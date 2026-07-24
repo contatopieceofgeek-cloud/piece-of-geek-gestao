@@ -2696,7 +2696,57 @@ function duplicateProduct(id){
   openProductModal(copy.id);
 }
 /* ===================== ANÚNCIOS ===================== */
+// Campos e cabeçalhos idênticos à planilha-modelo do usuário
+// (anuncio_mercadolivre_shopee.xlsx, abas "Mercado Livre" e "Shopee").
+const LISTING_FIELDS = {
+  ml: [
+    {key:'titulo', label:'Título do anúncio (até 60 caracteres)', maxlength:60},
+    {key:'categoria', label:'Categoria'},
+    {key:'preco', label:'Preço (R$)'},
+    {key:'estoque', label:'Estoque disponível'},
+    {key:'sku', label:'SKU / Código do produto'},
+    {key:'condicao', label:'Condição (Novo/Usado)', type:'select', options:['Novo','Usado']},
+    {key:'marca', label:'Marca'},
+    {key:'modelo', label:'Modelo'},
+    {key:'gtin', label:'GTIN / EAN'},
+    {key:'descricao', label:'Descrição', type:'textarea'},
+    {key:'fotos', label:'Fotos (nomes/ordem, capa primeiro)'},
+    {key:'peso', label:'Peso (kg)'},
+    {key:'dimensoes', label:'Dimensões A x L x C (cm)'},
+    {key:'garantia', label:'Garantia'},
+    {key:'tipoAnuncio', label:'Tipo de anúncio (Clássico/Premium)', type:'select', options:['Clássico','Premium']},
+  ],
+  shopee: [
+    {key:'nome', label:'Nome do produto (até 120 caracteres)', maxlength:120},
+    {key:'categoria', label:'Categoria'},
+    {key:'preco', label:'Preço (R$)'},
+    {key:'estoque', label:'Estoque'},
+    {key:'sku', label:'SKU pai'},
+    {key:'variacoes', label:'Variações (cor/tamanho)'},
+    {key:'marca', label:'Marca'},
+    {key:'gtin', label:'Código de barras / GTIN'},
+    {key:'descricao', label:'Descrição', type:'textarea'},
+    {key:'imagens', label:'Imagens (principal + até 8, ordem)'},
+    {key:'peso', label:'Peso do pacote (kg)'},
+    {key:'dimensoes', label:'Dimensões do pacote C x L x A (cm)'},
+    {key:'preVenda', label:'Pré-venda (Sim/Não)', type:'select', options:['Não','Sim']},
+    {key:'envio', label:'Opções de envio'},
+  ],
+};
 function listingFor(productId){ return state.listings.find(l=>l.productId===productId); }
+function listingHasContent(l){
+  if(!l) return false;
+  return ['ml','shopee'].some(plat => LISTING_FIELDS[plat].some(f => (l[plat]||{})[f.key]));
+}
+function defaultListingDraft(p){
+  const c = calcProduct(p);
+  const preco = num(c.practicedPrice,2);
+  const peso = num(totalWeight(p)/1000,2);
+  return {
+    ml: { titulo:p.name.slice(0,60), preco, estoque:p.stock, peso },
+    shopee: { nome:p.name.slice(0,120), preco, estoque:p.stock, peso },
+  };
+}
 let anunciosFilter = { search:'' };
 function renderAnuncios(){
   if(state.products.length===0) return `<div class="card">${emptyState('Cadastre um produto primeiro em Produtos')}</div>`;
@@ -2708,12 +2758,13 @@ function renderAnuncios(){
   if(q && list.length===0) return searchBar + `<div class="card">${emptyState('Nenhum produto encontrado')}</div>`;
   const rows = list.map(p=>{
     const l = listingFor(p.id);
-    const status = l ? `<span class="badge ok">Rascunho salvo</span> <span style="color:var(--text-faint);font-size:11px;">atualizado ${fmtDate((l.updatedAt||'').slice(0,10))}</span>` : `<span class="badge mut">Sem rascunho</span>`;
+    const hasContent = listingHasContent(l);
+    const status = hasContent ? `<span class="badge ok">Rascunho salvo</span> <span style="color:var(--text-faint);font-size:11px;">atualizado ${fmtDate((l.updatedAt||'').slice(0,10))}</span>` : `<span class="badge mut">Sem rascunho</span>`;
     return `<tr>
       <td data-label="Produto">${p.name}</td>
       <td data-label="Preço" class="right num">${brl(calcProduct(p).practicedPrice)}</td>
       <td data-label="Status">${status}</td>
-      <td class="right"><button class="btn ghost sm" onclick="openListingModal('${p.id}')">${l?'Editar anúncio':'Criar anúncio'}</button></td>
+      <td class="right"><button class="btn ghost sm" onclick="openListingModal('${p.id}')">${hasContent?'Editar anúncio':'Criar anúncio'}</button></td>
     </tr>`;
   }).join('');
   return searchBar + `<div class="card"><div class="tbl-wrap tbl-responsive"><table>
@@ -2721,76 +2772,65 @@ function renderAnuncios(){
     <tbody>${rows}</tbody>
   </table></div></div>`;
 }
+function renderListingField(platform, f, val){
+  const id = `lst_${platform}_${f.key}`;
+  if(f.type==='select'){
+    return `<div class="field"><label>${f.label}</label><select id="${id}">
+      <option value=""></option>
+      ${f.options.map(o=>`<option value="${o}" ${val===o?'selected':''}>${o}</option>`).join('')}
+    </select></div>`;
+  }
+  if(f.type==='textarea'){
+    return `<div class="field"><label>${f.label}</label><textarea id="${id}" rows="5">${val!=null?val:''}</textarea></div>`;
+  }
+  return `<div class="field"><label>${f.label}</label><input id="${id}" ${f.maxlength?`maxlength="${f.maxlength}"`:''} value="${val!=null?val:''}"></div>`;
+}
+function switchListingTab(platform){
+  document.getElementById('lstPanelMl').style.display = platform==='ml' ? '' : 'none';
+  document.getElementById('lstPanelShopee').style.display = platform==='shopee' ? '' : 'none';
+  document.getElementById('lstTabBtnMl').classList.toggle('active', platform==='ml');
+  document.getElementById('lstTabBtnShopee').classList.toggle('active', platform==='shopee');
+}
 function openListingModal(id){
   const p = state.products.find(x=>x.id===id);
   if(!p) return;
-  const l = listingFor(id) || { tituloMl:'', tituloShopee:'', descricao:'' };
+  const existing = listingFor(id);
+  const draft = existing || defaultListingDraft(p);
   showModal(`Anúncio — ${p.name}`, `
-    <div class="field hint" style="margin-top:-4px;margin-bottom:12px;">Preencha na mão ou tente gerar um rascunho com IA (opcional) e ajuste o que quiser antes de salvar/exportar.</div>
-    <button class="btn ghost sm" style="margin-bottom:14px;" onclick="tryGenerateWithAI('${id}')">✨ Tentar gerar com IA</button>
-    <div id="listingAiStatus"></div>
-    <div class="field"><label>Título — Mercado Livre</label><textarea id="lstTitleMl" rows="2">${l.tituloMl||''}</textarea></div>
-    <div class="field"><label>Título — Shopee</label><textarea id="lstTitleShopee" rows="2">${l.tituloShopee||''}</textarea></div>
-    <div class="field"><label>Descrição</label><textarea id="lstDesc" rows="8">${l.descricao||''}</textarea></div>
+    <div class="field hint" style="margin-top:-4px;margin-bottom:12px;">Campos iguais aos da planilha de exportação — preencha, salve o rascunho e exporte o Excel pra colar no formulário de cada marketplace.</div>
+    <div class="tabbar">
+      <button type="button" class="tabbtn active" id="lstTabBtnMl" onclick="switchListingTab('ml')">Mercado Livre</button>
+      <button type="button" class="tabbtn" id="lstTabBtnShopee" onclick="switchListingTab('shopee')">Shopee</button>
+    </div>
+    <div id="lstPanelMl">${LISTING_FIELDS.ml.map(f=>renderListingField('ml', f, (draft.ml||{})[f.key])).join('')}</div>
+    <div id="lstPanelShopee" style="display:none;">${LISTING_FIELDS.shopee.map(f=>renderListingField('shopee', f, (draft.shopee||{})[f.key])).join('')}</div>
     <div class="modal-actions" style="justify-content:space-between;flex-wrap:wrap;row-gap:10px;">
-      ${l.tituloMl||l.tituloShopee||l.descricao ? `<button class="btn ghost" style="color:var(--red);" onclick="deleteListingDraft('${id}')">Excluir rascunho</button>` : '<span></span>'}
+      ${listingHasContent(existing) ? `<button class="btn ghost" style="color:var(--red);" onclick="deleteListingDraft('${id}')">Excluir rascunho</button>` : '<span></span>'}
       <div style="display:flex;gap:10px;flex-wrap:wrap;">
         <button class="btn ghost" onclick="closeModal()">Fechar</button>
-        <button class="btn ghost" onclick="exportListingFile('${id}')">Exportar arquivo</button>
+        <button class="btn ghost" onclick="exportListingXlsx('${id}')">Exportar Excel</button>
         <button class="btn primary" onclick="saveListingDraft('${id}')">Salvar rascunho</button>
       </div>
     </div>
   `);
 }
-async function tryGenerateWithAI(id){
-  const p = state.products.find(x=>x.id===id);
-  if(!p) return;
-  if(!syncStatus.configured || !syncStatus.email){
-    toast('Configure a sincronização com Supabase primeiro (menu lateral → Sincronizar entre dispositivos) — a geração por IA roda numa Edge Function que exige login.','err');
-    return;
-  }
-  const statusEl = document.getElementById('listingAiStatus');
-  if(statusEl) statusEl.innerHTML = `<div class="helper-block">Gerando com o Gemini...</div>`;
-  try{
-    const client = initSupabase();
-    if(!client) throw new Error('Supabase não inicializado');
-    const { data, error } = await client.functions.invoke('generate-listing', {
-      body: {
-        productName: p.name,
-        filaments: p.filaments,
-        boxType: p.boxType,
-        practicedPrice: calcProduct(p).practicedPrice,
-        weightTotal: totalWeight(p),
-        timeH: p.timeH,
-        kitComponents: p.kitComponents,
-      },
+function readListingForm(){
+  const out = { ml:{}, shopee:{} };
+  ['ml','shopee'].forEach(platform=>{
+    LISTING_FIELDS[platform].forEach(f=>{
+      const el = document.getElementById(`lst_${platform}_${f.key}`);
+      out[platform][f.key] = el ? el.value.trim() : '';
     });
-    if(error){
-      let detail = error.message;
-      if(error.context && typeof error.context.json==='function'){
-        try{ const body = await error.context.clone().json(); if(body && body.error) detail = body.error; }catch(e2){}
-      }
-      throw new Error(detail);
-    }
-    if(data && data.error) throw new Error(data.error);
-    const mlEl = document.getElementById('lstTitleMl'), shEl = document.getElementById('lstTitleShopee'), descEl = document.getElementById('lstDesc');
-    if(!mlEl) return; // modal já foi fechado
-    mlEl.value = data.titulo_ml||''; shEl.value = data.titulo_shopee||''; descEl.value = data.descricao||'';
-    if(statusEl) statusEl.innerHTML = '';
-    toast('Rascunho gerado — confira e ajuste antes de salvar');
-  }catch(e){
-    if(statusEl) statusEl.innerHTML = `<div class="field hint" style="color:var(--red);">Erro ao gerar: ${e.message||e}</div>`;
-  }
+  });
+  return out;
 }
 function saveListingDraft(id){
   const p = state.products.find(x=>x.id===id);
   if(!p) return;
-  const tituloMl = document.getElementById('lstTitleMl').value.trim();
-  const tituloShopee = document.getElementById('lstTitleShopee').value.trim();
-  const descricao = document.getElementById('lstDesc').value.trim();
+  const values = readListingForm();
   let l = listingFor(id);
   if(!l){ l = { id:uid(), productId:id }; state.listings.push(l); }
-  Object.assign(l, { productName:p.name, tituloMl, tituloShopee, descricao, updatedAt: new Date().toISOString() });
+  Object.assign(l, { productName:p.name, ml:values.ml, shopee:values.shopee, updatedAt: new Date().toISOString() });
   saveListings();
   toast('Rascunho salvo');
   closeModal(); renderContent();
@@ -2802,20 +2842,18 @@ function deleteListingDraft(id){
   toast('Rascunho excluído');
   closeModal(); renderContent();
 }
-function exportListingFile(id){
+function exportListingXlsx(id){
   const p = state.products.find(x=>x.id===id);
   if(!p) return;
-  const tituloMl = document.getElementById('lstTitleMl').value.trim();
-  const tituloShopee = document.getElementById('lstTitleShopee').value.trim();
-  const descricao = document.getElementById('lstDesc').value.trim();
-  const text = `Produto: ${p.name}\n\nTítulo (Mercado Livre):\n${tituloMl||'(vazio)'}\n\nTítulo (Shopee):\n${tituloShopee||'(vazio)'}\n\nDescrição:\n${descricao||'(vazio)'}\n`;
-  const blob = new Blob([text], {type:'text/plain;charset=utf-8'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = `anuncio-${p.name.toLowerCase().replace(/[^a-z0-9]+/g,'-')}.txt`;
-  document.body.appendChild(a); a.click(); a.remove();
-  URL.revokeObjectURL(url);
-  toast('Arquivo exportado');
+  if(typeof XLSX==='undefined'){ toast('Biblioteca de exportação não carregou — verifique sua conexão e tente de novo','err'); return; }
+  const values = readListingForm();
+  const wb = XLSX.utils.book_new();
+  ['ml','shopee'].forEach(platform=>{
+    const rows = [LISTING_FIELDS[platform].map(f=>f.label), LISTING_FIELDS[platform].map(f=>values[platform][f.key]||'')];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), platform==='ml'?'Mercado Livre':'Shopee');
+  });
+  XLSX.writeFile(wb, `anuncio-${p.name.toLowerCase().replace(/[^a-z0-9]+/g,'-')}.xlsx`);
+  toast('Excel exportado');
 }
 function deleteProduct(id){
   const p = state.products.find(x=>x.id===id);
