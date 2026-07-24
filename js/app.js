@@ -2710,7 +2710,6 @@ const LISTING_FIELDS = {
     {key:'modelo', label:'Modelo'},
     {key:'gtin', label:'GTIN / EAN'},
     {key:'descricao', label:'Descrição', type:'textarea'},
-    {key:'fotos', label:'Fotos (nomes/ordem, capa primeiro)'},
     {key:'peso', label:'Peso (kg)'},
     {key:'dimensoes', label:'Dimensões A x L x C (cm)'},
     {key:'garantia', label:'Garantia', presets:['90 dias (garantia contra defeito de fabricação)','30 dias (garantia contra defeito de fabricação)','Sem garantia (produto sob encomenda / artesanal)']},
@@ -2726,13 +2725,24 @@ const LISTING_FIELDS = {
     {key:'marca', label:'Marca'},
     {key:'gtin', label:'Código de barras / GTIN'},
     {key:'descricao', label:'Descrição', type:'textarea'},
-    {key:'imagens', label:'Imagens (principal + até 8, ordem)'},
     {key:'peso', label:'Peso do pacote (kg)'},
     {key:'dimensoes', label:'Dimensões do pacote C x L x A (cm)'},
     {key:'preVenda', label:'Pré-venda (Sim/Não)', type:'select', options:['Não','Sim']},
     {key:'envio', label:'Opções de envio', presets:['Frete Grátis Shopee, Correios','Correios, Transportadora','Correios']},
   ],
 };
+// Campos com o mesmo valor nos dois marketplaces — preenchidos uma vez só
+// (fica de fora das abas ML/Shopee, mas é salvo/exportado nos dois).
+const SHARED_LISTING_KEYS = ['preco','estoque','marca','sku','gtin','peso','descricao'];
+const LISTING_SHARED_FIELDS = [
+  {key:'preco', label:'Preço (R$)'},
+  {key:'estoque', label:'Estoque'},
+  {key:'marca', label:'Marca'},
+  {key:'sku', label:'SKU / Código do produto'},
+  {key:'gtin', label:'GTIN / EAN / Código de barras'},
+  {key:'peso', label:'Peso (kg)'},
+  {key:'descricao', label:'Descrição', type:'textarea'},
+];
 function listingFor(productId){ return state.listings.find(l=>l.productId===productId); }
 function listingHasContent(l){
   if(!l) return false;
@@ -2741,7 +2751,10 @@ function listingHasContent(l){
 }
 function listingIsComplete(l){
   if(!l) return false;
-  return ['ml','shopee'].every(plat => LISTING_FIELDS[plat].every(f => (l[plat]||{})[f.key]));
+  const na = l.naFields || {};
+  const sharedOk = LISTING_SHARED_FIELDS.every(f => na[`shared_${f.key}`] || (l.ml||{})[f.key]);
+  const platOk = plat => LISTING_FIELDS[plat].filter(f=>!SHARED_LISTING_KEYS.includes(f.key)).every(f => na[`${plat}_${f.key}`] || (l[plat]||{})[f.key]);
+  return sharedOk && platOk('ml') && platOk('shopee');
 }
 // SKU curto e determinístico a partir do nome do produto, ex: "Espaço Cafe" -> "POG-ESPACO-CAFE".
 const ACCENT_MAP = {'á':'a','à':'a','â':'a','ã':'a','ä':'a','é':'e','è':'e','ê':'e','ë':'e','í':'i','ì':'i','î':'i','ï':'i','ó':'o','ò':'o','ô':'o','õ':'o','ö':'o','ú':'u','ù':'u','û':'u','ü':'u','ç':'c','ñ':'n'};
@@ -2773,7 +2786,8 @@ function mergeListingValues(auto, existing){
   if(existing) Object.keys(existing).forEach(k=>{ if(existing[k]) out[k] = existing[k]; });
   return out;
 }
-function listingFieldSuggestions(platform, key, presets){
+function listingFieldSuggestions(idKey, key, presets){
+  const platform = idKey==='shared' ? 'ml' : idKey;
   const fromHistory = state.listings.map(l=>(l[platform]||{})[key]).filter(Boolean);
   return Array.from(new Set([...(presets||[]), ...fromHistory]));
 }
@@ -2841,25 +2855,34 @@ function renderAnunciosProntos(){
   }).join('');
   return `<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(190px,1fr));">${cards}</div>`;
 }
-function renderListingField(platform, f, val){
-  const id = `lst_${platform}_${f.key}`;
+function renderListingField(idKey, f, val, isNa){
+  const id = `lst_${idKey}_${f.key}`;
+  const naKey = `${idKey}_${f.key}`;
+  const naBox = `<label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:400;color:var(--text-faint);margin-left:8px;cursor:pointer;"><input type="checkbox" ${isNa?'checked':''} onchange="toggleListingFieldNa('${id}','${naKey}',this.checked)" style="width:auto;margin:0;">não se aplica</label>`;
+  const dis = isNa ? 'disabled' : '';
   if(f.type==='select'){
-    return `<div class="field"><label>${f.label}</label><select id="${id}">
+    return `<div class="field"><label>${f.label}${naBox}</label><select id="${id}" ${dis}>
       <option value=""></option>
       ${f.options.map(o=>`<option value="${o}" ${val===o?'selected':''}>${o}</option>`).join('')}
     </select></div>`;
   }
   if(f.type==='textarea'){
-    return `<div class="field"><label>${f.label}</label><textarea id="${id}" rows="5">${val!=null?val:''}</textarea></div>`;
+    return `<div class="field"><label>${f.label}${naBox}</label><textarea id="${id}" rows="5" ${dis}>${val!=null?val:''}</textarea></div>`;
   }
   if(f.presets){
     const listId = `${id}_opts`;
-    const opts = listingFieldSuggestions(platform, f.key, f.presets);
-    return `<div class="field"><label>${f.label}</label><input id="${id}" list="${listId}" ${f.maxlength?`maxlength="${f.maxlength}"`:''} value="${val!=null?val:''}">
+    const opts = listingFieldSuggestions(idKey, f.key, f.presets);
+    return `<div class="field"><label>${f.label}${naBox}</label><input id="${id}" list="${listId}" ${f.maxlength?`maxlength="${f.maxlength}"`:''} value="${val!=null?val:''}" ${dis}>
       <datalist id="${listId}">${opts.map(o=>`<option value="${o}"></option>`).join('')}</datalist>
     </div>`;
   }
-  return `<div class="field"><label>${f.label}</label><input id="${id}" ${f.maxlength?`maxlength="${f.maxlength}"`:''} value="${val!=null?val:''}"></div>`;
+  return `<div class="field"><label>${f.label}${naBox}</label><input id="${id}" ${f.maxlength?`maxlength="${f.maxlength}"`:''} value="${val!=null?val:''}" ${dis}></div>`;
+}
+let editingNaFields = {};
+function toggleListingFieldNa(fieldId, naKey, checked){
+  if(checked) editingNaFields[naKey] = true; else delete editingNaFields[naKey];
+  const el = document.getElementById(fieldId);
+  if(el){ el.disabled = checked; if(checked) el.value = ''; }
 }
 function switchListingTab(platform){
   document.getElementById('lstPanelMl').style.display = platform==='ml' ? '' : 'none';
@@ -2874,8 +2897,14 @@ function openListingModal(id){
   const auto = defaultListingDraft(p);
   const draft = { ml: mergeListingValues(auto.ml, existing && existing.ml), shopee: mergeListingValues(auto.shopee, existing && existing.shopee) };
   editingListingPhotos = (existing && existing.fotos) ? existing.fotos.slice() : [];
+  editingNaFields = Object.assign({}, existing && existing.naFields);
+  Object.keys(editingNaFields).forEach(naKey=>{
+    const [platKey, fieldKey] = [naKey.slice(0,naKey.indexOf('_')), naKey.slice(naKey.indexOf('_')+1)];
+    if(platKey==='shared'){ draft.ml[fieldKey]=''; draft.shopee[fieldKey]=''; }
+    else if(draft[platKey]) draft[platKey][fieldKey] = '';
+  });
   showModal(`Anúncio — ${p.name}`, `
-    <div class="field hint" style="margin-top:-4px;margin-bottom:12px;">Campos iguais aos da planilha de exportação — preencha, salve o rascunho e exporte o Excel pra colar no formulário de cada marketplace.</div>
+    <div class="field hint" style="margin-top:-4px;margin-bottom:12px;">Campos iguais aos da planilha de exportação — preencha, salve o rascunho e exporte o Excel pra colar no formulário de cada marketplace. Marque "não se aplica" pra um campo não contar como pendente.</div>
     <div style="display:flex;gap:12px;align-items:center;margin-bottom:14px;">
       ${p.photo ? `<img src="${p.photo}" alt="${p.name}" style="width:64px;height:64px;object-fit:cover;border-radius:8px;flex-shrink:0;">` : `<div style="width:64px;height:64px;border-radius:8px;background:var(--panel-2);flex-shrink:0;"></div>`}
       <div class="field hint" style="margin:0;">${p.photo ? 'Foto (capa) puxada do cadastro em Produtos.' : 'Esse produto não tem foto cadastrada — adicione uma em Produtos → Editar pra ela aparecer aqui e nos anúncios prontos.'}</div>
@@ -2885,12 +2914,14 @@ function openListingModal(id){
       <input type="file" accept="image/*" multiple id="lstPhotoInput" onchange="handleListingPhotoUpload(this)">
     </div>
     <div id="lstPhotoPreview" style="margin-bottom:14px;"></div>
+    <div class="field hint" style="margin:0 0 4px;font-weight:600;color:var(--text-dim);">Campos comuns (usados nos dois marketplaces)</div>
+    ${LISTING_SHARED_FIELDS.map(f=>renderListingField('shared', f, (draft.ml||{})[f.key], !!editingNaFields[`shared_${f.key}`])).join('')}
     <div class="tabbar">
       <button type="button" class="tabbtn active" id="lstTabBtnMl" onclick="switchListingTab('ml')">Mercado Livre</button>
       <button type="button" class="tabbtn" id="lstTabBtnShopee" onclick="switchListingTab('shopee')">Shopee</button>
     </div>
-    <div id="lstPanelMl">${LISTING_FIELDS.ml.map(f=>renderListingField('ml', f, (draft.ml||{})[f.key])).join('')}</div>
-    <div id="lstPanelShopee" style="display:none;">${LISTING_FIELDS.shopee.map(f=>renderListingField('shopee', f, (draft.shopee||{})[f.key])).join('')}</div>
+    <div id="lstPanelMl">${LISTING_FIELDS.ml.filter(f=>!SHARED_LISTING_KEYS.includes(f.key)).map(f=>renderListingField('ml', f, (draft.ml||{})[f.key], !!editingNaFields[`ml_${f.key}`])).join('')}</div>
+    <div id="lstPanelShopee" style="display:none;">${LISTING_FIELDS.shopee.filter(f=>!SHARED_LISTING_KEYS.includes(f.key)).map(f=>renderListingField('shopee', f, (draft.shopee||{})[f.key], !!editingNaFields[`shopee_${f.key}`])).join('')}</div>
     <div class="modal-actions" style="justify-content:space-between;flex-wrap:wrap;row-gap:10px;">
       ${listingHasContent(existing) ? `<button class="btn ghost" style="color:var(--red);" onclick="deleteListingDraft('${id}')">Excluir rascunho</button>` : '<span></span>'}
       <div style="display:flex;gap:10px;flex-wrap:wrap;">
@@ -2906,7 +2937,8 @@ function readListingForm(){
   const out = { ml:{}, shopee:{} };
   ['ml','shopee'].forEach(platform=>{
     LISTING_FIELDS[platform].forEach(f=>{
-      const el = document.getElementById(`lst_${platform}_${f.key}`);
+      const idKey = SHARED_LISTING_KEYS.includes(f.key) ? 'shared' : platform;
+      const el = document.getElementById(`lst_${idKey}_${f.key}`);
       out[platform][f.key] = el ? el.value.trim() : '';
     });
   });
@@ -2957,7 +2989,7 @@ function saveListingDraft(id){
   const values = readListingForm();
   let l = listingFor(id);
   if(!l){ l = { id:uid(), productId:id }; state.listings.push(l); }
-  Object.assign(l, { productName:p.name, ml:values.ml, shopee:values.shopee, fotos:editingListingPhotos.slice(), updatedAt: new Date().toISOString() });
+  Object.assign(l, { productName:p.name, ml:values.ml, shopee:values.shopee, fotos:editingListingPhotos.slice(), naFields:Object.assign({},editingNaFields), updatedAt: new Date().toISOString() });
   saveListings();
   toast('Salvo');
   closeModal(); renderContent();
