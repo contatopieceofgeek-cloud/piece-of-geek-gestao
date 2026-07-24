@@ -2701,7 +2701,7 @@ function duplicateProduct(id){
 const LISTING_FIELDS = {
   ml: [
     {key:'titulo', label:'Título do anúncio (até 60 caracteres)', maxlength:60},
-    {key:'categoria', label:'Categoria'},
+    {key:'categoria', label:'Categoria', presets:['Brinquedos e Hobbies > Bonecos e Bonecos de Ação','Casa, Móveis e Decoração > Objetos e Utilidades Domésticas > Porta-Objetos','Eletrônicos, Áudio e Vídeo > Acessórios para Áudio e Vídeo > Suportes','Informática > Acessórios para Informática > Suportes']},
     {key:'preco', label:'Preço (R$)'},
     {key:'estoque', label:'Estoque disponível'},
     {key:'sku', label:'SKU / Código do produto'},
@@ -2713,12 +2713,12 @@ const LISTING_FIELDS = {
     {key:'fotos', label:'Fotos (nomes/ordem, capa primeiro)'},
     {key:'peso', label:'Peso (kg)'},
     {key:'dimensoes', label:'Dimensões A x L x C (cm)'},
-    {key:'garantia', label:'Garantia'},
+    {key:'garantia', label:'Garantia', presets:['90 dias (garantia contra defeito de fabricação)','30 dias (garantia contra defeito de fabricação)','Sem garantia (produto sob encomenda / artesanal)']},
     {key:'tipoAnuncio', label:'Tipo de anúncio (Clássico/Premium)', type:'select', options:['Clássico','Premium']},
   ],
   shopee: [
     {key:'nome', label:'Nome do produto (até 120 caracteres)', maxlength:120},
-    {key:'categoria', label:'Categoria'},
+    {key:'categoria', label:'Categoria', presets:['Brinquedos e Hobbies > Bonecos e Miniaturas','Casa e Decoração > Organizadores','Celulares e Acessórios > Suportes','Eletrônicos > Acessórios para Games']},
     {key:'preco', label:'Preço (R$)'},
     {key:'estoque', label:'Estoque'},
     {key:'sku', label:'SKU pai'},
@@ -2730,7 +2730,7 @@ const LISTING_FIELDS = {
     {key:'peso', label:'Peso do pacote (kg)'},
     {key:'dimensoes', label:'Dimensões do pacote C x L x A (cm)'},
     {key:'preVenda', label:'Pré-venda (Sim/Não)', type:'select', options:['Não','Sim']},
-    {key:'envio', label:'Opções de envio'},
+    {key:'envio', label:'Opções de envio', presets:['Frete Grátis Shopee, Correios','Correios, Transportadora','Correios']},
   ],
 };
 function listingFor(productId){ return state.listings.find(l=>l.productId===productId); }
@@ -2738,14 +2738,39 @@ function listingHasContent(l){
   if(!l) return false;
   return ['ml','shopee'].some(plat => LISTING_FIELDS[plat].some(f => (l[plat]||{})[f.key]));
 }
+// SKU curto e determinístico a partir do nome do produto, ex: "Espaço Cafe" -> "POG-ESPACO-CAFE".
+const ACCENT_MAP = {'á':'a','à':'a','â':'a','ã':'a','ä':'a','é':'e','è':'e','ê':'e','ë':'e','í':'i','ì':'i','î':'i','ï':'i','ó':'o','ò':'o','ô':'o','õ':'o','ö':'o','ú':'u','ù':'u','û':'u','ü':'u','ç':'c','ñ':'n'};
+function stripAccents(s){
+  return s.split('').map(ch=>{
+    const lower = ch.toLowerCase();
+    const plain = ACCENT_MAP[lower];
+    if(!plain) return ch;
+    return ch===lower ? plain : plain.toUpperCase();
+  }).join('');
+}
+function generateSku(p){
+  const slug = stripAccents(p.name).toUpperCase().replace(/[^A-Z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,24);
+  return `POG-${slug}`;
+}
 function defaultListingDraft(p){
   const c = calcProduct(p);
   const preco = num(c.practicedPrice,2);
   const peso = num(totalWeight(p)/1000,2);
+  const sku = generateSku(p);
   return {
-    ml: { titulo:p.name.slice(0,60), preco, estoque:p.stock, peso },
-    shopee: { nome:p.name.slice(0,120), preco, estoque:p.stock, peso },
+    ml: { titulo:p.name.slice(0,60), preco, estoque:p.stock, sku, condicao:'Novo', marca:'Piece of Geek 3D', peso, tipoAnuncio:'Clássico' },
+    shopee: { nome:p.name.slice(0,120), preco, estoque:p.stock, sku, marca:'Piece of Geek 3D', peso },
   };
+}
+// Preenche os campos em branco com o valor automático, mas nunca sobrescreve o que o usuário já preencheu.
+function mergeListingValues(auto, existing){
+  const out = Object.assign({}, auto);
+  if(existing) Object.keys(existing).forEach(k=>{ if(existing[k]) out[k] = existing[k]; });
+  return out;
+}
+function listingFieldSuggestions(platform, key, presets){
+  const fromHistory = state.listings.map(l=>(l[platform]||{})[key]).filter(Boolean);
+  return Array.from(new Set([...(presets||[]), ...fromHistory]));
 }
 let anunciosFilter = { search:'' };
 function renderAnuncios(){
@@ -2783,6 +2808,13 @@ function renderListingField(platform, f, val){
   if(f.type==='textarea'){
     return `<div class="field"><label>${f.label}</label><textarea id="${id}" rows="5">${val!=null?val:''}</textarea></div>`;
   }
+  if(f.presets){
+    const listId = `${id}_opts`;
+    const opts = listingFieldSuggestions(platform, f.key, f.presets);
+    return `<div class="field"><label>${f.label}</label><input id="${id}" list="${listId}" ${f.maxlength?`maxlength="${f.maxlength}"`:''} value="${val!=null?val:''}">
+      <datalist id="${listId}">${opts.map(o=>`<option value="${o}"></option>`).join('')}</datalist>
+    </div>`;
+  }
   return `<div class="field"><label>${f.label}</label><input id="${id}" ${f.maxlength?`maxlength="${f.maxlength}"`:''} value="${val!=null?val:''}"></div>`;
 }
 function switchListingTab(platform){
@@ -2795,7 +2827,8 @@ function openListingModal(id){
   const p = state.products.find(x=>x.id===id);
   if(!p) return;
   const existing = listingFor(id);
-  const draft = existing || defaultListingDraft(p);
+  const auto = defaultListingDraft(p);
+  const draft = { ml: mergeListingValues(auto.ml, existing && existing.ml), shopee: mergeListingValues(auto.shopee, existing && existing.shopee) };
   showModal(`Anúncio — ${p.name}`, `
     <div class="field hint" style="margin-top:-4px;margin-bottom:12px;">Campos iguais aos da planilha de exportação — preencha, salve o rascunho e exporte o Excel pra colar no formulário de cada marketplace.</div>
     <div class="tabbar">
