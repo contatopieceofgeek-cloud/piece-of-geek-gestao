@@ -2664,7 +2664,7 @@ function renderProdutos(){
       <div class="field hint" style="padding-top:9px;">${list.length} de ${state.products.length} produto(s) · clique no cabeçalho pra ordenar</div>
       ${(produtosFilter.search||produtosFilter.machineId) ? `<button class="btn ghost sm" onclick="produtosFilter.search=''; produtosFilter.machineId=''; renderContent();">Limpar filtros</button>` : ''}
     </div>
-    <div class="card"><div class="tbl-wrap tbl-responsive tbl-compact-mobile tbl-sticky-actions"><table>
+    <div class="card"><div class="tbl-wrap tbl-responsive tbl-compact-mobile"><table>
     <thead><tr>
       <th></th>
       <th style="cursor:pointer;" onclick="toggleProductSort('name')">Produto${sortArrow(produtosFilter,'name')}</th>
