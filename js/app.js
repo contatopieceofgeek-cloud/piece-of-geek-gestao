@@ -2736,7 +2736,12 @@ const LISTING_FIELDS = {
 function listingFor(productId){ return state.listings.find(l=>l.productId===productId); }
 function listingHasContent(l){
   if(!l) return false;
+  if((l.fotos||[]).length) return true;
   return ['ml','shopee'].some(plat => LISTING_FIELDS[plat].some(f => (l[plat]||{})[f.key]));
+}
+function listingIsComplete(l){
+  if(!l) return false;
+  return ['ml','shopee'].every(plat => LISTING_FIELDS[plat].every(f => (l[plat]||{})[f.key]));
 }
 // SKU curto e determinístico a partir do nome do produto, ex: "Espaço Cafe" -> "POG-ESPACO-CAFE".
 const ACCENT_MAP = {'á':'a','à':'a','â':'a','ã':'a','ä':'a','é':'e','è':'e','ê':'e','ë':'e','í':'i','ì':'i','î':'i','ï':'i','ó':'o','ò':'o','ô':'o','õ':'o','ö':'o','ú':'u','ù':'u','û':'u','ü':'u','ç':'c','ñ':'n'};
@@ -2792,7 +2797,11 @@ function renderAnunciosLista(){
   const rows = list.map(p=>{
     const l = listingFor(p.id);
     const hasContent = listingHasContent(l);
-    const status = hasContent ? `<span class="badge ok">Rascunho salvo</span> <span style="color:var(--text-faint);font-size:11px;">atualizado ${fmtDate((l.updatedAt||'').slice(0,10))}</span>` : `<span class="badge mut">Sem rascunho</span>`;
+    const complete = listingIsComplete(l);
+    const updatedTag = `<span style="color:var(--text-faint);font-size:11px;">atualizado ${fmtDate(((l&&l.updatedAt)||'').slice(0,10))}</span>`;
+    const status = !hasContent ? `<span class="badge mut">Sem anúncio</span>`
+      : complete ? `<span class="badge ok">Pronto</span> ${updatedTag}`
+      : `<span class="badge warn">Incompleto</span> ${updatedTag}`;
     return `<tr>
       <td data-label="Produto">${p.name}</td>
       <td data-label="Preço" class="right num">${brl(calcProduct(p).practicedPrice)}</td>
@@ -2806,19 +2815,25 @@ function renderAnunciosLista(){
   </table></div></div>`;
 }
 function renderAnunciosProntos(){
-  const ready = state.products.map(p=>({p, l:listingFor(p.id)})).filter(({l})=>listingHasContent(l));
-  if(ready.length===0) return `<div class="card">${emptyState('Nenhum anúncio pronto ainda — crie um rascunho na aba Lista primeiro')}</div>`;
+  const ready = state.products.map(p=>({p, l:listingFor(p.id)})).filter(({l})=>listingIsComplete(l));
+  if(ready.length===0) return `<div class="card">${emptyState('Nenhum anúncio pronto ainda — complete todos os campos de um produto na aba Lista')}</div>`;
   const cards = ready.map(({p,l})=>{
     const titulo = l.ml.titulo || l.shopee.nome || p.name;
     const preco = l.ml.preco || l.shopee.preco || num(calcProduct(p).practicedPrice,2);
+    const estoque = l.ml.estoque || l.shopee.estoque || p.stock;
     const descricao = l.ml.descricao || l.shopee.descricao || '';
+    const photos = [...(l.fotos||[]), ...(p.photo?[p.photo]:[])];
+    const cover = photos[0];
+    const thumbs = photos.length>1 ? `<div style="display:flex;gap:4px;padding:0 16px;">${photos.slice(1,5).map(ph=>`<img src="${ph}" style="width:28px;height:28px;object-fit:cover;border-radius:4px;border:1px solid var(--line);">`).join('')}</div>` : '';
     return `<div class="card" style="padding:0;overflow:hidden;display:flex;flex-direction:column;">
       <div style="aspect-ratio:1/1;background:var(--panel-2);display:flex;align-items:center;justify-content:center;">
-        ${p.photo ? `<img src="${p.photo}" alt="${p.name}" style="width:100%;height:100%;object-fit:cover;">` : `<span style="color:var(--text-faint);font-size:11px;">Sem foto</span>`}
+        ${cover ? `<img src="${cover}" alt="${p.name}" style="width:100%;height:100%;object-fit:cover;">` : `<span style="color:var(--text-faint);font-size:11px;">Sem foto</span>`}
       </div>
+      ${thumbs}
       <div style="padding:14px 16px;display:flex;flex-direction:column;gap:6px;flex:1;">
         <div style="font-family:var(--font-display);font-weight:600;font-size:14px;line-height:1.3;">${titulo}</div>
         <div style="color:var(--nozzle);font-weight:700;font-family:var(--font-mono);font-size:15px;">R$ ${preco}</div>
+        <div style="font-size:12px;color:var(--text-dim);">Estoque: ${estoque}</div>
         ${descricao ? `<div style="font-size:12px;color:var(--text-dim);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;">${descricao}</div>` : ''}
         <button class="btn ghost sm" style="margin-top:auto;" onclick="openListingModal('${p.id}')">Editar anúncio</button>
       </div>
@@ -2858,12 +2873,18 @@ function openListingModal(id){
   const existing = listingFor(id);
   const auto = defaultListingDraft(p);
   const draft = { ml: mergeListingValues(auto.ml, existing && existing.ml), shopee: mergeListingValues(auto.shopee, existing && existing.shopee) };
+  editingListingPhotos = (existing && existing.fotos) ? existing.fotos.slice() : [];
   showModal(`Anúncio — ${p.name}`, `
     <div class="field hint" style="margin-top:-4px;margin-bottom:12px;">Campos iguais aos da planilha de exportação — preencha, salve o rascunho e exporte o Excel pra colar no formulário de cada marketplace.</div>
     <div style="display:flex;gap:12px;align-items:center;margin-bottom:14px;">
       ${p.photo ? `<img src="${p.photo}" alt="${p.name}" style="width:64px;height:64px;object-fit:cover;border-radius:8px;flex-shrink:0;">` : `<div style="width:64px;height:64px;border-radius:8px;background:var(--panel-2);flex-shrink:0;"></div>`}
-      <div class="field hint" style="margin:0;">${p.photo ? 'Foto puxada do cadastro em Produtos.' : 'Esse produto não tem foto cadastrada — adicione uma em Produtos → Editar pra ela aparecer aqui e nos anúncios prontos.'}</div>
+      <div class="field hint" style="margin:0;">${p.photo ? 'Foto (capa) puxada do cadastro em Produtos.' : 'Esse produto não tem foto cadastrada — adicione uma em Produtos → Editar pra ela aparecer aqui e nos anúncios prontos.'}</div>
     </div>
+    <div class="field">
+      <label>Fotos adicionais (opcional, além da capa do cadastro)</label>
+      <input type="file" accept="image/*" multiple id="lstPhotoInput" onchange="handleListingPhotoUpload(this)">
+    </div>
+    <div id="lstPhotoPreview" style="margin-bottom:14px;"></div>
     <div class="tabbar">
       <button type="button" class="tabbtn active" id="lstTabBtnMl" onclick="switchListingTab('ml')">Mercado Livre</button>
       <button type="button" class="tabbtn" id="lstTabBtnShopee" onclick="switchListingTab('shopee')">Shopee</button>
@@ -2879,6 +2900,7 @@ function openListingModal(id){
       </div>
     </div>
   `);
+  renderListingPhotoPreview();
 }
 function readListingForm(){
   const out = { ml:{}, shopee:{} };
@@ -2890,15 +2912,54 @@ function readListingForm(){
   });
   return out;
 }
+let editingListingPhotos = [];
+async function handleListingPhotoUpload(input){
+  const files = Array.from(input.files||[]);
+  if(!files.length) return;
+  try{
+    const resized = await Promise.all(files.map(f=>resizeImageFile(f, 640, 0.75)));
+    editingListingPhotos.push(...resized);
+  }catch(e){
+    toast('Não consegui processar uma dessas imagens — tente outro arquivo','err');
+  }
+  input.value = '';
+  renderListingPhotoPreview();
+}
+function removeListingPhoto(index){
+  editingListingPhotos.splice(index,1);
+  renderListingPhotoPreview();
+}
+function downloadListingPhoto(index){
+  const data = editingListingPhotos[index];
+  if(!data) return;
+  const a = document.createElement('a');
+  a.href = data; a.download = `foto-${index+1}.jpg`;
+  document.body.appendChild(a); a.click(); a.remove();
+}
+function renderListingPhotoPreview(){
+  const el = document.getElementById('lstPhotoPreview');
+  if(!el) return;
+  if(!editingListingPhotos.length){
+    el.innerHTML = `<div class="field hint" style="margin:0;">Nenhuma foto adicional — opcional</div>`;
+    return;
+  }
+  el.innerHTML = `<div style="display:flex;gap:10px;flex-wrap:wrap;">${editingListingPhotos.map((data,i)=>`
+    <div style="position:relative;">
+      <img src="${data}" style="width:90px;height:90px;object-fit:cover;border-radius:8px;border:1px solid var(--line);display:block;">
+      <button class="btn ghost sm" style="position:absolute;top:-8px;right:-8px;padding:2px 7px;background:var(--panel);" onclick="removeListingPhoto(${i})">×</button>
+      <button class="btn ghost sm" style="position:absolute;bottom:-8px;left:50%;transform:translateX(-50%);padding:1px 6px;font-size:10px;background:var(--panel);white-space:nowrap;" onclick="downloadListingPhoto(${i})">Baixar</button>
+    </div>
+  `).join('')}</div>`;
+}
 function saveListingDraft(id){
   const p = state.products.find(x=>x.id===id);
   if(!p) return;
   const values = readListingForm();
   let l = listingFor(id);
   if(!l){ l = { id:uid(), productId:id }; state.listings.push(l); }
-  Object.assign(l, { productName:p.name, ml:values.ml, shopee:values.shopee, updatedAt: new Date().toISOString() });
+  Object.assign(l, { productName:p.name, ml:values.ml, shopee:values.shopee, fotos:editingListingPhotos.slice(), updatedAt: new Date().toISOString() });
   saveListings();
-  toast('Rascunho salvo');
+  toast('Salvo');
   closeModal(); renderContent();
 }
 function deleteListingDraft(id){
