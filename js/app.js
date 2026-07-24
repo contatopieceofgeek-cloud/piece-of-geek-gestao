@@ -1,7 +1,7 @@
 /* ===================== STATE ===================== */
 let state = { materials: [], products: [], sales: [], orders: [], customers: [], printFailures: [], settings: {} };
 let currentTab = 'dashboard';
-let currentMonth = new Date().toISOString().slice(0,7);
+let currentMonth;
 let currentYear = new Date().getFullYear();
 let salesFilter = { platform:'', product:'', from:'', to:'' };
 let stockTab = 'materiais';
@@ -22,6 +22,7 @@ function addMonths(ym, delta){
   return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
 }
 const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; };
+currentMonth = todayStr().slice(0,7);
 
 /* ===================== SEED DATA ===================== */
 function seedData(){
@@ -421,12 +422,6 @@ function calcProduct(prod){
   return { materialCost, energyCost, boxCost:bCost, bubbleCost, embalagemCost, depreciation, laborCost, failureCost, totalCost, suggestedPrice, practicedPrice, marginValue, marginPct, desiredMarginPct: desiredMargin*100, machine };
 }
 
-function platformFee(platformName, gross){
-  const p = state.settings.platforms.find(x=>x.name===platformName);
-  if(!p || gross<=0) return 0;
-  return gross*(p.pct/100) + p.fixed;
-}
-
 function salesInMonth(ym){ return state.sales.filter(s=>s.date && s.date.slice(0,7)===ym); }
 
 function blocoA(ym){
@@ -570,6 +565,7 @@ function render(){
       <div class="sidebar-foot">
         <div class="clock">${new Date().toLocaleDateString('pt-BR',{day:'2-digit',month:'short',year:'numeric'})}</div>
         Dados salvos automaticamente neste navegador.
+        ${(()=>{ const d = daysSinceLastBackup(); return (state.sales.length>0 && (d===null || d>=30)) ? `<div style="color:var(--amber);margin-top:6px;">${d===null?'Você nunca baixou um backup':'Faz '+d+' dias que você não baixa um backup'} — clique em "Exportar backup" pra ter uma cópia de segurança dos seus dados.</div>` : ''; })()}
         <div style="display:flex;gap:6px;margin-top:10px;">
           <button class="btn ghost sm" style="flex:1;padding:6px;" onclick="exportBackup()">Exportar backup</button>
           <button class="btn ghost sm" style="flex:1;padding:6px;" onclick="document.getElementById('importFile').click()">Importar</button>
@@ -633,9 +629,9 @@ function tabSubtitle(){
 }
 function renderTopbarActions(){
   const el = document.getElementById('topbarActions');
-  if(currentTab==='pedidos') el.innerHTML = `<button class="btn primary" onclick="openOrderModal()">+ Nova encomenda</button>`;
+  if(currentTab==='pedidos') el.innerHTML = `<button class="btn ghost" onclick="exportOrdersExcel()">Exportar</button> <button class="btn primary" onclick="openOrderModal()">+ Nova encomenda</button>`;
   else if(currentTab==='vendas') el.innerHTML = `<button class="btn ghost" onclick="openSettingsModal()">Taxas das plataformas</button> <button class="btn ghost" onclick="openKitModal()">Criar kit</button> <button class="btn ghost" onclick="exportSalesExcel()">Exportar</button> <button class="btn primary" onclick="openSaleModal()">+ Nova venda</button>`;
-  else if(currentTab==='clientes') el.innerHTML = `<button class="btn primary" onclick="openCustomerModal()">+ Novo cliente</button>`;
+  else if(currentTab==='clientes') el.innerHTML = `<button class="btn ghost" onclick="exportCustomersExcel()">Exportar</button> <button class="btn primary" onclick="openCustomerModal()">+ Novo cliente</button>`;
   else if(currentTab==='produtos') el.innerHTML = `<button class="btn ghost" onclick="openQuickQuoteModal()">Orçamento rápido</button> <button class="btn ghost" onclick="exportCatalogImage()">Catálogo (imagem)</button> <button class="btn ghost" onclick="exportCatalogPDF()">Catálogo (PDF, 1 pág./produto)</button> <button class="btn primary" onclick="openProductModal()">+ Novo produto</button>`;
   else if(currentTab==='estoque') el.innerHTML = stockTab==='materiais' ? `<button class="btn primary" onclick="openMaterialModal()">+ Nova matéria-prima</button>` : `<button class="btn primary" onclick="openProductionModal()">+ Registrar produção</button>`;
   else if(currentTab==='calculo') el.innerHTML = `<button class="btn primary" onclick="openSettingsModal()">Gerenciar impressoras</button>`;
@@ -985,7 +981,7 @@ function renderOpenOrdersList(){
   const open = state.orders.filter(o=>o.status!=='Enviado').sort((a,b)=>(a.dueDate||'9999').localeCompare(b.dueDate||'9999')).slice(0,6);
   if(open.length===0) return emptyState('Nenhuma encomenda em aberto');
   return `<div class="tbl-wrap tbl-responsive"><table><thead><tr><th>Cliente</th><th>Produto</th><th>Status</th></tr></thead><tbody>
-    ${open.map(o=>`<tr><td data-label="Cliente">${o.customerName||'—'}</td><td data-label="Produto">${o.qty}x ${o.productName}</td><td data-label="Status"><span class="badge info">${o.status}</span></td></tr>`).join('')}
+    ${open.map(o=>`<tr><td data-label="Cliente">${orderCustomerName(o)||'—'}</td><td data-label="Produto">${o.qty}x ${o.productName}</td><td data-label="Status"><span class="badge info">${o.status}</span></td></tr>`).join('')}
   </tbody></table></div>`;
 }
 function renderLowStockList(low){
@@ -1132,7 +1128,7 @@ function orderCard(o){
   const deadlineRisk = orderDeadlineRisk(o);
   return `<div class="card" style="padding:12px 13px;">
     <div style="display:flex;justify-content:space-between;gap:6px;align-items:flex-start;">
-      <div style="font-weight:600;font-size:13px;">${o.customerName || 'Sem cliente'}</div>
+      <div style="font-weight:600;font-size:13px;">${orderCustomerName(o) || 'Sem cliente'}</div>
       <button class="btn ghost sm" style="padding:2px 7px;" title="Excluir" onclick="deleteOrder('${o.id}')">×</button>
     </div>
     <div style="font-size:12.5px;color:var(--text-dim);margin-top:3px;">${o.qty}x ${o.productName}</div>
@@ -1163,10 +1159,17 @@ function deleteOrder(id){
   toast('Encomenda excluída');
   renderContent();
 }
+function orderCustomerName(o){
+  if(o.customerId){ const cu = state.customers.find(x=>x.id===o.customerId); if(cu) return cu.name; }
+  return o.customerName || '';
+}
 function openOrderModal(){
   if(state.products.length===0){ toast('Cadastre um produto antes de criar encomendas','err'); return; }
   showModal('Nova encomenda', `
-    <div class="field"><label>Cliente (opcional)</label><input id="oCust" placeholder="Nome do cliente"></div>
+    <div class="field"><label>Cliente (opcional)</label><select id="oCust">
+      <option value="">Avulso / sem cadastro</option>
+      ${state.customers.map(cu=>`<option value="${cu.id}">${cu.name}</option>`).join('')}
+    </select></div>
     <div class="row2">
       <div class="field"><label>Produto</label><select id="oProd">${state.products.map(p=>`<option value="${p.id}">${p.name}</option>`).join('')}</select></div>
       <div class="field"><label>Quantidade</label><input type="number" id="oQty" value="1" min="1"></div>
@@ -1184,7 +1187,7 @@ function confirmOrder(){
   const qty = parseFloat(document.getElementById('oQty').value)||0;
   if(qty<=0){ toast('Informe uma quantidade válida','err'); return; }
   state.orders.push({
-    id:uid(), customerName: document.getElementById('oCust').value.trim(),
+    id:uid(), customerId: document.getElementById('oCust').value || null,
     productId: prod.id, productName: prod.name, qty,
     dueDate: document.getElementById('oDue').value || '',
     notes: document.getElementById('oNotes').value.trim(),
@@ -1768,10 +1771,20 @@ function confirmFailure(){
   closeModal(); renderContent();
 }
 function deleteFailure(id){
-  if(!confirm('Excluir esse registro de falha?')) return;
-  state.printFailures = state.printFailures.filter(f=>f.id!==id);
+  const f = state.printFailures.find(x=>x.id===id);
+  if(!f) return;
+  if(!confirm('Excluir esse registro de falha? O material descontado na hora do registro volta pro estoque.')) return;
+  const prod = state.products.find(p=>p.id===f.productId);
+  if(prod){
+    productRecipe(prod).forEach(r=>{
+      const mat = materialByName(r.materialName);
+      if(mat) mat.stock += r.qty * (f.pctComplete/100);
+    });
+    saveMaterials();
+  }
+  state.printFailures = state.printFailures.filter(x=>x.id!==id);
   savePrintFailures();
-  toast('Registro excluído');
+  toast('Registro excluído e estoque restaurado');
   renderContent();
 }
 function renderCalculo(){
@@ -2028,13 +2041,17 @@ function confirmTracking(saleId){
 function deleteSale(id){
   const s = state.sales.find(x=>x.id===id);
   if(!s) return;
-  if(!confirm(`Excluir a venda de "${s.productName}" em ${fmtDate(s.date)}? O estoque do produto e as reservas alimentadas por ela serão ajustados.`)) return;
+  const linkedOrder = s.linkedOrderId ? state.orders.find(o=>o.id===s.linkedOrderId && o.status==='Enviado') : null;
+  let msg = `Excluir a venda de "${s.productName}" em ${fmtDate(s.date)}? O estoque do produto e as reservas alimentadas por ela serão ajustados.`;
+  if(linkedOrder) msg += ` A encomenda vinculada volta pro status "Pronto para envio".`;
+  if(!confirm(msg)) return;
   const prod = state.products.find(p=>p.id===s.productId);
   if(prod) prod.stock += s.qty;
   const touchedReserves = reverseSaleReserveAllocations(s);
+  if(linkedOrder) linkedOrder.status = 'Pronto para envio';
   state.sales = state.sales.filter(x=>x.id!==id);
-  saveSales(); if(prod) saveProducts(); if(touchedReserves) saveSettings();
-  toast('Venda excluída');
+  saveSales(); if(prod) saveProducts(); if(touchedReserves) saveSettings(); if(linkedOrder) saveOrders();
+  toast(linkedOrder ? 'Venda excluída e encomenda voltou pra fila' : 'Venda excluída');
   renderContent();
 }
 let cartItems = [];
@@ -2194,7 +2211,7 @@ function updateSalePreview(){
         <label style="font-size:11px;">Bate com pedido em aberto —</label>
         <select style="margin-top:3px;" onchange="onOrderMatchChange('${prod.id}', this.value); updateSalePreview();">
           <option value="">Não vincular</option>
-          ${matches.map(o=>`<option value="${o.id}" ${cartOrderLinks[prod.id]===o.id?'selected':''}>${o.customerName||'Sem cliente'} — ${o.qty}x${o.dueDate?' (prazo '+fmtDate(o.dueDate)+')':''}</option>`).join('')}
+          ${matches.map(o=>`<option value="${o.id}" ${cartOrderLinks[prod.id]===o.id?'selected':''}>${orderCustomerName(o)||'Sem cliente'} — ${o.qty}x${o.dueDate?' (prazo '+fmtDate(o.dueDate)+')':''}</option>`).join('')}
         </select>
       </div>`;
     }
@@ -2250,15 +2267,15 @@ function confirmSale(){
     const net = itemGross-itemFee;
     const profit = net-cost-itemShipping;
     const allocations = computeSaleReserveAllocations(calc, item.qty, profit);
+    const linkedOrderId = cartOrderLinks[prod.id] || null;
     state.sales.push({
       id:uid(), groupId, date, productId:prod.id, productName:prod.name, qty:item.qty, platform:plat,
       grossPrice:itemGross, feeTotal:itemFee, netReceipt:net, productionCost:cost, shippingCost:itemShipping, couponDiscount:itemCoupon, profit,
-      reserveAllocations:allocations, machineId: calc.machine?calc.machine.id:null, hoursUsed:(prod.timeH||0)*item.qty, customerId, trackingCode,
+      reserveAllocations:allocations, machineId: calc.machine?calc.machine.id:null, hoursUsed:(prod.timeH||0)*item.qty, customerId, trackingCode, linkedOrderId,
     });
     prod.stock -= item.qty;
     applySaleReserveAllocations(allocations);
     if(Object.keys(allocations).length){ settingsTouched = true; totalAllocated += Object.values(allocations).reduce((a,v)=>a+v,0); }
-    const linkedOrderId = cartOrderLinks[prod.id];
     if(linkedOrderId){
       const ord = state.orders.find(o=>o.id===linkedOrderId);
       if(ord){ ord.status='Enviado'; linkedCount++; }
@@ -2542,7 +2559,7 @@ function renderProdutos(){
       <td class="right num" data-label="Preço praticado">${brl(c.practicedPrice)}</td>
       <td class="right num" data-label="Margem" style="color:${c.marginValue<0?'var(--red)':'var(--green)'}">${pct(c.marginPct)}</td>
       <td class="right num" data-label="Estoque">${p.stock<=0?`<span class="badge mut">0</span>`:num(p.stock,0)}</td>
-      <td class="right"><button class="btn ghost sm" onclick="openProductModal('${p.id}')">Editar</button> <button class="btn ghost sm" onclick="deleteProduct('${p.id}')">Excluir</button></td>
+      <td class="right"><button class="btn ghost sm" onclick="openProductModal('${p.id}')">Editar</button> <button class="btn ghost sm" onclick="duplicateProduct('${p.id}')">Duplicar</button> <button class="btn ghost sm" onclick="deleteProduct('${p.id}')">Excluir</button></td>
     </tr>`;
   }).join('');
   return `
@@ -2573,9 +2590,27 @@ function renderProdutos(){
     <tbody>${rows || `<tr><td colspan="12" style="text-align:center;color:var(--text-faint);padding:20px;">Nenhum produto encontrado</td></tr>`}</tbody>
   </table></div></div>`;
 }
+function duplicateProduct(id){
+  const p = state.products.find(x=>x.id===id);
+  if(!p) return;
+  const copy = JSON.parse(JSON.stringify(p));
+  copy.id = uid();
+  copy.name = p.name + ' (cópia)';
+  copy.stock = 0;
+  delete copy.kitComponents;
+  state.products.push(copy);
+  saveProducts();
+  toast('Produto duplicado — ajuste o que for diferente');
+  openProductModal(copy.id);
+}
 function deleteProduct(id){
   const p = state.products.find(x=>x.id===id);
-  if(!confirm(`Excluir "${p.name}"? Vendas já registradas não serão afetadas.`)) return;
+  const openOrders = state.orders.filter(o=>o.productId===id && o.status!=='Enviado');
+  let msg = `Excluir "${p.name}"? Vendas já registradas não serão afetadas.`;
+  if(openOrders.length){
+    msg += ` Atenção: ${openOrders.length} encomenda(s) em aberto usam esse produto — elas continuam na fila, mas os botões "Produzir"/"Vender" delas vão passar a apontar pro primeiro produto da lista, o que pode confundir. Considere cancelar ou concluir essas encomendas antes.`;
+  }
+  if(!confirm(msg)) return;
   state.products = state.products.filter(x=>x.id!==id);
   saveProducts(); toast('Produto excluído'); renderContent();
 }
@@ -2955,9 +2990,11 @@ function confirmMaterial(id){
     state.materials.forEach(mat=>{ if(mat.id!==id) mat.isBubbleWrap = false; });
   }
   let renamedFrom = null;
+  let oldCostPerUnit = null;
   if(id){
     const existing = state.materials.find(x=>x.id===id);
     if(existing.name !== name) renamedFrom = existing.name;
+    oldCostPerUnit = existing.costPerUnit;
     Object.assign(existing, data);
   } else {
     state.materials.push({ id:uid(), ...data });
@@ -2970,7 +3007,18 @@ function confirmMaterial(id){
     });
     if(productsTouched) saveProducts();
   }
-  saveMaterials(); toast(id?'Matéria-prima atualizada':'Matéria-prima criada'); closeModal(); renderContent();
+  saveMaterials();
+  let marginMsg = '';
+  if(oldCostPerUnit!=null && oldCostPerUnit!==data.costPerUnit){
+    const affected = state.products.filter(p=>
+      (p.filaments||[]).some(f=>f.materialName===name) || p.boxType===name || (isBubbleWrap && (p.bubbleWrapM||0)>0)
+    ).filter(p=>{ const c = calcProduct(p); return c.marginPct < c.desiredMarginPct; });
+    if(affected.length){
+      marginMsg = ` — atenção: ${affected.length} produto(s) ficaram com margem abaixo do desejado (${affected.slice(0,3).map(p=>p.name).join(', ')})`;
+    }
+  }
+  toast((id?'Matéria-prima atualizada':'Matéria-prima criada') + marginMsg, marginMsg?'err':'');
+  closeModal(); renderContent();
 }
 function openRestockModal(id){
   const m = state.materials.find(x=>x.id===id);
@@ -3314,6 +3362,7 @@ function confirmMaintenance(machineId){
 function deleteMaintenanceEntry(machineId, entryId){
   const m = (state.settings.machines||[]).find(x=>x.id===machineId);
   if(!m) return;
+  if(!confirm('Excluir esse registro de manutenção?')) return;
   m.maintenanceLog = (m.maintenanceLog||[]).filter(e=>e.id!==entryId);
   saveSettings();
   openMaintenanceModal(machineId);
@@ -3323,6 +3372,9 @@ function addMachineRow(){
   renderMachineRows();
 }
 function removeMachineRow(i){
+  const m = editingMachines[i];
+  const usedBy = state.products.filter(p=>p.machineId===m.id);
+  if(usedBy.length && !confirm(`${usedBy.length} produto(s) usam "${m.name}" (${usedBy.slice(0,3).map(p=>p.name).join(', ')}${usedBy.length>3?'...':''}). Ao remover, eles passam a usar a primeira impressora da lista pro cálculo de custo. Continuar?`)) return;
   editingMachines.splice(i,1);
   renderMachineRows();
 }
@@ -3683,6 +3735,31 @@ function exportSalesExcel(){
   XLSX.writeFile(wb, `piece-of-geek-vendas-${todayStr()}.xlsx`);
   toast('Vendas exportadas');
 }
+function exportCustomersExcel(){
+  if(typeof XLSX==='undefined'){ toast('Biblioteca de exportação não carregou — verifique sua conexão e tente de novo','err'); return; }
+  if(state.customers.length===0){ toast('Nenhum cliente para exportar','err'); return; }
+  const rows = [['Nome','Contato','Qtd. vendas','Total comprado','Última compra','Observações']];
+  state.customers.forEach(cu=>{
+    const st = customerStats(cu.id);
+    rows.push([cu.name, cu.contact||'', st.qtd, st.total, st.lastDate?fmtDate(st.lastDate):'', cu.notes||'']);
+  });
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), 'Clientes');
+  XLSX.writeFile(wb, `piece-of-geek-clientes-${todayStr()}.xlsx`);
+  toast('Clientes exportados');
+}
+function exportOrdersExcel(){
+  if(typeof XLSX==='undefined'){ toast('Biblioteca de exportação não carregou — verifique sua conexão e tente de novo','err'); return; }
+  if(state.orders.length===0){ toast('Nenhuma encomenda para exportar','err'); return; }
+  const rows = [['Cliente','Produto','Qtd','Status','Prazo','Criada em','Observações']];
+  state.orders.slice().sort((a,b)=>(a.createdAt||'').localeCompare(b.createdAt||'')).forEach(o=>{
+    rows.push([orderCustomerName(o)||'Avulso', o.productName, o.qty, o.status, o.dueDate?fmtDate(o.dueDate):'', o.createdAt?fmtDate(o.createdAt.slice(0,10)):'', o.notes||'']);
+  });
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), 'Pedidos');
+  XLSX.writeFile(wb, `piece-of-geek-pedidos-${todayStr()}.xlsx`);
+  toast('Pedidos exportados');
+}
 
 /* ===================== BACKUP (exportar / importar) ===================== */
 function exportAnnualExcel(){
@@ -3730,7 +3807,15 @@ function exportBackup(silent){
   a.href = url; a.download = `piece-of-geek-backup-${todayStr()}.json`;
   document.body.appendChild(a); a.click(); a.remove();
   URL.revokeObjectURL(url);
+  try{ localStorage.setItem('pog3d_last_backup', todayStr()); }catch(e){}
   if(!silent) toast('Backup exportado');
+}
+function daysSinceLastBackup(){
+  let last;
+  try{ last = localStorage.getItem('pog3d_last_backup'); }catch(e){ last = null; }
+  if(!last) return null;
+  const d1 = new Date(last+'T00:00:00'), d2 = new Date(todayStr()+'T00:00:00');
+  return Math.round((d2-d1)/86400000);
 }
 function importBackup(file){
   const reader = new FileReader();
