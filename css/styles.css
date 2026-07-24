@@ -255,6 +255,20 @@ tbody tr:hover{background:rgba(0,0,0,0.025);}
 .menu-toggle:hover{background:#E8EAEE;}
 @media(max-width:860px){.menu-toggle{display:inline-flex;}}
 
+/* Fixa a coluna de ações (Editar/Duplicar/Excluir) na borda direita visível da
+   tabela quando ela rola na horizontal, pra não precisar rolar até o fim pra
+   ver os botões — só faz sentido em telas largas, onde a tabela ainda é <table>
+   de verdade (no mobile ela vira card via .tbl-responsive, ver abaixo). */
+@media(min-width:641px){
+  .tbl-sticky-actions td:last-child,
+  .tbl-sticky-actions th:last-child{
+    position:sticky;
+    right:0;
+    background:var(--panel);
+    box-shadow:-6px 0 8px -6px rgba(20,24,33,0.12);
+  }
+}
+
 /* Tabelas que viram cards em telas de celular, em vez de rolar na horizontal */
 @media(max-width:640px){
   .tbl-responsive table,.tbl-responsive thead,.tbl-responsive tbody,.tbl-responsive th,.tbl-responsive td,.tbl-responsive tr{display:block;}
