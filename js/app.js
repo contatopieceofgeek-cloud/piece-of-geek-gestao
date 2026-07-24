@@ -36,7 +36,7 @@ function seedData(){
     {id:uid(),name:'Caixa Grande',category:'Embalagem',unit:'un',costPerUnit:4.94,stock:0,lowStock:3,purchasePrice:49.40,purchaseQty:10,purchaseUnit:'un',isBox:true},
   ];
   const machines = [
-    {id:uid(),name:'Bambu Lab A1 Mini',price:2279,residual:227.9,lifeHours:5000,energyCostPerHour:0.0704,powerConsumptionKw:0.1,installmentValue:108.523809,installmentsTotal:21,startMonth:'2026-07'},
+    {id:uid(),name:'Bambu Lab A1 Mini',price:2279,residual:227.9,lifeHours:5000,energyCostPerHour:0.0704,powerConsumptionKw:0.1,installmentValue:108.523809,installmentsTotal:21,startMonth:'2026-07',maintenanceLog:[]},
   ];
   const p = (name,filamentType,weightG,timeH,boxType,practicedPrice) => ({
     id:uid(),name,filaments:[{materialName:filamentType,weightG}],timeH,bubbleWrapM:0.5,boxType,failureMarginPct:0.10,practicedPrice,stock:0,machineId:machines[0].id
@@ -104,6 +104,8 @@ function seedData(){
       {id:uid(),name:'Fundo de Expansão (Lucro Retido)',goal:0,balance:0,autoMode:'pct_profit',autoPct:0},
     ],
     monthlyCloses:{},
+    monthlySnapshots:{},
+    lastActiveMonth: todayStr().slice(0,7),
     laborHourlyRate:25,
   };
   return { materials, products, sales:[], orders:[], customers:[], printFailures:[], settings };
@@ -168,7 +170,7 @@ function migrateSettings(settings){
       settings.machines = [];
     }
   }
-  settings.machines.forEach(m=>{ if(m.energyCostPerHour==null) m.energyCostPerHour = 0.0704; if(m.powerConsumptionKw==null) m.powerConsumptionKw = 0; if(!m.id) m.id = uid(); });
+  settings.machines.forEach(m=>{ if(m.energyCostPerHour==null) m.energyCostPerHour = 0.0704; if(m.powerConsumptionKw==null) m.powerConsumptionKw = 0; if(!m.id) m.id = uid(); if(!Array.isArray(m.maintenanceLog)) m.maintenanceLog = []; });
   if(settings.energyTariffPerKwh==null) settings.energyTariffPerKwh = 0.75;
   if(settings.meiRevenueLimit==null) settings.meiRevenueLimit = 81000;
   if(settings.monthlyGoal==null) settings.monthlyGoal = 0;
@@ -185,6 +187,8 @@ function migrateSettings(settings){
   if(!Array.isArray(settings.investments)) settings.investments = [];
   settings.investments.forEach(inv=>{ if(!inv.paymentType) inv.paymentType = 'avista'; if(!inv.category) inv.category = 'Outros'; });
   if(!settings.monthlyCloses) settings.monthlyCloses = {};
+  if(!settings.monthlySnapshots) settings.monthlySnapshots = {};
+  if(!settings.lastActiveMonth) settings.lastActiveMonth = todayStr().slice(0,7);
   delete settings.opExpenses;
   delete settings.meiTax;
   delete settings.opExpensesBreakdown;
@@ -343,6 +347,7 @@ async function loadState(){
       state.products = p ? JSON.parse(p) : seed.products;
       migrateProducts(state.products);
       backfillMachineHours();
+      snapshotPastMonths();
     }
   }catch(e){
     console.error('storage load error', e);
@@ -431,9 +436,12 @@ function blocoA(ym){
   const receitaLiquida = faturamento - taxas;
   const custoProducao = sales.reduce((a,s)=>a+s.productionCost,0);
   const frete = sales.reduce((a,s)=>a+(s.shippingCost||0),0);
-  const despesas = (state.settings.expenses||[]).reduce((a,e)=>a+(e.value||0),0);
+  const snap = (state.settings.monthlySnapshots||{})[ym];
+  const expensesSrc = snap ? snap.expenses : state.settings.expenses;
+  const taxesSrc = snap ? snap.taxes : state.settings.taxes;
+  const despesas = (expensesSrc||[]).reduce((a,e)=>a+(e.value||0),0);
   const lucroBruto = receitaLiquida - custoProducao - frete - despesas;
-  const mei = (state.settings.taxes||[]).reduce((a,t)=>a+(t.value||0),0);
+  const mei = (taxesSrc||[]).reduce((a,t)=>a+(t.value||0),0);
   const lucroOperacional = lucroBruto - mei;
   return { faturamento, taxas, receitaLiquida, custoProducao, frete, despesas, lucroBruto, mei, lucroOperacional, qtdVendas: sales.length };
 }
@@ -453,21 +461,43 @@ function blocoB(ym){
   const totalPagar = rows.reduce((a,r)=>a+r.totalPagar,0);
   return { rows, totalDue, totalPagar, dueAmount: totalDue };
 }
-function blocoC(){
-  const goals = state.settings.reserveGoals;
+function blocoC(ym){
+  const snap = ym ? (state.settings.monthlySnapshots||{})[ym] : null;
+  const goals = snap ? snap.reserveGoals : state.settings.reserveGoals;
   return { goals, total: goals.reduce((a,g)=>a+g.goal,0) };
 }
 function investmentsDueInMonth(ym){
   return (state.settings.investments||[]).reduce((sum,inv)=>sum+investmentDueInMonth(inv,ym),0);
 }
 function blocoD(ym){
-  const a = blocoA(ym), b = blocoB(ym), c = blocoC();
+  const a = blocoA(ym), b = blocoB(ym), c = blocoC(ym);
   const investimentosMes = investmentsDueInMonth(ym);
   const caixaLiquido = a.lucroOperacional - b.dueAmount - investimentosMes;
   const proLabore = a.lucroOperacional - b.dueAmount - c.total - investimentosMes;
   return { lucroOperacional:a.lucroOperacional, parcelas:b.dueAmount, reservas:c.total, investimentosMes, caixaLiquido, proLabore };
 }
 
+/* Congela despesas/impostos/metas de reserva de meses que já viraram, pra editar
+   Configurações não reescrever retroativamente o Caixa/Anual de meses passados. */
+function snapshotPastMonths(){
+  const currentYm = todayStr().slice(0,7);
+  const last = state.settings.lastActiveMonth || currentYm;
+  if(!state.settings.monthlySnapshots) state.settings.monthlySnapshots = {};
+  let ym = last, changed = false;
+  while(ym < currentYm){
+    if(!state.settings.monthlySnapshots[ym]){
+      state.settings.monthlySnapshots[ym] = {
+        expenses: JSON.parse(JSON.stringify(state.settings.expenses||[])),
+        taxes: JSON.parse(JSON.stringify(state.settings.taxes||[])),
+        reserveGoals: (state.settings.reserveGoals||[]).map(g=>({id:g.id,name:g.name,goal:g.goal})),
+      };
+      changed = true;
+    }
+    ym = addMonths(ym,1);
+  }
+  if(last !== currentYm){ state.settings.lastActiveMonth = currentYm; changed = true; }
+  if(changed) saveSettings();
+}
 function reservesAlreadyFundedThisMonth(ym){
   const already = {};
   salesInMonth(ym).forEach(s=>{
@@ -532,9 +562,9 @@ function render(){
         ${navItem('vendas','Vendas')}
         ${navItem('clientes','Clientes')}
         ${navItem('produtos','Produtos')}
-        ${navItem('estoque','Estoque')}
+        ${navItem('estoque','Estoque',lowStockMaterials().length)}
         ${navItem('calculo','Cálculo')}
-        ${navItem('caixa','Caixa')}
+        ${navItem('caixa','Caixa',dasIsUrgent()?'!':0)}
         ${navItem('anual','Anual')}
       </div>
       <div class="sidebar-foot">
@@ -567,8 +597,14 @@ function render(){
   renderTopbarActions();
   renderContent();
 }
-function navItem(key,label){
-  return `<div class="nav-item ${currentTab===key?'active':''}" onclick="switchTab('${key}')"><span class="nav-dot"></span>${label}</div>`;
+function navItem(key,label,badge){
+  const badgeHtml = badge ? `<span class="nav-badge" title="${badge==='!'?'DAS vencendo/atrasado':'Itens com estoque baixo'}">${badge}</span>` : '';
+  return `<div class="nav-item ${currentTab===key?'active':''}" onclick="switchTab('${key}')"><span class="nav-dot"></span>${label}${badgeHtml}</div>`;
+}
+function dasIsUrgent(){
+  if(!state.settings.dasEnabled) return false;
+  const { paid, diffDays } = dasStatus();
+  return !paid && diffDays<=5;
 }
 function toggleSidebar(){
   document.getElementById('sidebar').classList.toggle('open');
@@ -598,7 +634,7 @@ function tabSubtitle(){
 function renderTopbarActions(){
   const el = document.getElementById('topbarActions');
   if(currentTab==='pedidos') el.innerHTML = `<button class="btn primary" onclick="openOrderModal()">+ Nova encomenda</button>`;
-  else if(currentTab==='vendas') el.innerHTML = `<button class="btn ghost" onclick="openSettingsModal()">Taxas das plataformas</button> <button class="btn ghost" onclick="openKitModal()">Criar kit</button> <button class="btn primary" onclick="openSaleModal()">+ Nova venda</button>`;
+  else if(currentTab==='vendas') el.innerHTML = `<button class="btn ghost" onclick="openSettingsModal()">Taxas das plataformas</button> <button class="btn ghost" onclick="openKitModal()">Criar kit</button> <button class="btn ghost" onclick="exportSalesExcel()">Exportar</button> <button class="btn primary" onclick="openSaleModal()">+ Nova venda</button>`;
   else if(currentTab==='clientes') el.innerHTML = `<button class="btn primary" onclick="openCustomerModal()">+ Novo cliente</button>`;
   else if(currentTab==='produtos') el.innerHTML = `<button class="btn ghost" onclick="openQuickQuoteModal()">Orçamento rápido</button> <button class="btn ghost" onclick="exportCatalogImage()">Catálogo (imagem)</button> <button class="btn ghost" onclick="exportCatalogPDF()">Catálogo (PDF, 1 pág./produto)</button> <button class="btn primary" onclick="openProductModal()">+ Novo produto</button>`;
   else if(currentTab==='estoque') el.innerHTML = stockTab==='materiais' ? `<button class="btn primary" onclick="openMaterialModal()">+ Nova matéria-prima</button>` : `<button class="btn primary" onclick="openProductionModal()">+ Registrar produção</button>`;
@@ -1532,7 +1568,7 @@ function exportCatalogPDF(){
   const summaryRows = items.map(p=>{
     const price = calcProduct(p).practicedPrice;
     return `<div style="display:flex;align-items:center;gap:14px;padding:10px 0;border-bottom:1px solid #e2e2e2;">
-      ${p.photo ? `<img src="${p.photo}" style="width:46px;height:46px;object-fit:cover;border-radius:6px;">` : `<div style="width:46px;height:46px;border-radius:6px;background:#eee;"></div>`}
+      ${p.photo ? `<img src="${p.photo}" alt="${p.name}" style="width:46px;height:46px;object-fit:cover;border-radius:6px;">` : `<div style="width:46px;height:46px;border-radius:6px;background:#eee;"></div>`}
       <div style="flex:1;font-size:14px;">${p.name}</div>
       <div style="font-weight:bold;font-size:14px;">${brl(price)}</div>
     </div>`;
@@ -1542,7 +1578,7 @@ function exportCatalogPDF(){
     const c = calcProduct(p);
     const filSummary = (p.filaments||[]).map(f=>`${f.materialName} ${num(f.weightG,0)}g`).join(' + ');
     return `<div class="catalog-page" style="display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;">
-      ${p.photo ? `<img src="${p.photo}" style="max-width:320px;max-height:320px;object-fit:cover;border-radius:14px;margin-bottom:26px;box-shadow:0 4px 16px rgba(0,0,0,0.15);">` : ''}
+      ${p.photo ? `<img src="${p.photo}" alt="${p.name}" style="max-width:320px;max-height:320px;object-fit:cover;border-radius:14px;margin-bottom:26px;box-shadow:0 4px 16px rgba(0,0,0,0.15);">` : ''}
       <h1 style="font-size:30px;margin:0 0 12px;">${p.name}</h1>
       <div style="font-size:34px;font-weight:bold;margin-bottom:22px;">${brl(c.practicedPrice)}</div>
       <div style="font-size:13.5px;color:#555;line-height:2;max-width:420px;">
@@ -1773,11 +1809,15 @@ function renderCalculo(){
         const pctUsed = life>0 ? Math.min(100,(used/life)*100) : 0;
         const color = pctUsed>=90 ? 'var(--red)' : pctUsed>=70 ? 'var(--amber)' : 'var(--teal)';
         const badge = pctUsed>=100 ? '<span class="badge bad">Vida útil atingida</span>' : pctUsed>=90 ? '<span class="badge bad">Manutenção urgente</span>' : pctUsed>=70 ? '<span class="badge warn">Fique de olho</span>' : '<span class="badge ok">Ok</span>';
+        const log = m.maintenanceLog||[];
+        const last = log.length ? log.slice().sort((a,b)=>b.date.localeCompare(a.date))[0] : null;
         return `<div class="card">
           <div style="font-weight:600;font-size:13px;">${m.name}</div>
           <div style="font-family:var(--font-mono);font-size:18px;font-weight:600;margin:8px 0 4px;">${num(used,0)}h <span style="font-size:12px;color:var(--text-faint);font-weight:400;">/ ${num(life,0)}h</span></div>
           <div class="progress"><div style="width:${pctUsed}%;background:${color};"></div></div>
           <div style="margin-top:8px;">${badge}</div>
+          <div style="margin-top:10px;font-size:11.5px;color:var(--text-faint);">${last ? `Última manutenção: ${fmtDate(last.date)}${last.note?' — '+last.note:''}` : 'Nenhuma manutenção registrada'}</div>
+          <button class="btn ghost sm" style="width:100%;margin-top:8px;" onclick="openMaintenanceModal('${m.id}')">Registrar manutenção</button>
         </div>`;
       }).join('')}
     </div>
@@ -1882,7 +1922,7 @@ function renderVendas(){
   if(salesFilter.to) list = list.filter(s=>s.date<=salesFilter.to);
   list.sort((a,b)=>b.date.localeCompare(a.date));
 
-  const totals = list.reduce((acc,s)=>{ acc.gross+=s.grossPrice; acc.fee+=s.feeTotal; acc.net+=s.netReceipt; acc.cost+=s.productionCost; acc.shipping+=(s.shippingCost||0); acc.profit+=s.profit; return acc; }, {gross:0,fee:0,net:0,cost:0,shipping:0,profit:0});
+  const totals = list.reduce((acc,s)=>{ acc.gross+=s.grossPrice; acc.fee+=s.feeTotal; acc.net+=s.netReceipt; acc.cost+=s.productionCost; acc.shipping+=(s.shippingCost||0); acc.coupon+=(s.couponDiscount||0); acc.profit+=s.profit; return acc; }, {gross:0,fee:0,net:0,cost:0,shipping:0,coupon:0,profit:0});
 
   return `
     <div class="filter-bar">
@@ -1899,17 +1939,18 @@ function renderVendas(){
       ${(salesFilter.platform||salesFilter.product||salesFilter.from||salesFilter.to) ? `<button class="btn ghost sm" onclick="salesFilter={platform:'',product:'',from:'',to:''}; renderContent();">Limpar filtros</button>` : ''}
     </div>
 
-    <div class="grid g-4" style="margin-bottom:16px;">
+    <div class="grid ${totals.coupon>0?'g-5':'g-4'}" style="margin-bottom:16px;">
       <div class="kpi" style="--accent:var(--nozzle)"><div class="kpi-label">Bruto</div><div class="kpi-value" style="font-size:18px;">${brl(totals.gross)}</div></div>
       <div class="kpi" style="--accent:var(--amber)"><div class="kpi-label">Taxas</div><div class="kpi-value" style="font-size:18px;">${brl(totals.fee)}</div></div>
       <div class="kpi" style="--accent:var(--teal)"><div class="kpi-label">Recebido líquido</div><div class="kpi-value" style="font-size:18px;">${brl(totals.net)}</div></div>
+      ${totals.coupon>0 ? `<div class="kpi" style="--accent:var(--amber)"><div class="kpi-label">Descontos de cupom</div><div class="kpi-value" style="font-size:18px;">${brl(totals.coupon)}</div></div>` : ''}
       <div class="kpi" style="--accent:${totals.profit<0?'var(--red)':'var(--green)'}"><div class="kpi-label">Lucro real</div><div class="kpi-value ${totals.profit<0?'neg':'pos'}" style="font-size:18px;">${brl(totals.profit)}</div></div>
     </div>
 
     <div class="card">
       ${list.length===0 ? emptyState('Nenhuma venda encontrada. Clique em "Nova venda" para começar.') : `
       <div class="tbl-wrap tbl-responsive"><table>
-        <thead><tr><th>Data</th><th>Produto</th><th>Cliente</th><th>Plataforma</th><th class="right">Qtd</th><th class="right">Preço bruto</th><th class="right">Taxa</th><th class="right">Líquido</th><th class="right">Custo prod.</th><th class="right">Frete</th><th class="right">Lucro</th><th></th></tr></thead>
+        <thead><tr><th>Data</th><th>Produto</th><th>Cliente</th><th>Plataforma</th><th class="right">Qtd</th><th class="right">Preço bruto</th><th class="right">Taxa</th><th class="right">Líquido</th><th class="right">Custo prod.</th><th class="right">Frete</th><th class="right">Lucro</th><th>Rastreio</th><th></th></tr></thead>
         <tbody>
           ${list.map(s=>`<tr>
             <td class="num" data-label="Data">${fmtDate(s.date)}${s.groupId?' <span class="chip" title="Faz parte de uma venda com vários itens">🧾</span>':''}</td>
@@ -1923,6 +1964,7 @@ function renderVendas(){
             <td class="right num" data-label="Custo prod." style="color:var(--text-faint)">${brl(s.productionCost)}</td>
             <td class="right num" data-label="Frete" style="color:var(--text-faint)">${s.shippingCost ? brl(s.shippingCost) : '—'}</td>
             <td class="right num ${s.profit<0?'neg':''}" data-label="Lucro" style="${s.profit>=0?'color:var(--green)':''}">${brl(s.profit)}</td>
+            <td data-label="Rastreio">${s.trackingCode ? `<span class="chip" style="cursor:pointer;font-family:var(--font-mono);" title="Clique para editar" onclick="openTrackingModal('${s.id}')">${s.trackingCode}</span>` : `<button class="btn ghost sm" onclick="openTrackingModal('${s.id}')">+ rastreio</button>`}</td>
             <td class="right"><button class="btn ghost sm" onclick="printSaleReceipt('${s.id}')">Recibo</button> <button class="btn ghost sm" onclick="deleteSale('${s.id}')">Excluir</button></td>
           </tr>`).join('')}
         </tbody>
@@ -1959,6 +2001,29 @@ function reverseSaleReserveAllocations(sale){
     if(fund){ fund.balance -= sale.depreciationAllocated; touched = true; }
   }
   return touched;
+}
+function openTrackingModal(saleId){
+  const s = state.sales.find(x=>x.id===saleId);
+  if(!s) return;
+  showModal('Código de rastreio', `
+    <div class="field"><label>Produto</label><input value="${s.productName}" disabled></div>
+    <div class="field"><label>Código de rastreio</label><input id="trkCode" value="${s.trackingCode||''}" placeholder="Ex: BR123456789BR"></div>
+    ${s.groupId ? `<div class="field hint" style="margin-top:-8px;">Essa venda faz parte de um carrinho com vários itens — o código vai ser aplicado a todos eles, já que normalmente vão no mesmo pacote.</div>` : ''}
+    <div class="modal-actions">
+      <button class="btn ghost" onclick="closeModal()">Cancelar</button>
+      <button class="btn primary" onclick="confirmTracking('${saleId}')">Salvar</button>
+    </div>
+  `);
+}
+function confirmTracking(saleId){
+  const s = state.sales.find(x=>x.id===saleId);
+  if(!s) return;
+  const code = document.getElementById('trkCode').value.trim() || null;
+  const targets = s.groupId ? state.sales.filter(x=>x.groupId===s.groupId) : [s];
+  targets.forEach(t=>{ t.trackingCode = code; });
+  saveSales();
+  toast(code ? 'Código de rastreio salvo' : 'Código de rastreio removido');
+  closeModal(); renderContent();
 }
 function deleteSale(id){
   const s = state.sales.find(x=>x.id===id);
@@ -2003,7 +2068,11 @@ function openSaleModal(presetProductId, presetQty, presetOrderId){
     </div>
     <div class="field hint" style="margin-top:-8px;margin-bottom:12px;">Vem preenchido com a taxa cadastrada da plataforma, mas edite se o Mercado Livre/Shopee cobrou diferente (aplica sobre o total da venda).</div>
     <div id="sTierNote"></div>
-    <div class="field"><label>Frete pago por você (R$, total da venda)</label><input type="number" id="sShipping" step="0.01" value="0" placeholder="Ex: frete grátis que você bancou" oninput="updateSalePreview()"></div>
+    <div class="row2">
+      <div class="field"><label>Frete pago por você (R$, total da venda)</label><input type="number" id="sShipping" step="0.01" value="0" placeholder="Ex: frete grátis que você bancou" oninput="updateSalePreview()"></div>
+      <div class="field"><label>Desconto de cupom/campanha (R$, opcional)</label><input type="number" id="sCoupon" step="0.01" value="0" placeholder="Quanto o ML/Shopee descontou por promoção"></div>
+    </div>
+    <div class="field"><label>Código de rastreio (opcional)</label><input id="sTracking" placeholder="Se já tiver na hora — dá pra adicionar depois também"></div>
     <div class="helper-block" id="salePreview"></div>
     <button class="btn ghost sm" style="width:100%;margin-top:10px;" id="sPixBtn">Gerar cobrança PIX</button>
     <div id="salePixArea" style="margin-top:10px;"></div>
@@ -2154,11 +2223,14 @@ function updateSalePreview(){
 function confirmSale(){
   const totalGross = cartItems.reduce((a,it)=>a+it.qty*it.unitPrice,0);
   if(cartItems.length===0 || totalGross<=0){ toast('Verifique os itens e valores da venda','err'); return; }
+  if(cartItems.some(it=>it.qty<=0 || it.unitPrice<0)){ toast('Quantidade deve ser maior que zero e preço não pode ser negativo','err'); return; }
   const date = document.getElementById('sDate').value || todayStr();
   const plat = document.getElementById('sPlat').value;
   const customerId = document.getElementById('sCustomer').value || null;
   const totalFee = saleFeeFromForm(totalGross);
   const totalShipping = parseFloat(document.getElementById('sShipping').value)||0;
+  const totalCoupon = parseFloat(document.getElementById('sCoupon').value)||0;
+  const trackingCode = document.getElementById('sTracking').value.trim() || null;
   const groupId = cartItems.length>1 ? uid() : null;
 
   let totalAllocated = 0;
@@ -2172,6 +2244,7 @@ function confirmSale(){
     const share = totalGross>0 ? itemGross/totalGross : 0;
     const itemFee = totalFee*share;
     const itemShipping = totalShipping*share;
+    const itemCoupon = totalCoupon*share;
     const calc = calcProduct(prod);
     const cost = calc.totalCost*item.qty;
     const net = itemGross-itemFee;
@@ -2179,8 +2252,8 @@ function confirmSale(){
     const allocations = computeSaleReserveAllocations(calc, item.qty, profit);
     state.sales.push({
       id:uid(), groupId, date, productId:prod.id, productName:prod.name, qty:item.qty, platform:plat,
-      grossPrice:itemGross, feeTotal:itemFee, netReceipt:net, productionCost:cost, shippingCost:itemShipping, profit,
-      reserveAllocations:allocations, machineId: calc.machine?calc.machine.id:null, hoursUsed:(prod.timeH||0)*item.qty, customerId,
+      grossPrice:itemGross, feeTotal:itemFee, netReceipt:net, productionCost:cost, shippingCost:itemShipping, couponDiscount:itemCoupon, profit,
+      reserveAllocations:allocations, machineId: calc.machine?calc.machine.id:null, hoursUsed:(prod.timeH||0)*item.qty, customerId, trackingCode,
     });
     prod.stock -= item.qty;
     applySaleReserveAllocations(allocations);
@@ -2281,6 +2354,8 @@ function openCustomerModal(id){
 function confirmCustomer(id){
   const name = document.getElementById('cuName').value.trim();
   if(!name){ toast('Informe o nome do cliente','err'); return; }
+  const dup = state.customers.find(x=>x.id!==id && x.name.trim().toLowerCase()===name.toLowerCase());
+  if(dup && !confirm(`Já existe um cliente chamado "${dup.name}". Cadastrar outro com o mesmo nome mesmo assim?`)) return;
   const data = { name, contact: document.getElementById('cuContact').value.trim(), notes: document.getElementById('cuNotes').value.trim() };
   if(id){ Object.assign(state.customers.find(x=>x.id===id), data); }
   else { state.customers.push({ id:uid(), ...data }); }
@@ -2456,7 +2531,7 @@ function renderProdutos(){
   const rows = list.map(({p,c})=>{
     const filSummary = (p.filaments||[]).map(f=>`${f.materialName} ${num(f.weightG,0)}g`).join(' + ');
     return `<tr>
-      <td data-label="Foto">${p.photo ? `<img src="${p.photo}" style="width:36px;height:36px;object-fit:cover;border-radius:6px;">` : `<div style="width:36px;height:36px;border-radius:6px;background:var(--panel-2);"></div>`}</td>
+      <td data-label="Foto">${p.photo ? `<img src="${p.photo}" alt="${p.name}" style="width:36px;height:36px;object-fit:cover;border-radius:6px;">` : `<div style="width:36px;height:36px;border-radius:6px;background:var(--panel-2);"></div>`}</td>
       <td data-label="Produto">${p.name}${p.kitComponents && p.kitComponents.length ? `<div style="font-size:11px;font-style:italic;color:var(--text-faint);margin-top:2px;">${p.kitComponents.map(kc=>`${kc.qty>1?kc.qty+'x ':''}${kc.productName}`).join(' + ')}</div>` : ''}</td>
       <td title="${filSummary}" data-label="Filamentos">${filSummary}</td>
       <td data-label="Impressora">${c.machine ? c.machine.name : '<span class="badge bad">nenhuma</span>'}</td>
@@ -2608,7 +2683,7 @@ function renderPhotoPreview(){
   if(!el) return;
   el.innerHTML = editingPhotoData
     ? `<div style="position:relative;display:inline-block;margin-top:8px;">
-         <img src="${editingPhotoData}" style="width:110px;height:110px;object-fit:cover;border-radius:8px;border:1px solid var(--line);display:block;">
+         <img src="${editingPhotoData}" alt="Prévia da foto do produto" style="width:110px;height:110px;object-fit:cover;border-radius:8px;border:1px solid var(--line);display:block;">
          <button class="btn ghost sm" style="position:absolute;top:-8px;right:-8px;padding:2px 7px;background:var(--panel);" onclick="removePhoto()">×</button>
        </div>`
     : `<div style="font-size:11.5px;color:var(--text-faint);margin-top:6px;">Nenhuma foto — opcional</div>`;
@@ -2674,10 +2749,13 @@ function updateProductPreview(){
 function confirmProduct(id){
   const form = readProductForm();
   if(!form.name){ toast('Informe o nome do produto','err'); return; }
+  const dup = state.products.find(x=>x.id!==id && x.name.trim().toLowerCase()===form.name.trim().toLowerCase());
+  if(dup){ toast(`Já existe um produto chamado "${dup.name}" — use outro nome`,'err'); return; }
   const priceRaw = document.getElementById('pPrice').value;
   const stock = parseFloat(document.getElementById('pStock').value)||0;
   const c = calcProduct(form);
   const practicedPrice = priceRaw ? parseFloat(priceRaw) : c.suggestedPrice;
+  if((practicedPrice!=null && practicedPrice<0) || stock<0){ toast('Preço e estoque não podem ser negativos','err'); return; }
   if(id){
     const p = state.products.find(x=>x.id===id);
     Object.assign(p, form, { practicedPrice, stock, photo: editingPhotoData });
@@ -2798,12 +2876,18 @@ function renderFinishedStock(){
 function deleteMaterial(id){
   const m = state.materials.find(x=>x.id===id);
   if(!m) return;
-  const usedBy = state.products.filter(p=>
+  let usedBy = state.products.filter(p=>
     (p.filaments||[]).some(f=>f.materialName===m.name) || p.boxType===m.name
   );
+  if(m.isBubbleWrap){
+    usedBy = usedBy.concat(state.products.filter(p=>!usedBy.includes(p) && (p.bubbleWrapM||0)>0));
+  }
   let msg = `Excluir "${m.name}" do estoque?`;
+  if(m.isBubbleWrap){
+    msg += ` Atenção: esse é o material marcado como plástico bolha — depois de excluir, nenhum produto vai ter custo de plástico bolha calculado até você marcar outro material com esse papel.`;
+  }
   if(usedBy.length){
-    msg += ` Atenção: ${usedBy.length} produto(s) usam esse material no cálculo de custo (${usedBy.map(p=>p.name).slice(0,3).join(', ')}${usedBy.length>3?'...':''}) — o custo deles vai ficar incorreto até você ajustar.`;
+    msg += ` ${usedBy.length} produto(s) usam esse material no cálculo de custo (${usedBy.map(p=>p.name).slice(0,3).join(', ')}${usedBy.length>3?'...':''}) — o custo deles vai ficar incorreto até você ajustar.`;
   }
   if(!confirm(msg)) return;
   state.materials = state.materials.filter(x=>x.id!==id);
@@ -2851,16 +2935,20 @@ function updateMaterialUnitCost(){
 function confirmMaterial(id){
   const name = document.getElementById('mName').value.trim();
   if(!name){ toast('Informe o nome','err'); return; }
+  const dup = state.materials.find(x=>x.id!==id && x.name.trim().toLowerCase()===name.toLowerCase());
+  if(dup){ toast(`Já existe uma matéria-prima chamada "${dup.name}" — use outro nome`,'err'); return; }
   const purchasePrice = parseFloat(document.getElementById('mPPrice').value)||0;
   const purchaseQty = parseFloat(document.getElementById('mPQty').value)||1;
+  const stock = parseFloat(document.getElementById('mStock').value)||0;
+  const lowStock = parseFloat(document.getElementById('mLow').value)||0;
+  if(purchasePrice<0 || purchaseQty<0 || stock<0 || lowStock<0){ toast('Valores de preço/quantidade/estoque não podem ser negativos','err'); return; }
   const category = document.getElementById('mCat').value;
   const isBox = category==='Embalagem' && !!document.getElementById('mIsBox').checked;
   const isBubbleWrap = category==='Embalagem' && !!document.getElementById('mIsBubbleWrap').checked;
   const data = {
     name, category, unit: document.getElementById('mUnit').value,
     purchasePrice, purchaseQty, costPerUnit: purchasePrice/purchaseQty,
-    stock: parseFloat(document.getElementById('mStock').value)||0,
-    lowStock: parseFloat(document.getElementById('mLow').value)||0,
+    stock, lowStock,
     isBox, isBubbleWrap,
   };
   if(isBubbleWrap){
@@ -2901,8 +2989,15 @@ function confirmRestock(id){
   const qty = parseFloat(document.getElementById('rQty').value)||0;
   const cost = parseFloat(document.getElementById('rCost').value);
   if(qty<=0){ toast('Informe uma quantidade válida','err'); return; }
+  if(cost && cost>0){
+    /* média ponderada: mistura o valor do estoque já existente com o da compra nova,
+       em vez de simplesmente substituir pelo preço do último lote. */
+    const existingValue = m.stock * m.costPerUnit;
+    const newTotalStock = m.stock + qty;
+    m.costPerUnit = newTotalStock>0 ? (existingValue + cost) / newTotalStock : cost/qty;
+    m.purchasePrice = cost; m.purchaseQty = qty;
+  }
   m.stock += qty;
-  if(cost && cost>0){ m.purchasePrice = cost; m.purchaseQty = qty; m.costPerUnit = cost/qty; }
   saveMaterials(); toast('Estoque atualizado'); closeModal(); renderContent();
 }
 function openProductionModal(productId, presetQty){
@@ -3059,12 +3154,14 @@ let editingPlatforms = [];
 let editingExpenses = [];
 let editingTaxes = [];
 let editingMachines = [];
+let editingReserveGoals = [];
 function openSettingsModal(){
   const s = state.settings;
   editingPlatforms = JSON.parse(JSON.stringify(s.platforms));
   editingExpenses = JSON.parse(JSON.stringify(s.expenses||[]));
   editingTaxes = JSON.parse(JSON.stringify(s.taxes||[]));
   editingMachines = JSON.parse(JSON.stringify(s.machines||[]));
+  editingReserveGoals = JSON.parse(JSON.stringify(s.reserveGoals||[]));
   showModal('Configurações de caixa', `
     <div class="section-title" style="margin-top:0;">Taxas por plataforma de venda</div>
     <div class="field hint" style="margin-top:-6px;margin-bottom:10px;">As plataformas mudam suas taxas de tempos em tempos — atualize aqui quando isso acontecer. Vendas já registradas não são recalculadas.</div>
@@ -3109,15 +3206,8 @@ function openSettingsModal(){
     <button class="btn ghost sm" onclick="addMachineRow()">+ Adicionar impressora</button>
     <div class="section-title" style="margin-top:16px;">Metas de reserva mensal</div>
     <div class="field hint" style="margin-top:-6px;margin-bottom:10px;">Defina a meta mensal de cada reserva e, se quiser, o % do lucro de cada venda que deve ir automaticamente pra lá. O que faltar pra bater a meta pode ser completado depois com "Fechar o mês" em Caixa.</div>
-    ${s.reserveGoals.map((g,i)=>`
-      <div class="row3" style="align-items:end;">
-        <div class="field"><label>${g.name}</label><input id="cfgGoal${i}" type="number" value="${g.goal}" step="0.01" placeholder="meta mensal R$"></div>
-        ${g.autoMode==='cost_depreciation'
-          ? `<div class="field" style="grid-column:span 2;"><label>Alocação automática</label><input value="Automático — via custo de depreciação de cada venda" disabled></div>`
-          : `<div class="field"><label>% do lucro por venda</label><input id="cfgGoalPct${i}" type="number" value="${g.autoPct||0}" step="1" placeholder="0"></div>
-             <div class="field hint" style="padding-bottom:9px;">Some ao saldo em tempo real; "Fechar o mês" completa o resto.</div>`}
-      </div>
-    `).join('')}
+    <div id="reserveRows"></div>
+    <button class="btn ghost sm" onclick="addReserveRow()">+ Adicionar reserva</button>
     <div class="modal-actions">
       <button class="btn ghost" onclick="closeModal()">Cancelar</button>
       <button class="btn primary" onclick="confirmSettings()">Salvar</button>
@@ -3127,6 +3217,34 @@ function openSettingsModal(){
   renderNameValueRows('expenseRows', editingExpenses, 'updateExpenseRow', 'removeExpenseRow');
   renderNameValueRows('taxRows', editingTaxes, 'updateTaxRow', 'removeTaxRow');
   renderMachineRows();
+  renderReserveRows();
+}
+function renderReserveRows(){
+  const el = document.getElementById('reserveRows');
+  if(!el) return;
+  el.innerHTML = editingReserveGoals.map((g,i)=>`
+    <div class="row3" style="align-items:end;">
+      <div class="field"><label>${i===0?'Nome':''}</label><input value="${g.name}" oninput="editingReserveGoals[${i}].name=this.value"></div>
+      <div class="field"><label>${i===0?'Meta mensal (R$)':''}</label><input type="number" value="${g.goal}" step="0.01" placeholder="meta mensal R$" oninput="editingReserveGoals[${i}].goal=parseFloat(this.value)||0"></div>
+      ${g.autoMode==='cost_depreciation'
+        ? `<div class="field"><label>${i===0?'Alocação automática':''}</label><input value="Automático — via custo de depreciação" disabled></div>`
+        : `<div class="field"><label>${i===0?'% do lucro por venda':''}</label><input type="number" value="${g.autoPct||0}" step="1" placeholder="0" oninput="editingReserveGoals[${i}].autoPct=Math.min(100,Math.max(0,parseFloat(this.value)||0))"></div>`}
+    </div>
+    <div style="display:flex;justify-content:flex-end;margin:-6px 0 10px;">
+      ${g.autoMode==='cost_depreciation' ? `<span class="field hint" style="margin:0;">Reserva fixa do sistema — não pode ser removida</span>` : `<button class="btn ghost sm" title="Remover" onclick="removeReserveRow(${i})">Remover reserva</button>`}
+    </div>
+  `).join('');
+}
+function addReserveRow(){
+  editingReserveGoals.push({ id:uid(), name:'Nova reserva', goal:0, balance:0, autoMode:'pct_profit', autoPct:0 });
+  renderReserveRows();
+}
+function removeReserveRow(i){
+  if(editingReserveGoals[i].autoMode==='cost_depreciation') return;
+  const removed = editingReserveGoals[i];
+  if(removed.balance>0 && !confirm(`"${removed.name}" tem ${brl(removed.balance)} guardado. Remover mesmo assim? Esse saldo deixa de aparecer em Caixa (não é devolvido a lugar nenhum).`)) return;
+  editingReserveGoals.splice(i,1);
+  renderReserveRows();
 }
 function renderMachineRows(){
   const el = document.getElementById('machineRows');
@@ -3155,6 +3273,50 @@ function renderMachineRows(){
       </div>
     </div>
   `).join('') : `<div class="empty" style="padding:14px;">Nenhuma impressora cadastrada</div>`;
+}
+function openMaintenanceModal(machineId){
+  const m = (state.settings.machines||[]).find(x=>x.id===machineId);
+  if(!m) return;
+  const log = (m.maintenanceLog||[]).slice().sort((a,b)=>b.date.localeCompare(a.date));
+  showModal(`Manutenção — ${m.name}`, `
+    <div class="row2">
+      <div class="field"><label>Data</label><input type="date" id="mtDate" value="${todayStr()}"></div>
+      <div class="field"><label>Custo (R$, opcional)</label><input type="number" id="mtCost" step="0.01" value="0"></div>
+    </div>
+    <div class="field"><label>O que foi feito</label><input id="mtNote" placeholder="Ex: troca de bico, nivelamento da mesa"></div>
+    <div class="modal-actions">
+      <button class="btn ghost" onclick="closeModal()">Cancelar</button>
+      <button class="btn primary" onclick="confirmMaintenance('${machineId}')">Registrar</button>
+    </div>
+    ${log.length ? `<div class="section-title" style="margin-top:18px;">Histórico</div>
+      <div class="tbl-wrap"><table><tbody>
+        ${log.map(entry=>`<tr>
+          <td class="num" style="white-space:nowrap;">${fmtDate(entry.date)}</td>
+          <td>${entry.note||'—'}</td>
+          <td class="right num">${entry.cost?brl(entry.cost):''}</td>
+          <td class="right"><button class="btn ghost sm" onclick="deleteMaintenanceEntry('${machineId}','${entry.id}')">×</button></td>
+        </tr>`).join('')}
+      </tbody></table></div>` : ''}
+  `);
+}
+function confirmMaintenance(machineId){
+  const m = (state.settings.machines||[]).find(x=>x.id===machineId);
+  if(!m) return;
+  const date = document.getElementById('mtDate').value || todayStr();
+  const cost = parseFloat(document.getElementById('mtCost').value)||0;
+  const note = document.getElementById('mtNote').value.trim();
+  if(!Array.isArray(m.maintenanceLog)) m.maintenanceLog = [];
+  m.maintenanceLog.push({ id:uid(), date, cost, note });
+  saveSettings();
+  toast('Manutenção registrada');
+  closeModal(); renderContent();
+}
+function deleteMaintenanceEntry(machineId, entryId){
+  const m = (state.settings.machines||[]).find(x=>x.id===machineId);
+  if(!m) return;
+  m.maintenanceLog = (m.maintenanceLog||[]).filter(e=>e.id!==entryId);
+  saveSettings();
+  openMaintenanceModal(machineId);
 }
 function addMachineRow(){
   editingMachines.push({ id:uid(), name:'Nova impressora', price:0, residual:0, lifeHours:5000, energyCostPerHour:0.0704, installmentValue:0, installmentsTotal:0, startMonth:currentMonth });
@@ -3242,13 +3404,7 @@ function confirmSettings(){
   s.monthlyGoal = parseFloat(document.getElementById('cfgMonthlyGoal').value)||0;
   s.printHoursPerDay = parseFloat(document.getElementById('cfgPrintHours').value)||16;
   s.machines = editingMachines.filter(m=>m.name && m.name.trim());
-  s.reserveGoals.forEach((g,i)=>{
-    g.goal = parseFloat(document.getElementById('cfgGoal'+i).value)||0;
-    if(g.autoMode==='pct_profit'){
-      const pctEl = document.getElementById('cfgGoalPct'+i);
-      if(pctEl) g.autoPct = Math.min(100, Math.max(0, parseFloat(pctEl.value)||0));
-    }
-  });
+  s.reserveGoals = editingReserveGoals.filter(g=>g.name && g.name.trim());
   saveSettings(); toast('Configurações salvas'); closeModal(); renderContent();
 }
 function openCloseMonthModal(){
@@ -3300,14 +3456,17 @@ function confirmReserve(id){
 
 /* ===================== MODAL ===================== */
 function showModal(title, bodyHtml){
-  document.getElementById('modalBody').innerHTML = `
+  const modal = document.getElementById('modalBody');
+  modal.innerHTML = `
     <div class="modal-head"><h3>${title}</h3><button class="modal-close" onclick="closeModal()">×</button></div>
     ${bodyHtml}
   `;
   document.getElementById('overlay').classList.add('show');
+  modal.focus();
 }
 function closeModal(){ document.getElementById('overlay').classList.remove('show'); }
 document.getElementById('overlay').addEventListener('click', (e)=>{ if(e.target.id==='overlay') closeModal(); });
+document.addEventListener('keydown', (e)=>{ if(e.key==='Escape' && document.getElementById('overlay').classList.contains('show')) closeModal(); });
 
 function openOnboardingModal(){
   showModal('Vamos configurar seu negócio', `
@@ -3500,6 +3659,29 @@ async function confirmReset(){
   render();
   toast('Backup automático baixado e dados apagados');
   openOnboardingModal();
+}
+
+function exportSalesExcel(){
+  if(typeof XLSX==='undefined'){ toast('Biblioteca de exportação não carregou — verifique sua conexão e tente de novo','err'); return; }
+  let list = state.sales.slice();
+  if(salesFilter.platform) list = list.filter(s=>s.platform===salesFilter.platform);
+  if(salesFilter.product) list = list.filter(s=>s.productId===salesFilter.product);
+  if(salesFilter.from) list = list.filter(s=>s.date>=salesFilter.from);
+  if(salesFilter.to) list = list.filter(s=>s.date<=salesFilter.to);
+  if(list.length===0){ toast('Nenhuma venda para exportar com esses filtros','err'); return; }
+  list.sort((a,b)=>a.date.localeCompare(b.date));
+  const rows = [['Data','Produto','Cliente','Plataforma','Qtd','Preço bruto','Taxa','Líquido','Custo Produção','Frete','Desconto cupom','Lucro','Rastreio']];
+  list.forEach(s=>{
+    const cuName = s.customerId ? ((state.customers.find(cu=>cu.id===s.customerId)||{}).name||'') : 'Avulso';
+    rows.push([s.date, s.productName, cuName, s.platform, s.qty, s.grossPrice, s.feeTotal, s.netReceipt, s.productionCost, s.shippingCost||0, s.couponDiscount||0, s.profit, s.trackingCode||'']);
+  });
+  const totals = list.reduce((a,s)=>({gross:a.gross+s.grossPrice,fee:a.fee+s.feeTotal,net:a.net+s.netReceipt,cost:a.cost+s.productionCost,shipping:a.shipping+(s.shippingCost||0),coupon:a.coupon+(s.couponDiscount||0),profit:a.profit+s.profit}),{gross:0,fee:0,net:0,cost:0,shipping:0,coupon:0,profit:0});
+  rows.push([]);
+  rows.push(['TOTAL', '', '', '', '', totals.gross, totals.fee, totals.net, totals.cost, totals.shipping, totals.coupon, totals.profit]);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), 'Vendas');
+  XLSX.writeFile(wb, `piece-of-geek-vendas-${todayStr()}.xlsx`);
+  toast('Vendas exportadas');
 }
 
 /* ===================== BACKUP (exportar / importar) ===================== */
