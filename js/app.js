@@ -2773,8 +2773,16 @@ function listingFieldSuggestions(platform, key, presets){
   return Array.from(new Set([...(presets||[]), ...fromHistory]));
 }
 let anunciosFilter = { search:'' };
+let anunciosView = 'lista';
 function renderAnuncios(){
   if(state.products.length===0) return `<div class="card">${emptyState('Cadastre um produto primeiro em Produtos')}</div>`;
+  const tabs = `<div class="tabbar">
+    <button class="tabbtn ${anunciosView==='lista'?'active':''}" onclick="anunciosView='lista'; renderContent();">Lista</button>
+    <button class="tabbtn ${anunciosView==='prontos'?'active':''}" onclick="anunciosView='prontos'; renderContent();">Anúncios prontos</button>
+  </div>`;
+  return tabs + (anunciosView==='prontos' ? renderAnunciosProntos() : renderAnunciosLista());
+}
+function renderAnunciosLista(){
   const q = anunciosFilter.search.toLowerCase();
   const list = q ? state.products.filter(p=>p.name.toLowerCase().includes(q)) : state.products;
   const searchBar = `<div class="filter-bar">
@@ -2796,6 +2804,27 @@ function renderAnuncios(){
     <thead><tr><th>Produto</th><th class="right">Preço</th><th>Status</th><th></th></tr></thead>
     <tbody>${rows}</tbody>
   </table></div></div>`;
+}
+function renderAnunciosProntos(){
+  const ready = state.products.map(p=>({p, l:listingFor(p.id)})).filter(({l})=>listingHasContent(l));
+  if(ready.length===0) return `<div class="card">${emptyState('Nenhum anúncio pronto ainda — crie um rascunho na aba Lista primeiro')}</div>`;
+  const cards = ready.map(({p,l})=>{
+    const titulo = l.ml.titulo || l.shopee.nome || p.name;
+    const preco = l.ml.preco || l.shopee.preco || num(calcProduct(p).practicedPrice,2);
+    const descricao = l.ml.descricao || l.shopee.descricao || '';
+    return `<div class="card" style="padding:0;overflow:hidden;display:flex;flex-direction:column;">
+      <div style="aspect-ratio:1/1;background:var(--panel-2);display:flex;align-items:center;justify-content:center;">
+        ${p.photo ? `<img src="${p.photo}" alt="${p.name}" style="width:100%;height:100%;object-fit:cover;">` : `<span style="color:var(--text-faint);font-size:11px;">Sem foto</span>`}
+      </div>
+      <div style="padding:14px 16px;display:flex;flex-direction:column;gap:6px;flex:1;">
+        <div style="font-family:var(--font-display);font-weight:600;font-size:14px;line-height:1.3;">${titulo}</div>
+        <div style="color:var(--nozzle);font-weight:700;font-family:var(--font-mono);font-size:15px;">R$ ${preco}</div>
+        ${descricao ? `<div style="font-size:12px;color:var(--text-dim);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;">${descricao}</div>` : ''}
+        <button class="btn ghost sm" style="margin-top:auto;" onclick="openListingModal('${p.id}')">Editar anúncio</button>
+      </div>
+    </div>`;
+  }).join('');
+  return `<div class="grid g-3">${cards}</div>`;
 }
 function renderListingField(platform, f, val){
   const id = `lst_${platform}_${f.key}`;
@@ -2831,6 +2860,10 @@ function openListingModal(id){
   const draft = { ml: mergeListingValues(auto.ml, existing && existing.ml), shopee: mergeListingValues(auto.shopee, existing && existing.shopee) };
   showModal(`Anúncio — ${p.name}`, `
     <div class="field hint" style="margin-top:-4px;margin-bottom:12px;">Campos iguais aos da planilha de exportação — preencha, salve o rascunho e exporte o Excel pra colar no formulário de cada marketplace.</div>
+    <div style="display:flex;gap:12px;align-items:center;margin-bottom:14px;">
+      ${p.photo ? `<img src="${p.photo}" alt="${p.name}" style="width:64px;height:64px;object-fit:cover;border-radius:8px;flex-shrink:0;">` : `<div style="width:64px;height:64px;border-radius:8px;background:var(--panel-2);flex-shrink:0;"></div>`}
+      <div class="field hint" style="margin:0;">${p.photo ? 'Foto puxada do cadastro em Produtos.' : 'Esse produto não tem foto cadastrada — adicione uma em Produtos → Editar pra ela aparecer aqui e nos anúncios prontos.'}</div>
+    </div>
     <div class="tabbar">
       <button type="button" class="tabbtn active" id="lstTabBtnMl" onclick="switchListingTab('ml')">Mercado Livre</button>
       <button type="button" class="tabbtn" id="lstTabBtnShopee" onclick="switchListingTab('shopee')">Shopee</button>
