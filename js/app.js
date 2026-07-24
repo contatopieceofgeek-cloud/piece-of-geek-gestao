@@ -1717,7 +1717,12 @@ async function exportCatalogImage(){
 
 /* ===================== FILA DE IMPRESSÃO ===================== */
 function printJobRecipe(prod){
-  return productRecipe(prod).filter(r=>r.materialName!==prod.boxType);
+  const bw = (bubbleWrapMaterial()||{}).name || 'Plástico Bolha';
+  return productRecipe(prod).filter(r=>r.materialName!==prod.boxType && r.materialName!==bw);
+}
+function packagingRecipe(prod){
+  const bw = (bubbleWrapMaterial()||{}).name || 'Plástico Bolha';
+  return productRecipe(prod).filter(r=>r.materialName===prod.boxType || r.materialName===bw);
 }
 function renderImpressao(){
   const thisMonth = todayStr().slice(0,7);
@@ -1772,7 +1777,7 @@ function openPrintJobModal(productId, presetQty, presetOutcome){
     </div>
     <div id="pjPctBlock" style="display:none;"><div class="field"><label>% concluído antes de falhar</label><input type="number" id="pjPct" value="100" min="1" max="100" oninput="updatePrintJobPreview()"></div></div>
     <div class="field"><label>Observações (opcional)</label><input id="pjNotes" placeholder="Ex: descolou da mesa, entupiu o bico..."></div>
-    <div class="field hint" style="margin-top:-8px;">A caixa/embalagem não é descontada aqui — só sai do estoque na hora da venda. Filamento e plástico bolha saem agora.</div>
+    <div class="field hint" style="margin-top:-8px;">Caixa e plástico bolha não são descontados aqui — só saem do estoque na hora da venda. Só o filamento sai agora.</div>
     <div class="helper-block" id="pjPreview"></div>
     <div class="modal-actions">
       <button class="btn ghost" onclick="closeModal()">Cancelar</button>
@@ -2116,8 +2121,10 @@ function deleteSale(id){
   const prod = state.products.find(p=>p.id===s.productId);
   if(prod){
     prod.stock += s.qty;
-    const boxMat = materialByName(prod.boxType);
-    if(boxMat) boxMat.stock += s.qty;
+    packagingRecipe(prod).forEach(r=>{
+      const mat = materialByName(r.materialName);
+      if(mat) mat.stock += r.qty * s.qty;
+    });
   }
   const touchedReserves = reverseSaleReserveAllocations(s);
   if(linkedOrder) linkedOrder.status = 'Pronto para envio';
@@ -2347,8 +2354,10 @@ function confirmSale(){
       reserveAllocations:allocations, machineId: calc.machine?calc.machine.id:null, hoursUsed:(prod.timeH||0)*item.qty, customerId, trackingCode, linkedOrderId,
     });
     prod.stock -= item.qty;
-    const boxMat = materialByName(prod.boxType);
-    if(boxMat){ boxMat.stock -= item.qty; if(boxMat.stock<0) boxNegativeWarn = true; }
+    packagingRecipe(prod).forEach(r=>{
+      const mat = materialByName(r.materialName);
+      if(mat){ mat.stock -= r.qty*item.qty; if(mat.stock<0) boxNegativeWarn = true; }
+    });
     applySaleReserveAllocations(allocations);
     if(Object.keys(allocations).length){ settingsTouched = true; totalAllocated += Object.values(allocations).reduce((a,v)=>a+v,0); }
     if(linkedOrderId){
