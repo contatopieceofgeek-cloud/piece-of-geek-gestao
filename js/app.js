@@ -2644,7 +2644,7 @@ function renderProdutos(){
       <td class="right num" data-label="Preço praticado">${brl(c.practicedPrice)}</td>
       <td class="right num" data-label="Margem" style="color:${c.marginValue<0?'var(--red)':'var(--green)'}">${pct(c.marginPct)}</td>
       <td class="right num" data-label="Estoque">${p.stock<=0?`<span class="badge mut">0</span>`:num(p.stock,0)}</td>
-      <td class="right"><button class="btn ghost sm" onclick="openProductModal('${p.id}')">Editar</button> <button class="btn ghost sm" onclick="duplicateProduct('${p.id}')">Duplicar</button> <button class="btn ghost sm" onclick="deleteProduct('${p.id}')">Excluir</button></td>
+      <td class="right"><button class="btn ghost sm" onclick="openProductModal('${p.id}')">Editar</button> <button class="btn ghost sm" onclick="duplicateProduct('${p.id}')">Duplicar</button> <button class="btn ghost sm" onclick="openListingModal('${p.id}')">Gerar anúncio (IA)</button> <button class="btn ghost sm" onclick="deleteProduct('${p.id}')">Excluir</button></td>
     </tr>`;
   }).join('');
   return `
@@ -2687,6 +2687,57 @@ function duplicateProduct(id){
   saveProducts();
   toast('Produto duplicado — ajuste o que for diferente');
   openProductModal(copy.id);
+}
+async function openListingModal(id){
+  const p = state.products.find(x=>x.id===id);
+  if(!p) return;
+  if(!syncStatus.configured || !syncStatus.email){
+    toast('Configure a sincronização com Supabase primeiro (menu lateral → Sincronizar entre dispositivos) — a geração por IA roda numa Edge Function que exige login.','err');
+    return;
+  }
+  showModal(`Gerar anúncio (IA) — ${p.name}`, `
+    <div class="field hint" style="margin-top:-4px;margin-bottom:12px;">Gerado por IA a partir dos dados já cadastrados. Confira antes de publicar — a IA pode errar ou generalizar demais.</div>
+    <div id="listingResult"><div class="helper-block">Gerando com o Gemini...</div></div>
+    <div class="modal-actions">
+      <button class="btn ghost" onclick="closeModal()">Fechar</button>
+      <button class="btn primary" onclick="openListingModal('${id}')">Gerar de novo</button>
+    </div>
+  `);
+  try{
+    const client = initSupabase();
+    if(!client) throw new Error('Supabase não inicializado');
+    const { data, error } = await client.functions.invoke('generate-listing', {
+      body: {
+        productName: p.name,
+        filaments: p.filaments,
+        boxType: p.boxType,
+        practicedPrice: calcProduct(p).practicedPrice,
+        weightTotal: totalWeight(p),
+        timeH: p.timeH,
+        kitComponents: p.kitComponents,
+      },
+    });
+    if(error) throw error;
+    if(data && data.error) throw new Error(data.error);
+    const el = document.getElementById('listingResult');
+    if(!el) return; // usuário já fechou ou pediu outra geração antes desta terminar
+    el.innerHTML = `
+      <div class="field"><label>Título — Mercado Livre</label><textarea id="lstTitleMl" rows="2">${data.titulo_ml||''}</textarea></div>
+      <button class="btn ghost sm" style="margin:-8px 0 12px;" onclick="copyListingField('lstTitleMl')">Copiar título ML</button>
+      <div class="field"><label>Título — Shopee</label><textarea id="lstTitleShopee" rows="2">${data.titulo_shopee||''}</textarea></div>
+      <button class="btn ghost sm" style="margin:-8px 0 12px;" onclick="copyListingField('lstTitleShopee')">Copiar título Shopee</button>
+      <div class="field"><label>Descrição</label><textarea id="lstDesc" rows="8">${data.descricao||''}</textarea></div>
+      <button class="btn ghost sm" style="margin-top:-8px;" onclick="copyListingField('lstDesc')">Copiar descrição</button>
+    `;
+  }catch(e){
+    const el = document.getElementById('listingResult');
+    if(el) el.innerHTML = `<div class="field hint" style="color:var(--red);">Erro ao gerar: ${e.message||e}</div>`;
+  }
+}
+function copyListingField(fieldId){
+  const el = document.getElementById(fieldId);
+  if(!el) return;
+  navigator.clipboard.writeText(el.value).then(()=>toast('Copiado')).catch(()=>toast('Não consegui copiar — selecione o texto manualmente','err'));
 }
 function deleteProduct(id){
   const p = state.products.find(x=>x.id===id);
