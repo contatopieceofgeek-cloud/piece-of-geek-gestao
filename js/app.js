@@ -601,9 +601,24 @@ function render(){
   renderTopbarActions();
   renderContent();
 }
+const NAV_ICON_PATHS = {
+  dashboard: '<rect x="2.5" y="2.5" width="6" height="6" rx="1.3"></rect><rect x="11.5" y="2.5" width="6" height="6" rx="1.3"></rect><rect x="2.5" y="11.5" width="6" height="6" rx="1.3"></rect><rect x="11.5" y="11.5" width="6" height="6" rx="1.3"></rect>',
+  pedidos: '<rect x="4" y="3.5" width="12" height="14" rx="2"></rect><path d="M7.5 3.5V2.8a1.3 1.3 0 0 1 1.3-1.3h2.4A1.3 1.3 0 0 1 12.5 2.8v.7"></path><line x1="7" y1="8.5" x2="13" y2="8.5"></line><line x1="7" y1="11.5" x2="13" y2="11.5"></line><line x1="7" y1="14.5" x2="10.5" y2="14.5"></line>',
+  impressao: '<path d="M6 7.5V3h8v4.5"></path><rect x="3" y="7.5" width="14" height="6.5" rx="1.5"></rect><rect x="6" y="11.5" width="8" height="5.5" rx="1"></rect>',
+  vendas: '<polyline points="3,13 8,8 11.5,11.5 17,5"></polyline><polyline points="12.5,5 17,5 17,9.5"></polyline>',
+  clientes: '<circle cx="7" cy="6.5" r="2.7"></circle><path d="M2 17c0-3 2.2-5 5-5s5 2 5 5"></path><circle cx="14.3" cy="7.5" r="2.1"></circle><path d="M13 12.4c2.2.3 3.8 2.1 3.8 4.6"></path>',
+  produtos: '<path d="M10 2.5l7 4v7l-7 4-7-4v-7z"></path><polyline points="3,6.5 10,10.5 17,6.5"></polyline><line x1="10" y1="10.5" x2="10" y2="17.5"></line>',
+  estoque: '<rect x="2.5" y="3" width="15" height="4" rx="1"></rect><path d="M3.5 7v7a1.5 1.5 0 0 0 1.5 1.5h10a1.5 1.5 0 0 0 1.5-1.5V7"></path><line x1="8" y1="10.5" x2="12" y2="10.5"></line>',
+  calculo: '<rect x="4" y="2.5" width="12" height="15" rx="2"></rect><rect x="6" y="4.5" width="8" height="3" rx="0.5"></rect><line x1="6.5" y1="11" x2="9" y2="11"></line><line x1="11" y1="11" x2="13.5" y2="11"></line><line x1="6.5" y1="14" x2="9" y2="14"></line><line x1="11" y1="14" x2="13.5" y2="14"></line>',
+  caixa: '<rect x="2.5" y="5.5" width="15" height="10.5" rx="2"></rect><path d="M13.5 5.5V4A1.5 1.5 0 0 0 12 2.5H6A1.5 1.5 0 0 0 4.5 4v1.5"></path><circle cx="14" cy="11" r="1.1" fill="currentColor" stroke="none"></circle>',
+  anual: '<rect x="3" y="4" width="14" height="13" rx="2"></rect><line x1="3" y1="8" x2="17" y2="8"></line><line x1="6.5" y1="2.5" x2="6.5" y2="5.5"></line><line x1="13.5" y1="2.5" x2="13.5" y2="5.5"></line><circle cx="7" cy="11.7" r="0.9" fill="currentColor" stroke="none"></circle><circle cx="10" cy="11.7" r="0.9" fill="currentColor" stroke="none"></circle><circle cx="13" cy="11.7" r="0.9" fill="currentColor" stroke="none"></circle>',
+};
+function navIcon(key){
+  return `<svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${NAV_ICON_PATHS[key]||''}</svg>`;
+}
 function navItem(key,label,badge){
   const badgeHtml = badge ? `<span class="nav-badge" title="${badge==='!'?'DAS vencendo/atrasado':'Itens com estoque baixo'}">${badge}</span>` : '';
-  return `<div class="nav-item ${currentTab===key?'active':''}" onclick="switchTab('${key}')"><span class="nav-dot"></span>${label}${badgeHtml}</div>`;
+  return `<div class="nav-item ${currentTab===key?'active':''}" onclick="switchTab('${key}')">${navIcon(key)}${label}${badgeHtml}</div>`;
 }
 function dasIsUrgent(){
   if(!state.settings.dasEnabled) return false;
