@@ -2875,7 +2875,7 @@ function openListingModal(id){
       <div style="display:flex;gap:10px;flex-wrap:wrap;">
         <button class="btn ghost" onclick="closeModal()">Fechar</button>
         <button class="btn ghost" onclick="exportListingXlsx('${id}')">Exportar Excel</button>
-        <button class="btn primary" onclick="saveListingDraft('${id}')">Salvar rascunho</button>
+        <button class="btn primary" onclick="saveListingDraft('${id}')">Salvar</button>
       </div>
     </div>
   `);
