@@ -916,12 +916,12 @@ function renderQuoteFilamentRows(){
   if(!el) return;
   const filamentOptions = state.materials.filter(m=>m.category==='Filamento');
   el.innerHTML = quoteFilaments.map((f,i)=>`
-    <div style="display:grid;grid-template-columns:1.6fr 1fr auto;gap:8px;align-items:center;margin-bottom:8px;">
-      <select onchange="quoteFilaments[${i}].materialName=this.value; updateQuickQuotePreview();">
+    <div style="display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr) 28px;gap:8px;align-items:center;margin-bottom:8px;">
+      <select style="min-width:0;" onchange="quoteFilaments[${i}].materialName=this.value; updateQuickQuotePreview();">
         ${filamentOptions.map(fo=>`<option value="${fo.name}" ${f.materialName===fo.name?'selected':''}>${fo.name}</option>`).join('')}
       </select>
-      <input type="number" step="0.01" value="${f.weightG}" placeholder="peso (g)" oninput="quoteFilaments[${i}].weightG=parseFloat(this.value)||0; updateQuickQuotePreview();">
-      <button class="btn ghost sm" title="Remover" onclick="removeQuoteFilamentRow(${i})">×</button>
+      <input type="number" step="0.01" value="${f.weightG}" placeholder="peso (g)" style="min-width:0;" oninput="quoteFilaments[${i}].weightG=parseFloat(this.value)||0; updateQuickQuotePreview();">
+      <button class="btn ghost sm" title="Remover" style="padding:6px 8px;" onclick="removeQuoteFilamentRow(${i})">×</button>
     </div>
   `).join('');
 }
@@ -2115,13 +2115,13 @@ function renderCartItemsList(){
   if(!el) return;
   el.innerHTML = cartItems.map(item=>{
     const prod = state.products.find(p=>p.id===item.productId);
-    return `<div style="display:grid;grid-template-columns:2fr 64px 100px auto;gap:8px;align-items:center;margin-bottom:8px;">
-      <select onchange="updateCartItem('${item.rowId}','productId',this.value)">
+    return `<div style="display:grid;grid-template-columns:minmax(0,1fr) 52px 76px 28px;gap:6px;align-items:center;margin-bottom:8px;">
+      <select style="min-width:0;" onchange="updateCartItem('${item.rowId}','productId',this.value)">
         ${state.products.map(p=>`<option value="${p.id}" ${p.id===item.productId?'selected':''}>${p.name}</option>`).join('')}
       </select>
-      <input type="number" min="1" value="${item.qty}" title="Quantidade" oninput="updateCartItem('${item.rowId}','qty',this.value)">
-      <input type="number" step="0.01" value="${item.unitPrice.toFixed(2)}" title="Preço unitário" oninput="updateCartItem('${item.rowId}','unitPrice',this.value)">
-      <button class="btn ghost sm" title="Remover item" onclick="removeCartItem('${item.rowId}')">×</button>
+      <input type="number" min="1" value="${item.qty}" title="Quantidade" style="min-width:0;padding:8px 4px;" oninput="updateCartItem('${item.rowId}','qty',this.value)">
+      <input type="number" step="0.01" value="${item.unitPrice.toFixed(2)}" title="Preço unitário" style="min-width:0;padding:8px 4px;" oninput="updateCartItem('${item.rowId}','unitPrice',this.value)">
+      <button class="btn ghost sm" title="Remover item" style="padding:6px 8px;" onclick="removeCartItem('${item.rowId}')">×</button>
     </div>`;
   }).join('');
 }
@@ -2693,12 +2693,12 @@ function renderFilamentRows(){
   if(!el) return;
   const filamentOptions = state.materials.filter(m=>m.category==='Filamento');
   el.innerHTML = editingFilaments.map((f,i)=>`
-    <div style="display:grid;grid-template-columns:1.6fr 1fr auto;gap:8px;align-items:center;margin-bottom:8px;">
-      <select onchange="editingFilaments[${i}].materialName=this.value; updateProductPreview();">
+    <div style="display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr) 28px;gap:8px;align-items:center;margin-bottom:8px;">
+      <select style="min-width:0;" onchange="editingFilaments[${i}].materialName=this.value; updateProductPreview();">
         ${filamentOptions.map(fo=>`<option value="${fo.name}" ${f.materialName===fo.name?'selected':''}>${fo.name}</option>`).join('')}
       </select>
-      <input type="number" step="0.01" value="${f.weightG}" placeholder="peso (g)" oninput="editingFilaments[${i}].weightG=parseFloat(this.value)||0; updateProductPreview();">
-      <button class="btn ghost sm" title="Remover" onclick="removeFilamentRow(${i})">×</button>
+      <input type="number" step="0.01" value="${f.weightG}" placeholder="peso (g)" style="min-width:0;" oninput="editingFilaments[${i}].weightG=parseFloat(this.value)||0; updateProductPreview();">
+      <button class="btn ghost sm" title="Remover" style="padding:6px 8px;" onclick="removeFilamentRow(${i})">×</button>
     </div>
   `).join('');
 }
@@ -3330,10 +3330,10 @@ function renderNameValueRows(containerId, list, updateFn, removeFn){
   const el = document.getElementById(containerId);
   if(!el) return;
   el.innerHTML = list.length ? list.map((item,i)=>`
-    <div style="display:grid;grid-template-columns:2fr 1fr auto;gap:8px;align-items:center;margin-bottom:8px;">
-      <input value="${item.name}" placeholder="Nome" oninput="${updateFn}(${i},'name',this.value)">
-      <input type="number" step="0.01" value="${item.value}" placeholder="R$" oninput="${updateFn}(${i},'value',this.value)">
-      <button class="btn ghost sm" title="Remover" onclick="${removeFn}(${i})">×</button>
+    <div style="display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) 28px;gap:8px;align-items:center;margin-bottom:8px;">
+      <input value="${item.name}" placeholder="Nome" style="min-width:0;" oninput="${updateFn}(${i},'name',this.value)">
+      <input type="number" step="0.01" value="${item.value}" placeholder="R$" style="min-width:0;" oninput="${updateFn}(${i},'value',this.value)">
+      <button class="btn ghost sm" title="Remover" style="padding:6px 8px;" onclick="${removeFn}(${i})">×</button>
     </div>
   `).join('') : `<div class="empty" style="padding:10px;">Nenhum item ainda</div>`;
 }
@@ -3365,11 +3365,11 @@ function renderPlatformRows(){
     const isML = /mercado\s*livre/i.test(p.name);
     const isShopee = /shopee/i.test(p.name) && p.tiers;
     return `
-    <div style="display:grid;grid-template-columns:1.6fr 1fr 1fr auto;gap:8px;align-items:end;margin-bottom:${isML||isShopee?4:8}px;">
-      <div class="field" style="margin-bottom:0;">${i===0?'<label>Plataforma</label>':''}<input value="${p.name}" oninput="editingPlatforms[${i}].name=this.value"></div>
-      <div class="field" style="margin-bottom:0;">${i===0?'<label>Taxa %</label>':''}<input type="number" step="0.01" value="${p.pct}" oninput="editingPlatforms[${i}].pct=parseFloat(this.value)||0"></div>
-      <div class="field" style="margin-bottom:0;">${i===0?'<label>Taxa fixa R$</label>':''}<input type="number" step="0.01" value="${p.fixed}" oninput="editingPlatforms[${i}].fixed=parseFloat(this.value)||0"></div>
-      <button class="btn ghost sm" title="Remover" onclick="removePlatformRow(${i})">×</button>
+    <div style="display:grid;grid-template-columns:minmax(0,2.2fr) minmax(0,0.8fr) minmax(0,0.8fr) 28px;gap:8px;align-items:end;margin-bottom:${isML||isShopee?4:8}px;">
+      <div class="field" style="margin-bottom:0;min-width:0;">${i===0?'<label>Plataforma</label>':''}<input value="${p.name}" style="min-width:0;" oninput="editingPlatforms[${i}].name=this.value"></div>
+      <div class="field" style="margin-bottom:0;min-width:0;">${i===0?'<label>Taxa %</label>':''}<input type="number" step="0.01" value="${p.pct}" style="min-width:0;" oninput="editingPlatforms[${i}].pct=parseFloat(this.value)||0"></div>
+      <div class="field" style="margin-bottom:0;min-width:0;">${i===0?'<label>Taxa fixa R$</label>':''}<input type="number" step="0.01" value="${p.fixed}" style="min-width:0;" oninput="editingPlatforms[${i}].fixed=parseFloat(this.value)||0"></div>
+      <button class="btn ghost sm" title="Remover" style="padding:6px 8px;" onclick="removePlatformRow(${i})">×</button>
     </div>
     ${isML ? `<div style="margin:0 0 12px;display:flex;flex-wrap:wrap;gap:6px;">
         ${ML_CATEGORY_PRESETS.map(pr=>`<button type="button" class="chip" style="cursor:pointer;border:none;" onclick="applyMlPreset(${i},${pr.pct})">${pr.label} (${pr.pct}%)</button>`).join('')}
