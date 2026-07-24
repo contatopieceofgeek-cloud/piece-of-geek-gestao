@@ -2824,7 +2824,7 @@ function renderAnunciosProntos(){
       </div>
     </div>`;
   }).join('');
-  return `<div class="grid g-3">${cards}</div>`;
+  return `<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(190px,1fr));">${cards}</div>`;
 }
 function renderListingField(platform, f, val){
   const id = `lst_${platform}_${f.key}`;
