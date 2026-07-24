@@ -1,0 +1,9 @@
+{
+  "name": "piece-of-geek-gestao",
+  "version": "1.0.0",
+  "description": "App de gestão para negócio de impressão 3D (MEI) — precificação, estoque, pedidos, vendas, caixa.",
+  "private": true,
+  "scripts": {
+    "dev": "python3 -m http.server 8000"
+  }
+}

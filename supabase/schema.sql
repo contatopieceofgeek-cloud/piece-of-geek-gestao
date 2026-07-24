@@ -1,0 +1,33 @@
+-- Schema usado pela sincronização multi-dispositivo do Piece of Geek 3D.
+-- Rodar no SQL Editor de um projeto Supabase (novo ou existente).
+--
+-- O app guarda cada domínio de dado (materials, products, sales, orders,
+-- customers, printFailures, settings) como uma linha JSON separada,
+-- chaveada por usuário + nome da chave. Não é um schema relacional —
+-- é deliberadamente simples pra espelhar exatamente o que já existia
+-- em localStorage/IndexedDB, sem precisar reescrever toda a camada
+-- de persistência do app.
+
+create table app_data (
+  user_id uuid references auth.users not null,
+  key text not null,
+  value text not null,
+  updated_at timestamptz default now(),
+  primary key (user_id, key)
+);
+
+alter table app_data enable row level security;
+
+create policy "own data" on app_data for all
+  using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+-- Chaves usadas pelo app: 'materials', 'products', 'sales', 'orders',
+-- 'customers', 'printFailures', 'settings'.
+--
+-- Autenticação: email/senha simples via Supabase Auth (auth.users nativo,
+-- sem tabela própria de perfil).
+--
+-- Se for evoluir pra um schema relacional de verdade (tabelas próprias
+-- por domínio, em vez de blobs JSON), isso é uma migração de dados real,
+-- não só de schema — pensar em como migrar o JSON existente de cada
+-- usuário antes de trocar a estrutura.
