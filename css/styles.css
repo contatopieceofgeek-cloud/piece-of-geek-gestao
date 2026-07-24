@@ -266,9 +266,11 @@ tbody tr:hover{background:rgba(0,0,0,0.025);}
   .kpi{background:#fff;border:1px solid #ccc;}
   .kpi-value, .card-title, .section-title{color:#111;}
   canvas{max-width:100%;}
-  body.printing-catalog .sidebar, body.printing-catalog .main{display:none!important;}
+  body.printing-catalog #app{display:none!important;}
   body.printing-catalog #catalogPrintArea{display:block!important;}
+  @page{ margin:0; }
 }
 #catalogPrintArea{display:none;}
-.catalog-page{page-break-after:always;padding:50px 44px;box-sizing:border-box;min-height:100vh;font-family:Arial,sans-serif;color:#111;background:#fff;}
+.catalog-summary{padding:50px 44px;box-sizing:border-box;width:210mm;font-family:Arial,sans-serif;color:#111;background:#fff;page-break-after:always;}
+.catalog-page{page-break-after:always;padding:50px 44px;box-sizing:border-box;width:210mm;height:297mm;font-family:Arial,sans-serif;color:#111;background:#fff;}
 .catalog-page:last-child{page-break-after:auto;}

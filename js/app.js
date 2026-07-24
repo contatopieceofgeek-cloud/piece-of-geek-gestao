@@ -134,6 +134,13 @@ function migrateProducts(products){
   });
   return products;
 }
+function migratePrintFailures(list){
+  list.forEach(f=>{
+    if(!f.outcome) f.outcome = 'failure';
+    if(f.qty==null) f.qty = 1;
+  });
+  return list;
+}
 function migrateSettings(settings){
   if(Array.isArray(settings.platforms)){
     const shopee = settings.platforms.find(p=>p.name==='Shopee');
@@ -341,7 +348,7 @@ async function loadState(){
       state.sales = s ? JSON.parse(s) : [];
       state.orders = o ? JSON.parse(o) : [];
       state.customers = cu ? JSON.parse(cu) : [];
-      state.printFailures = pf ? JSON.parse(pf) : [];
+      state.printFailures = pf ? migratePrintFailures(JSON.parse(pf)) : [];
       const parsedSettings = c ? migrateSettings(JSON.parse(c)) : null;
       state.settings = parsedSettings ? Object.assign({}, seed.settings, parsedSettings) : seed.settings;
       if(!state.settings.platforms || !state.settings.platforms.length) state.settings.platforms = seed.settings.platforms;
@@ -554,6 +561,7 @@ function render(){
       <div class="nav">
         ${navItem('dashboard','Dashboard')}
         ${navItem('pedidos','Pedidos')}
+        ${navItem('impressao','Fila de Impressão')}
         ${navItem('vendas','Vendas')}
         ${navItem('clientes','Clientes')}
         ${navItem('produtos','Produtos')}
@@ -612,12 +620,13 @@ function closeSidebar(){
 }
 function switchTab(t){ currentTab=t; closeSidebar(); render(); }
 function tabTitle(){
-  return {dashboard:'Dashboard',pedidos:'Pedidos',vendas:'Vendas',clientes:'Clientes',produtos:'Produtos',estoque:'Estoque',calculo:'Cálculo',caixa:'Caixa',anual:'Anual'}[currentTab];
+  return {dashboard:'Dashboard',pedidos:'Pedidos',impressao:'Fila de Impressão',vendas:'Vendas',clientes:'Clientes',produtos:'Produtos',estoque:'Estoque',calculo:'Cálculo',caixa:'Caixa',anual:'Anual'}[currentTab];
 }
 function tabSubtitle(){
   return {
     dashboard:'Visão geral do seu negócio de impressão 3D',
     pedidos:'Fila de encomendas, da fila de impressão até o envio',
+    impressao:'Todas as impressões — sucesso, teste ou falha',
     vendas:'Registro diário de vendas e recebimentos',
     clientes:'Quem compra de você, e quanto',
     produtos:'Calculadora de precificação e catálogo',
@@ -633,7 +642,8 @@ function renderTopbarActions(){
   else if(currentTab==='vendas') el.innerHTML = `<button class="btn ghost" onclick="openSettingsModal()">Taxas das plataformas</button> <button class="btn ghost" onclick="openKitModal()">Criar kit</button> <button class="btn ghost" onclick="exportSalesExcel()">Exportar</button> <button class="btn primary" onclick="openSaleModal()">+ Nova venda</button>`;
   else if(currentTab==='clientes') el.innerHTML = `<button class="btn ghost" onclick="exportCustomersExcel()">Exportar</button> <button class="btn primary" onclick="openCustomerModal()">+ Novo cliente</button>`;
   else if(currentTab==='produtos') el.innerHTML = `<button class="btn ghost" onclick="openQuickQuoteModal()">Orçamento rápido</button> <button class="btn ghost" onclick="exportCatalogImage()">Catálogo (imagem)</button> <button class="btn ghost" onclick="exportCatalogPDF()">Catálogo (PDF, 1 pág./produto)</button> <button class="btn primary" onclick="openProductModal()">+ Novo produto</button>`;
-  else if(currentTab==='estoque') el.innerHTML = stockTab==='materiais' ? `<button class="btn primary" onclick="openMaterialModal()">+ Nova matéria-prima</button>` : `<button class="btn primary" onclick="openProductionModal()">+ Registrar produção</button>`;
+  else if(currentTab==='estoque') el.innerHTML = stockTab==='materiais' ? `<button class="btn primary" onclick="openMaterialModal()">+ Nova matéria-prima</button>` : `<button class="btn primary" onclick="switchTab('impressao')">Ir pra Fila de Impressão</button>`;
+  else if(currentTab==='impressao') el.innerHTML = `<button class="btn primary" onclick="openPrintJobModal()">+ Nova impressão</button>`;
   else if(currentTab==='calculo') el.innerHTML = `<button class="btn primary" onclick="openSettingsModal()">Gerenciar impressoras</button>`;
   else if(currentTab==='anual') el.innerHTML = `<button class="btn ghost" onclick="exportAnnualExcel()">Exportar Excel</button> <button class="btn ghost" onclick="window.print()">Exportar PDF</button> <button class="btn primary" onclick="openInvestmentModal()">+ Adicionar investimento</button>`;
   else el.innerHTML = '';
@@ -642,6 +652,7 @@ function renderContent(){
   const c = document.getElementById('content');
   if(currentTab==='dashboard') c.innerHTML = renderDashboard();
   else if(currentTab==='pedidos') c.innerHTML = renderPedidos();
+  else if(currentTab==='impressao') c.innerHTML = renderImpressao();
   else if(currentTab==='vendas') c.innerHTML = renderVendas();
   else if(currentTab==='clientes') c.innerHTML = renderClientes();
   else if(currentTab==='produtos') c.innerHTML = renderProdutos();
@@ -1138,7 +1149,7 @@ function orderCard(o){
       ${ORDER_STATUSES.map(s=>`<option value="${s}" ${s===o.status?'selected':''}>${s}</option>`).join('')}
     </select>
     <div style="display:flex;gap:6px;margin-top:8px;">
-      ${o.status!=='Enviado' ? `<button class="btn sm" style="flex:1;" onclick="openProductionModal('${o.productId}', ${o.qty})">Produzir</button>` : ''}
+      ${o.status!=='Enviado' ? `<button class="btn sm" style="flex:1;" onclick="openPrintJobModal('${o.productId}', ${o.qty})">Produzir</button>` : ''}
       ${(o.status==='Pronto para envio'||o.status==='Enviado') ? `<button class="btn sm primary" style="flex:1;" onclick="openSaleModal('${o.productId}', ${o.qty}, '${o.id}')">Vender</button>` : ''}
     </div>
     ${prod && prod.stock < o.qty && o.status!=='Enviado' ? `<div style="font-size:11px;color:var(--amber);margin-top:6px;">Estoque atual: ${num(prod.stock,0)} — falta produzir ${num(o.qty-prod.stock,0)}</div>` : ''}
@@ -1541,26 +1552,26 @@ function printSaleReceipt(saleId){
   const lines = s.groupId ? state.sales.filter(x=>x.groupId===s.groupId) : [s];
   const cuName = s.customerId ? ((state.customers.find(cu=>cu.id===s.customerId)||{}).name || 'Cliente avulso') : 'Cliente avulso';
   const total = lines.reduce((a,l)=>a+l.grossPrice,0);
-  const rows = lines.map(l=>`<tr><td style="padding:8px 0;">${l.productName}</td><td style="text-align:center;">${l.qty}</td><td style="text-align:right;">${brl(l.grossPrice/l.qty)}</td><td style="text-align:right;">${brl(l.grossPrice)}</td></tr>`).join('');
+  const rows = lines.map((l,i)=>`<tr style="${i%2===0?'background:#F6F7F9;':''}"><td style="padding:8px 10px;">${l.productName}</td><td style="text-align:center;padding:8px 10px;">${l.qty}</td><td style="text-align:right;padding:8px 10px;">${brl(l.grossPrice/l.qty)}</td><td style="text-align:right;padding:8px 10px;">${brl(l.grossPrice)}</td></tr>`).join('');
   printHTML(`
-    <div class="catalog-page" style="min-height:auto;padding:50px;max-width:480px;margin:0 auto;">
+    <div class="catalog-summary" style="max-width:480px;margin:0 auto;">
       <div style="text-align:center;margin-bottom:24px;">
-        <h1 style="font-size:22px;margin:0 0 4px;">Piece of Geek 3D</h1>
-        <div style="color:#666;font-size:12.5px;">Recibo de venda</div>
+        <h1 style="font-size:22px;margin:0 0 4px;color:#BD4119;">Piece of Geek 3D</h1>
+        <div style="color:#5D6270;font-size:12.5px;">Recibo de venda</div>
       </div>
-      <div style="border-top:1px solid #ddd;border-bottom:1px solid #ddd;padding:14px 0;margin-bottom:18px;font-size:13px;">
-        <div style="display:flex;justify-content:space-between;padding:3px 0;"><span>Data</span><span>${fmtDate(s.date)}</span></div>
-        <div style="display:flex;justify-content:space-between;padding:3px 0;"><span>Cliente</span><span>${cuName}</span></div>
-        <div style="display:flex;justify-content:space-between;padding:3px 0;"><span>Forma</span><span>${s.platform}</span></div>
+      <div style="border-top:1px solid #E2E4E9;border-bottom:1px solid #E2E4E9;padding:14px 0;margin-bottom:18px;font-size:13px;color:#1A1D23;">
+        <div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:#5D6270;">Data</span><span>${fmtDate(s.date)}</span></div>
+        <div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:#5D6270;">Cliente</span><span>${cuName}</span></div>
+        <div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:#5D6270;">Forma</span><span>${s.platform}</span></div>
       </div>
-      <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:18px;">
-        <thead><tr style="border-bottom:1px solid #ddd;"><th style="text-align:left;padding:6px 0;">Produto</th><th style="text-align:center;padding:6px 0;">Qtd</th><th style="text-align:right;padding:6px 0;">Valor unit.</th><th style="text-align:right;padding:6px 0;">Subtotal</th></tr></thead>
+      <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:18px;color:#1A1D23;">
+        <thead><tr style="border-bottom:1px solid #E2E4E9;color:#5D6270;"><th style="text-align:left;padding:6px 10px;">Produto</th><th style="text-align:center;padding:6px 10px;">Qtd</th><th style="text-align:right;padding:6px 10px;">Valor unit.</th><th style="text-align:right;padding:6px 10px;">Subtotal</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
-      <div style="display:flex;justify-content:space-between;font-size:18px;font-weight:bold;border-top:2px solid #111;padding-top:12px;">
-        <span>Total</span><span>${brl(total)}</span>
+      <div style="display:flex;justify-content:space-between;font-size:18px;font-weight:bold;border-top:2px solid #1A1D23;padding-top:12px;color:#0B7A6B;">
+        <span style="color:#1A1D23;">Total</span><span>${brl(total)}</span>
       </div>
-      <div style="text-align:center;color:#888;font-size:12px;margin-top:30px;">Obrigado pela preferência!</div>
+      <div style="text-align:center;color:#5D6270;font-size:12px;margin-top:30px;">Obrigado pela preferência!</div>
     </div>
   `);
 }
@@ -1568,12 +1579,12 @@ function exportCatalogPDF(){
   if(state.products.length===0){ toast('Cadastre produtos antes de exportar o catálogo','err'); return; }
   const items = state.products.slice().sort((a,b)=>a.name.localeCompare(b.name));
 
-  const summaryRows = items.map(p=>{
+  const summaryRows = items.map((p,i)=>{
     const price = calcProduct(p).practicedPrice;
-    return `<div style="display:flex;align-items:center;gap:14px;padding:10px 0;border-bottom:1px solid #e2e2e2;">
+    return `<div style="display:flex;align-items:center;gap:14px;padding:10px 12px;page-break-inside:avoid;${i%2===0?'background:#F6F7F9;':''}border-radius:8px;">
       ${p.photo ? `<img src="${p.photo}" alt="${p.name}" style="width:46px;height:46px;object-fit:cover;border-radius:6px;">` : `<div style="width:46px;height:46px;border-radius:6px;background:#eee;"></div>`}
-      <div style="flex:1;font-size:14px;">${p.name}</div>
-      <div style="font-weight:bold;font-size:14px;">${brl(price)}</div>
+      <div style="flex:1;font-size:14px;color:#1A1D23;">${p.name}</div>
+      <div style="font-weight:bold;font-size:14px;color:#0B7A6B;">${brl(price)}</div>
     </div>`;
   }).join('');
 
@@ -1582,9 +1593,9 @@ function exportCatalogPDF(){
     const filSummary = (p.filaments||[]).map(f=>`${f.materialName} ${num(f.weightG,0)}g`).join(' + ');
     return `<div class="catalog-page" style="display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;">
       ${p.photo ? `<img src="${p.photo}" alt="${p.name}" style="max-width:320px;max-height:320px;object-fit:cover;border-radius:14px;margin-bottom:26px;box-shadow:0 4px 16px rgba(0,0,0,0.15);">` : ''}
-      <h1 style="font-size:30px;margin:0 0 12px;">${p.name}</h1>
-      <div style="font-size:34px;font-weight:bold;margin-bottom:22px;">${brl(c.practicedPrice)}</div>
-      <div style="font-size:13.5px;color:#555;line-height:2;max-width:420px;">
+      <h1 style="font-size:30px;margin:0 0 12px;color:#1A1D23;">${p.name}</h1>
+      <div style="font-size:34px;font-weight:bold;margin-bottom:22px;color:#0B7A6B;">${brl(c.practicedPrice)}</div>
+      <div style="font-size:13.5px;color:#5D6270;line-height:2;max-width:420px;">
         ${filSummary ? `Filamento: ${filSummary}<br>` : ''}
         Peso total: ${num(totalWeight(p),0)}g &nbsp;·&nbsp; Tempo de impressão: ${num(p.timeH,1)}h
         ${p.kitComponents && p.kitComponents.length ? `<br>Composição: ${p.kitComponents.map(kc=>`${kc.qty>1?kc.qty+'x ':''}${kc.productName}`).join(' + ')}` : ''}
@@ -1593,10 +1604,12 @@ function exportCatalogPDF(){
   }).join('');
 
   printHTML(`
-    <div class="catalog-page">
-      <h1 style="font-size:28px;margin:0 0 4px;">Piece of Geek 3D</h1>
-      <div style="color:#666;font-size:13px;margin-bottom:24px;">Catálogo de produtos — atualizado em ${new Date().toLocaleDateString('pt-BR')}</div>
+    <div class="catalog-summary">
+      <h1 style="font-size:28px;margin:0 0 4px;color:#BD4119;">Piece of Geek 3D</h1>
+      <div style="color:#5D6270;font-size:13px;margin-bottom:18px;">Catálogo de produtos — atualizado em ${new Date().toLocaleDateString('pt-BR')}</div>
+      <div style="border-top:1px solid #E2E4E9;margin-bottom:8px;"></div>
       ${summaryRows}
+      <div style="border-top:1px solid #E2E4E9;margin-top:8px;padding-top:10px;color:#5D6270;font-size:11.5px;">Preços sujeitos a alteração sem aviso prévio · Consulte disponibilidade</div>
     </div>
     ${productPages}
   `);
@@ -1687,106 +1700,147 @@ async function exportCatalogImage(){
   toast('Catálogo exportado como imagem');
 }
 
-/* ===================== CÁLCULO ===================== */
-function renderFailuresSection(){
-  const now = new Date();
+/* ===================== FILA DE IMPRESSÃO ===================== */
+function printJobRecipe(prod){
+  return productRecipe(prod).filter(r=>r.materialName!==prod.boxType);
+}
+function renderImpressao(){
   const thisMonth = todayStr().slice(0,7);
-  const thisYear = String(now.getFullYear());
-  const failuresThisMonth = state.printFailures.filter(f=>f.date && f.date.slice(0,7)===thisMonth);
-  const failuresThisYear = state.printFailures.filter(f=>f.date && f.date.slice(0,4)===thisYear);
-  const lossMonth = failuresThisMonth.reduce((a,f)=>a+f.totalLoss,0);
-  const lossYear = failuresThisYear.reduce((a,f)=>a+f.totalLoss,0);
+  const thisYear = todayStr().slice(0,4);
+  const jobsMonth = state.printFailures.filter(f=>f.date && f.date.slice(0,7)===thisMonth);
+  const jobsYear = state.printFailures.filter(f=>f.date && f.date.slice(0,4)===thisYear);
+  const lossMonth = jobsMonth.reduce((a,f)=>a+(f.totalLoss||0),0);
+  const lossYear = jobsYear.reduce((a,f)=>a+(f.totalLoss||0),0);
+  const failuresMonth = jobsMonth.filter(f=>f.outcome==='failure').length;
 
-  const recent = state.printFailures.slice().sort((a,b)=>b.date.localeCompare(a.date)).slice(0,8);
+  const recent = state.printFailures.slice().sort((a,b)=>b.date.localeCompare(a.date)).slice(0,15);
+  const outcomeBadge = (o)=>({success:'<span class="badge ok">Sucesso</span>',test:'<span class="badge info">Teste</span>',failure:'<span class="badge bad">Falha</span>'}[o]||o);
 
   return `
-    <div class="section-title">Falhas de impressão<span class="sub" style="font-size:11px;font-weight:400;color:var(--text-faint);">desperdício real, pra comparar com a margem de falha estimada</span></div>
+    <div class="grid g-3" style="margin-bottom:16px;">
+      <div class="kpi" style="--accent:var(--red)"><div class="kpi-label">Perdido este mês</div><div class="kpi-value neg">${brl(lossMonth)}</div><div class="kpi-note">${failuresMonth} falha(s)</div></div>
+      <div class="kpi" style="--accent:var(--red)"><div class="kpi-label">Perdido este ano</div><div class="kpi-value neg">${brl(lossYear)}</div><div class="kpi-note">${jobsYear.filter(f=>f.outcome==='failure').length} falha(s)</div></div>
+      <div class="kpi"><div class="kpi-label">Impressões este mês</div><div class="kpi-value">${jobsMonth.length}</div></div>
+    </div>
     <div class="card">
-      <div class="grid g-3" style="margin-bottom:16px;">
-        <div class="kpi" style="--accent:var(--red)"><div class="kpi-label">Perdido este mês</div><div class="kpi-value neg">${brl(lossMonth)}</div><div class="kpi-note">${failuresThisMonth.length} falha(s)</div></div>
-        <div class="kpi" style="--accent:var(--red)"><div class="kpi-label">Perdido este ano</div><div class="kpi-value neg">${brl(lossYear)}</div><div class="kpi-note">${failuresThisYear.length} falha(s)</div></div>
-        <div class="kpi"><div class="kpi-label">Registro rápido</div><div style="margin-top:8px;"><button class="btn primary sm" style="width:100%;" onclick="openFailureModal()">+ Registrar falha</button></div></div>
-      </div>
+      <div class="card-title">Histórico de impressões<span class="sub">mais recentes primeiro</span></div>
       ${recent.length ? `<div class="tbl-wrap tbl-responsive"><table>
-        <thead><tr><th>Data</th><th>Produto</th><th class="right">% concluído</th><th class="right">Prejuízo</th><th>Obs.</th><th></th></tr></thead>
+        <thead><tr><th>Data</th><th>Produto</th><th class="right">Qtd</th><th>Resultado</th><th class="right">Prejuízo</th><th>Obs.</th><th></th></tr></thead>
         <tbody>${recent.map(f=>`<tr>
           <td class="num" data-label="Data">${fmtDate(f.date)}</td>
           <td data-label="Produto">${f.productName}</td>
-          <td class="right num" data-label="% concluído">${num(f.pctComplete,0)}%</td>
-          <td class="right num" data-label="Prejuízo" style="color:var(--red)">${brl(f.totalLoss)}</td>
+          <td class="right num" data-label="Qtd">${num(f.qty||1,0)}${f.outcome==='failure'&&f.pctComplete<100?` (${num(f.pctComplete,0)}%)`:''}</td>
+          <td data-label="Resultado">${outcomeBadge(f.outcome)}</td>
+          <td class="right num" data-label="Prejuízo" style="color:var(--red)">${f.totalLoss?brl(f.totalLoss):'—'}</td>
           <td data-label="Obs.">${f.notes||'—'}</td>
-          <td class="right"><button class="btn ghost sm" onclick="deleteFailure('${f.id}')">Excluir</button></td>
+          <td class="right"><button class="btn ghost sm" onclick="deletePrintJob('${f.id}')">Excluir</button></td>
         </tr>`).join('')}</tbody>
-      </table></div>` : emptyState('Nenhuma falha registrada ainda — ótimo sinal, ou só falta registrar quando acontecer.')}
+      </table></div>` : emptyState('Nenhuma impressão registrada ainda. Clique em "Nova impressão" pra começar.')}
     </div>
   `;
 }
-function openFailureModal(){
-  if(state.products.length===0){ toast('Cadastre um produto antes de registrar uma falha','err'); return; }
-  showModal('Registrar falha de impressão', `
-    <div class="field"><label>Produto</label><select id="failProd">
-      ${state.products.map(p=>`<option value="${p.id}">${p.name}</option>`).join('')}
+function openPrintJobModal(productId, presetQty, presetOutcome){
+  if(state.products.length===0){ toast('Cadastre um produto antes de registrar uma impressão','err'); return; }
+  const selId = productId || state.products[0].id;
+  showModal('Nova impressão', `
+    <div class="field"><label>Produto</label><select id="pjProd" onchange="updatePrintJobPreview()">
+      ${state.products.map(p=>`<option value="${p.id}" ${p.id===selId?'selected':''}>${p.name}</option>`).join('')}
     </select></div>
-    <div class="row2">
-      <div class="field"><label>Data</label><input type="date" id="failDate" value="${todayStr()}"></div>
-      <div class="field"><label>% concluído antes de falhar</label><input type="number" id="failPct" value="100" min="1" max="100" oninput="updateFailurePreview()"></div>
+    <div class="row3">
+      <div class="field"><label>Quantidade</label><input type="number" id="pjQty" value="${presetQty||1}" min="1" oninput="updatePrintJobPreview()"></div>
+      <div class="field"><label>Data</label><input type="date" id="pjDate" value="${todayStr()}"></div>
+      <div class="field"><label>Resultado</label><select id="pjOutcome" onchange="updatePrintJobPreview()">
+        <option value="success" ${(!presetOutcome||presetOutcome==='success')?'selected':''}>Sucesso — vai pro estoque</option>
+        <option value="test" ${presetOutcome==='test'?'selected':''}>Teste — não vai pro estoque de venda</option>
+        <option value="failure" ${presetOutcome==='failure'?'selected':''}>Falhou</option>
+      </select></div>
     </div>
-    <div class="field"><label>Observações (opcional)</label><input id="failNotes" placeholder="Ex: descolou da mesa, entupiu o bico..."></div>
-    <div class="field hint" style="margin-top:-8px;">Assume que material e energia até esse ponto foram gastos e não recuperados. O material perdido já sai do seu estoque.</div>
-    <div class="helper-block" id="failPreview"></div>
+    <div id="pjPctBlock" style="display:none;"><div class="field"><label>% concluído antes de falhar</label><input type="number" id="pjPct" value="100" min="1" max="100" oninput="updatePrintJobPreview()"></div></div>
+    <div class="field"><label>Observações (opcional)</label><input id="pjNotes" placeholder="Ex: descolou da mesa, entupiu o bico..."></div>
+    <div class="field hint" style="margin-top:-8px;">A caixa/embalagem não é descontada aqui — só sai do estoque na hora da venda. Filamento e plástico bolha saem agora.</div>
+    <div class="helper-block" id="pjPreview"></div>
     <div class="modal-actions">
       <button class="btn ghost" onclick="closeModal()">Cancelar</button>
-      <button class="btn primary" onclick="confirmFailure()">Registrar falha</button>
+      <button class="btn primary" onclick="confirmPrintJob()">Registrar impressão</button>
     </div>
   `);
-  updateFailurePreview();
+  updatePrintJobPreview();
 }
-function updateFailurePreview(){
-  const prod = state.products.find(p=>p.id===document.getElementById('failProd').value);
-  const pct = Math.min(100, Math.max(1, parseFloat(document.getElementById('failPct').value)||100));
-  const c = calcProduct(prod);
-  const loss = (c.materialCost + c.energyCost) * (pct/100);
-  document.getElementById('failPreview').innerHTML = `
-    <div class="calc-line"><span>Material + energia até a falha (${pct}%)</span><span style="color:var(--red)">${brl(loss)}</span></div>
-    <div class="field hint" style="margin-top:6px;">O material dessa proporção será descontado do estoque de matéria-prima.</div>
-  `;
+function updatePrintJobPreview(){
+  const prod = state.products.find(p=>p.id===document.getElementById('pjProd').value);
+  const qty = parseFloat(document.getElementById('pjQty').value)||0;
+  const outcome = document.getElementById('pjOutcome').value;
+  document.getElementById('pjPctBlock').style.display = outcome==='failure' ? 'block' : 'none';
+  const pct = outcome==='failure' ? Math.min(100,Math.max(1,parseFloat(document.getElementById('pjPct').value)||100)) : 100;
+  const recipe = printJobRecipe(prod);
+  const lines = recipe.map(r=>{
+    const mat = materialByName(r.materialName);
+    const need = r.qty*qty*(pct/100);
+    const after = mat ? mat.stock-need : -need;
+    return `<div class="calc-line"><span>${r.materialName} (${num(need,1)} ${mat?mat.unit:''})</span><span style="color:${after<0?'var(--red)':'var(--text-dim)'}">${mat?num(mat.stock,1):'0'} → ${num(after,1)}</span></div>`;
+  }).join('');
+  const stockLine = outcome==='success'
+    ? `<div class="calc-line total"><span>Estoque de "${prod.name}" após produção</span><span>${num(prod.stock,0)} → ${num(prod.stock+qty,0)}</span></div>`
+    : `<div class="field hint" style="margin-top:6px;">${outcome==='test'?'Teste não soma no estoque disponível pra venda.':'Falha não soma no estoque.'}</div>`;
+  document.getElementById('pjPreview').innerHTML = lines + stockLine;
 }
-function confirmFailure(){
-  const prod = state.products.find(p=>p.id===document.getElementById('failProd').value);
-  const date = document.getElementById('failDate').value || todayStr();
-  const pctComplete = Math.min(100, Math.max(1, parseFloat(document.getElementById('failPct').value)||100));
-  const notes = document.getElementById('failNotes').value.trim();
-  const c = calcProduct(prod);
-  const totalLoss = (c.materialCost + c.energyCost) * (pctComplete/100);
+function confirmPrintJob(){
+  const prod = state.products.find(p=>p.id===document.getElementById('pjProd').value);
+  const qty = parseFloat(document.getElementById('pjQty').value)||0;
+  if(qty<=0){ toast('Informe uma quantidade válida','err'); return; }
+  const outcome = document.getElementById('pjOutcome').value;
+  const date = document.getElementById('pjDate').value || todayStr();
+  const notes = document.getElementById('pjNotes').value.trim();
+  const pctComplete = outcome==='failure' ? Math.min(100,Math.max(1,parseFloat(document.getElementById('pjPct').value)||100)) : 100;
 
-  const recipe = productRecipe(prod);
+  const c = calcProduct(prod);
+  const recipe = printJobRecipe(prod);
+  let negativeWarn = false;
   recipe.forEach(r=>{
     const mat = materialByName(r.materialName);
-    if(mat){ mat.stock -= r.qty * (pctComplete/100); }
+    if(mat){ mat.stock -= r.qty*qty*(pctComplete/100); if(mat.stock<0) negativeWarn=true; }
   });
 
-  state.printFailures.push({ id:uid(), date, productId:prod.id, productName:prod.name, pctComplete, materialCost:c.materialCost*(pctComplete/100), energyCost:c.energyCost*(pctComplete/100), totalLoss, notes });
-  saveMaterials(); savePrintFailures();
-  toast(`Falha registrada — prejuízo de ${brl(totalLoss)}`);
+  let totalLoss = 0, materialCost = 0, energyCost = 0;
+  if(outcome==='success') prod.stock += qty;
+  if(outcome==='failure'){
+    materialCost = c.materialCost*qty*(pctComplete/100);
+    energyCost = c.energyCost*qty*(pctComplete/100);
+    totalLoss = materialCost+energyCost;
+  }
+  const machines = state.settings.machines||[];
+  const machine = machines.find(m=>m.id===prod.machineId) || machines[0];
+  if(machine){ machine.hoursUsed = (machine.hoursUsed||0) + qty*(prod.timeH||0)*(pctComplete/100); }
+
+  state.printFailures.push({ id:uid(), date, productId:prod.id, productName:prod.name, qty, outcome, pctComplete, materialCost, energyCost, totalLoss, notes });
+  saveMaterials(); savePrintFailures(); if(outcome==='success') saveProducts(); if(machine) saveSettings();
+
+  const msgs = { success:'Impressão registrada — estoque atualizado', test:'Impressão de teste registrada', failure:`Falha registrada — prejuízo de ${brl(totalLoss)}` };
+  toast((negativeWarn?'Atenção: estoque de matéria-prima negativo — ':'') + msgs[outcome], negativeWarn?'err':'');
   closeModal(); renderContent();
 }
-function deleteFailure(id){
-  const f = state.printFailures.find(x=>x.id===id);
-  if(!f) return;
-  if(!confirm('Excluir esse registro de falha? O material descontado na hora do registro volta pro estoque.')) return;
-  const prod = state.products.find(p=>p.id===f.productId);
+function deletePrintJob(id){
+  const j = state.printFailures.find(x=>x.id===id);
+  if(!j) return;
+  if(!confirm(`Excluir esse registro de impressão? O material usado volta pro estoque${j.outcome==='success'?' e o estoque do produto é ajustado':''}.`)) return;
+  const prod = state.products.find(p=>p.id===j.productId);
   if(prod){
-    productRecipe(prod).forEach(r=>{
+    printJobRecipe(prod).forEach(r=>{
       const mat = materialByName(r.materialName);
-      if(mat) mat.stock += r.qty * (f.pctComplete/100);
+      if(mat) mat.stock += r.qty * (j.qty||1) * (j.pctComplete/100);
     });
-    saveMaterials();
+    if(j.outcome==='success') prod.stock = Math.max(0, prod.stock - (j.qty||1));
+    const machines = state.settings.machines||[];
+    const machine = machines.find(m=>m.id===prod.machineId) || machines[0];
+    if(machine){ machine.hoursUsed = Math.max(0, (machine.hoursUsed||0) - (j.qty||1)*(prod.timeH||0)*(j.pctComplete/100)); saveSettings(); }
+    saveMaterials(); if(j.outcome==='success') saveProducts();
   }
   state.printFailures = state.printFailures.filter(x=>x.id!==id);
   savePrintFailures();
-  toast('Registro excluído e estoque restaurado');
+  toast('Registro excluído');
   renderContent();
 }
+/* ===================== CÁLCULO ===================== */
 function renderCalculo(){
   const machines = state.settings.machines||[];
   const tariff = state.settings.energyTariffPerKwh||0;
@@ -1834,7 +1888,7 @@ function renderCalculo(){
         </div>`;
       }).join('')}
     </div>
-    <div class="field hint" style="margin-top:10px;">Horas somadas a partir do tempo de impressão de cada venda registrada (peso × tempo do produto, na impressora usada). Ajuste a "vida útil" de cada impressora em "Gerenciar impressoras" conforme sua experiência real de manutenção.</div>` : ''}
+    <div class="field hint" style="margin-top:10px;">Horas somadas a partir de cada impressão registrada na Fila de Impressão (sucesso, teste ou falha — todas gastam tempo de máquina de verdade). Ajuste a "vida útil" de cada impressora em "Gerenciar impressoras" conforme sua experiência real de manutenção.</div>` : ''}
 
     <div class="section-title">Mão de obra</div>
     <div class="card">
@@ -1895,7 +1949,6 @@ function renderCalculo(){
       <div id="calculoExample"></div>
     </div>
 
-    ${renderFailuresSection()}
   `;
 }
 function updateEnergyTariff(val){
@@ -2046,11 +2099,15 @@ function deleteSale(id){
   if(linkedOrder) msg += ` A encomenda vinculada volta pro status "Pronto para envio".`;
   if(!confirm(msg)) return;
   const prod = state.products.find(p=>p.id===s.productId);
-  if(prod) prod.stock += s.qty;
+  if(prod){
+    prod.stock += s.qty;
+    const boxMat = materialByName(prod.boxType);
+    if(boxMat) boxMat.stock += s.qty;
+  }
   const touchedReserves = reverseSaleReserveAllocations(s);
   if(linkedOrder) linkedOrder.status = 'Pronto para envio';
   state.sales = state.sales.filter(x=>x.id!==id);
-  saveSales(); if(prod) saveProducts(); if(touchedReserves) saveSettings(); if(linkedOrder) saveOrders();
+  saveSales(); if(prod){ saveProducts(); saveMaterials(); } if(touchedReserves) saveSettings(); if(linkedOrder) saveOrders();
   toast(linkedOrder ? 'Venda excluída e encomenda voltou pra fila' : 'Venda excluída');
   renderContent();
 }
@@ -2253,6 +2310,7 @@ function confirmSale(){
   let totalAllocated = 0;
   let linkedCount = 0;
   let settingsTouched = false;
+  let boxNegativeWarn = false;
 
   cartItems.forEach(item=>{
     const prod = state.products.find(p=>p.id===item.productId);
@@ -2274,6 +2332,8 @@ function confirmSale(){
       reserveAllocations:allocations, machineId: calc.machine?calc.machine.id:null, hoursUsed:(prod.timeH||0)*item.qty, customerId, trackingCode, linkedOrderId,
     });
     prod.stock -= item.qty;
+    const boxMat = materialByName(prod.boxType);
+    if(boxMat){ boxMat.stock -= item.qty; if(boxMat.stock<0) boxNegativeWarn = true; }
     applySaleReserveAllocations(allocations);
     if(Object.keys(allocations).length){ settingsTouched = true; totalAllocated += Object.values(allocations).reduce((a,v)=>a+v,0); }
     if(linkedOrderId){
@@ -2282,14 +2342,15 @@ function confirmSale(){
     }
   });
 
-  saveSales(); saveProducts();
+  saveSales(); saveProducts(); saveMaterials();
   if(linkedCount>0) saveOrders();
   if(settingsTouched) saveSettings();
 
   const itemMsg = cartItems.length>1 ? `${cartItems.length} itens registrados` : 'Venda registrada';
   const allocMsg = totalAllocated>0 ? ` — ${brl(totalAllocated)} reservado automaticamente` : '';
   const linkMsg = linkedCount>0 ? ` — ${linkedCount} pedido(s) marcado(s) como enviado` : '';
-  toast(itemMsg + allocMsg + linkMsg);
+  const boxMsg = boxNegativeWarn ? ' — atenção: estoque de caixa/embalagem negativo' : '';
+  toast(itemMsg + allocMsg + linkMsg + boxMsg, boxNegativeWarn?'err':'');
   closeModal();
   renderContent();
 }
@@ -2897,7 +2958,7 @@ function renderFinishedStock(){
       <td class="right num" data-label="Custo unitário">${brl(c.totalCost)}</td>
       <td class="right num" data-label="Valor em estoque">${brl(p.stock*c.totalCost)}</td>
       <td class="right" data-label="Status">${p.stock<=0?`<span class="badge bad">Sem estoque</span>`:p.stock<=3?`<span class="badge warn">Baixo</span>`:`<span class="badge ok">Ok</span>`}</td>
-      <td class="right"><button class="btn ghost sm" onclick="openProductionModal('${p.id}')">Produzir</button></td>
+      <td class="right"><button class="btn ghost sm" onclick="openPrintJobModal('${p.id}')">Produzir</button></td>
     </tr>`;
   }).join('');
   const totalValue = state.products.reduce((a,p)=>a+p.stock*calcProduct(p).totalCost,0);
@@ -3048,55 +3109,6 @@ function confirmRestock(id){
   m.stock += qty;
   saveMaterials(); toast('Estoque atualizado'); closeModal(); renderContent();
 }
-function openProductionModal(productId, presetQty){
-  const products = state.products;
-  if(products.length===0){ toast('Cadastre um produto primeiro','err'); return; }
-  const selId = productId || products[0].id;
-  showModal('Registrar produção', `
-    <div class="field"><label>Produto</label><select id="prodSel" onchange="updateProductionPreview()">
-      ${products.map(p=>`<option value="${p.id}" ${p.id===selId?'selected':''}>${p.name}</option>`).join('')}
-    </select></div>
-    <div class="field"><label>Quantidade a produzir</label><input type="number" id="prodQty" value="${presetQty||1}" min="1" oninput="updateProductionPreview()"></div>
-    <div class="helper-block" id="productionPreview"></div>
-    <div class="modal-actions">
-      <button class="btn ghost" onclick="closeModal()">Cancelar</button>
-      <button class="btn primary" onclick="confirmProduction()">Registrar produção</button>
-    </div>
-  `);
-  updateProductionPreview();
-}
-function updateProductionPreview(){
-  const prod = state.products.find(p=>p.id===document.getElementById('prodSel').value);
-  const qty = parseFloat(document.getElementById('prodQty').value)||0;
-  const recipe = productRecipe(prod);
-  const lines = recipe.map(r=>{
-    const mat = materialByName(r.materialName);
-    const need = r.qty*qty;
-    const after = mat ? mat.stock-need : -need;
-    return `<div class="calc-line"><span>${r.materialName} (${num(need,1)} ${mat?mat.unit:''})</span><span style="color:${after<0?'var(--red)':'var(--text-dim)'}">${mat?num(mat.stock,1):'0'} → ${num(after,1)}</span></div>`;
-  }).join('');
-  document.getElementById('productionPreview').innerHTML = `${lines}
-    <div class="calc-line total"><span>Estoque de "${prod.name}" após produção</span><span>${num(prod.stock,0)} → ${num(prod.stock+qty,0)}</span></div>`;
-}
-function confirmProduction(){
-  const prod = state.products.find(p=>p.id===document.getElementById('prodSel').value);
-  const qty = parseFloat(document.getElementById('prodQty').value)||0;
-  if(qty<=0){ toast('Informe uma quantidade válida','err'); return; }
-  const recipe = productRecipe(prod);
-  let negativeWarn = false;
-  recipe.forEach(r=>{
-    const mat = materialByName(r.materialName);
-    if(mat){ mat.stock -= r.qty*qty; if(mat.stock<0) negativeWarn=true; }
-  });
-  prod.stock += qty;
-  const machines = state.settings.machines||[];
-  const machine = machines.find(m=>m.id===prod.machineId) || machines[0];
-  if(machine){ machine.hoursUsed = (machine.hoursUsed||0) + qty*(prod.timeH||0); }
-  saveMaterials(); saveProducts(); if(machine) saveSettings();
-  toast(negativeWarn ? 'Produção registrada — atenção: estoque de matéria-prima negativo' : 'Produção registrada');
-  closeModal(); renderContent();
-}
-
 /* ===================== CAIXA ===================== */
 function renderCaixa(){
   const a = blocoA(currentMonth), b = blocoB(currentMonth), c = blocoC(), d = blocoD(currentMonth);
@@ -3832,7 +3844,7 @@ function importBackup(file){
       state.sales = data.sales;
       state.orders = Array.isArray(data.orders) ? data.orders : [];
       state.customers = Array.isArray(data.customers) ? data.customers : [];
-      state.printFailures = Array.isArray(data.printFailures) ? data.printFailures : [];
+      state.printFailures = migratePrintFailures(Array.isArray(data.printFailures) ? data.printFailures : []);
       backfillMachineHours();
       await saveAll();
       toast('Backup importado com sucesso');
