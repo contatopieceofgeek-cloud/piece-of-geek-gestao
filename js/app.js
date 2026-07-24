@@ -2717,7 +2717,13 @@ async function openListingModal(id){
         kitComponents: p.kitComponents,
       },
     });
-    if(error) throw error;
+    if(error){
+      let detail = error.message;
+      if(error.context && typeof error.context.json==='function'){
+        try{ const body = await error.context.clone().json(); if(body && body.error) detail = body.error; }catch(e2){}
+      }
+      throw new Error(detail);
+    }
     if(data && data.error) throw new Error(data.error);
     const el = document.getElementById('listingResult');
     if(!el) return; // usuário já fechou ou pediu outra geração antes desta terminar
