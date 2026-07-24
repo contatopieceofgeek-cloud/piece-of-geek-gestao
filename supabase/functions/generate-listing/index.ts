@@ -69,32 +69,42 @@ Dados do produto:
 - Preço praticado: ${practicedPrice ? "R$ " + practicedPrice : "não informado"}
 ${kitDesc}`;
 
-  let resp: Response;
-  try {
-    resp = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": GEMINI_API_KEY,
-        },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { responseMimeType: "application/json", temperature: 0.7 },
-        }),
-      }
-    );
-  } catch (e) {
-    return jsonResponse({ error: "Falha ao conectar com a API do Gemini: " + String(e) }, 502);
+  // O Gemini às vezes responde 503/429 (sobrecarga temporária do modelo) — tenta
+  // de novo automaticamente algumas vezes antes de desistir e devolver erro.
+  const MAX_ATTEMPTS = 3;
+  let resp: Response | null = null;
+  let lastErrText = "";
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      resp = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": GEMINI_API_KEY,
+          },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { responseMimeType: "application/json", temperature: 0.7 },
+          }),
+        }
+      );
+    } catch (e) {
+      return jsonResponse({ error: "Falha ao conectar com a API do Gemini: " + String(e) }, 502);
+    }
+
+    if (resp.ok) break;
+
+    lastErrText = await resp.text();
+    const retryable = resp.status === 503 || resp.status === 429;
+    if (!retryable || attempt === MAX_ATTEMPTS) {
+      return jsonResponse({ error: `Gemini retornou erro (${resp.status}) após ${attempt} tentativa(s): ${lastErrText}` }, 502);
+    }
+    await new Promise((r) => setTimeout(r, attempt * 1000)); // 1s, depois 2s
   }
 
-  if (!resp.ok) {
-    const errText = await resp.text();
-    return jsonResponse({ error: `Gemini retornou erro (${resp.status}): ${errText}` }, 502);
-  }
-
-  const data = await resp.json();
+  const data = await resp!.json();
   const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!text) {
     return jsonResponse({ error: "Resposta vazia do Gemini — tente novamente" }, 502);
