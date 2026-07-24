@@ -1,5 +1,5 @@
 /* ===================== STATE ===================== */
-let state = { materials: [], products: [], sales: [], orders: [], customers: [], printFailures: [], settings: {} };
+let state = { materials: [], products: [], sales: [], orders: [], customers: [], printFailures: [], listings: [], settings: {} };
 let currentTab = 'dashboard';
 let currentMonth;
 let currentYear = new Date().getFullYear();
@@ -109,7 +109,7 @@ function seedData(){
     lastActiveMonth: todayStr().slice(0,7),
     laborHourlyRate:25,
   };
-  return { materials, products, sales:[], orders:[], customers:[], printFailures:[], settings };
+  return { materials, products, sales:[], orders:[], customers:[], printFailures:[], listings:[], settings };
 }
 
 /* ===================== STORAGE ===================== */
@@ -335,10 +335,10 @@ async function storageSet(key, value){
 async function loadState(){
   await refreshSyncStatus();
   try{
-    const [m,p,s,o,cu,c,pf] = await Promise.all([
-      storageGet('materials'), storageGet('products'), storageGet('sales'), storageGet('orders'), storageGet('customers'), storageGet('settings'), storageGet('printFailures'),
+    const [m,p,s,o,cu,c,pf,li] = await Promise.all([
+      storageGet('materials'), storageGet('products'), storageGet('sales'), storageGet('orders'), storageGet('customers'), storageGet('settings'), storageGet('printFailures'), storageGet('listings'),
     ]);
-    if(!m && !p && !s && !o && !cu && !c && !pf){
+    if(!m && !p && !s && !o && !cu && !c && !pf && !li){
       state = seedData();
       await saveAll();
     } else {
@@ -349,6 +349,7 @@ async function loadState(){
       state.orders = o ? JSON.parse(o) : [];
       state.customers = cu ? JSON.parse(cu) : [];
       state.printFailures = pf ? migratePrintFailures(JSON.parse(pf)) : [];
+      state.listings = li ? JSON.parse(li) : [];
       const parsedSettings = c ? migrateSettings(JSON.parse(c)) : null;
       state.settings = parsedSettings ? Object.assign({}, seed.settings, parsedSettings) : seed.settings;
       if(!state.settings.platforms || !state.settings.platforms.length) state.settings.platforms = seed.settings.platforms;
@@ -372,9 +373,10 @@ async function saveProducts(){ const ok = await storageSet('products', JSON.stri
 async function saveSales(){ const ok = await storageSet('sales', JSON.stringify(state.sales)); if(!ok) toast('Erro ao salvar vendas','err'); }
 async function saveOrders(){ const ok = await storageSet('orders', JSON.stringify(state.orders)); if(!ok) toast('Erro ao salvar encomendas','err'); }
 async function savePrintFailures(){ const ok = await storageSet('printFailures', JSON.stringify(state.printFailures)); if(!ok) toast('Erro ao salvar falhas de impressão','err'); }
+async function saveListings(){ const ok = await storageSet('listings', JSON.stringify(state.listings)); if(!ok) toast('Erro ao salvar anúncios','err'); }
 async function saveCustomers(){ const ok = await storageSet('customers', JSON.stringify(state.customers)); if(!ok) toast('Erro ao salvar clientes','err'); }
 async function saveSettings(){ const ok = await storageSet('settings', JSON.stringify(state.settings)); if(!ok) toast('Erro ao salvar configurações','err'); }
-async function saveAll(){ await Promise.all([saveMaterials(),saveProducts(),saveSales(),saveOrders(),saveCustomers(),savePrintFailures(),saveSettings()]); }
+async function saveAll(){ await Promise.all([saveMaterials(),saveProducts(),saveSales(),saveOrders(),saveCustomers(),savePrintFailures(),saveListings(),saveSettings()]); }
 
 /* ===================== TOAST ===================== */
 function toast(msg,type=''){
@@ -565,6 +567,7 @@ function render(){
         ${navItem('vendas','Vendas')}
         ${navItem('clientes','Clientes')}
         ${navItem('produtos','Produtos')}
+        ${navItem('anuncios','Anúncios')}
         ${navItem('estoque','Estoque',lowStockMaterials().length)}
         ${navItem('calculo','Cálculo')}
         ${navItem('caixa','Caixa',dasIsUrgent()?'!':0)}
@@ -608,6 +611,7 @@ const NAV_ICON_PATHS = {
   vendas: '<polyline points="3,13 8,8 11.5,11.5 17,5"></polyline><polyline points="12.5,5 17,5 17,9.5"></polyline>',
   clientes: '<circle cx="7" cy="6.5" r="2.7"></circle><path d="M2 17c0-3 2.2-5 5-5s5 2 5 5"></path><circle cx="14.3" cy="7.5" r="2.1"></circle><path d="M13 12.4c2.2.3 3.8 2.1 3.8 4.6"></path>',
   produtos: '<path d="M10 2.5l7 4v7l-7 4-7-4v-7z"></path><polyline points="3,6.5 10,10.5 17,6.5"></polyline><line x1="10" y1="10.5" x2="10" y2="17.5"></line>',
+  anuncios: '<path d="M10.5 2.5h5A1.5 1.5 0 0 1 17 4v5a1.5 1.5 0 0 1-.44 1.06l-7 7a1.5 1.5 0 0 1-2.12 0l-5-5a1.5 1.5 0 0 1 0-2.12l7-7a1.5 1.5 0 0 1 1.06-.44z"></path><circle cx="13.2" cy="6.8" r="1.1" fill="currentColor" stroke="none"></circle>',
   estoque: '<rect x="2.5" y="3" width="15" height="4" rx="1"></rect><path d="M3.5 7v7a1.5 1.5 0 0 0 1.5 1.5h10a1.5 1.5 0 0 0 1.5-1.5V7"></path><line x1="8" y1="10.5" x2="12" y2="10.5"></line>',
   calculo: '<rect x="4" y="2.5" width="12" height="15" rx="2"></rect><rect x="6" y="4.5" width="8" height="3" rx="0.5"></rect><line x1="6.5" y1="11" x2="9" y2="11"></line><line x1="11" y1="11" x2="13.5" y2="11"></line><line x1="6.5" y1="14" x2="9" y2="14"></line><line x1="11" y1="14" x2="13.5" y2="14"></line>',
   caixa: '<rect x="2.5" y="5.5" width="15" height="10.5" rx="2"></rect><path d="M13.5 5.5V4A1.5 1.5 0 0 0 12 2.5H6A1.5 1.5 0 0 0 4.5 4v1.5"></path><circle cx="14" cy="11" r="1.1" fill="currentColor" stroke="none"></circle>',
@@ -635,7 +639,7 @@ function closeSidebar(){
 }
 function switchTab(t){ currentTab=t; closeSidebar(); render(); }
 function tabTitle(){
-  return {dashboard:'Dashboard',pedidos:'Pedidos',impressao:'Fila de Impressão',vendas:'Vendas',clientes:'Clientes',produtos:'Produtos',estoque:'Estoque',calculo:'Cálculo',caixa:'Caixa',anual:'Anual'}[currentTab];
+  return {dashboard:'Dashboard',pedidos:'Pedidos',impressao:'Fila de Impressão',vendas:'Vendas',clientes:'Clientes',produtos:'Produtos',anuncios:'Anúncios',estoque:'Estoque',calculo:'Cálculo',caixa:'Caixa',anual:'Anual'}[currentTab];
 }
 function tabSubtitle(){
   return {
@@ -645,6 +649,7 @@ function tabSubtitle(){
     vendas:'Registro diário de vendas e recebimentos',
     clientes:'Quem compra de você, e quanto',
     produtos:'Calculadora de precificação e catálogo',
+    anuncios:'Rascunhos de anúncio pra Mercado Livre e Shopee, por produto',
     estoque:'Matéria-prima e produtos prontos',
     calculo:'Como o app calcula depreciação, energia e mão de obra',
     caixa:'Resultado operacional, parcelas e reservas',
@@ -657,6 +662,7 @@ function renderTopbarActions(){
   else if(currentTab==='vendas') el.innerHTML = `<button class="btn ghost" onclick="openSettingsModal()">Taxas das plataformas</button> <button class="btn ghost" onclick="openKitModal()">Criar kit</button> <button class="btn ghost" onclick="exportSalesExcel()">Exportar</button> <button class="btn primary" onclick="openSaleModal()">+ Nova venda</button>`;
   else if(currentTab==='clientes') el.innerHTML = `<button class="btn ghost" onclick="exportCustomersExcel()">Exportar</button> <button class="btn primary" onclick="openCustomerModal()">+ Novo cliente</button>`;
   else if(currentTab==='produtos') el.innerHTML = `<button class="btn ghost" onclick="openQuickQuoteModal()">Orçamento rápido</button> <button class="btn ghost" onclick="exportCatalogImage()">Catálogo (imagem)</button> <button class="btn ghost" onclick="exportCatalogPDF()">Catálogo (PDF, 1 pág./produto)</button> <button class="btn primary" onclick="openProductModal()">+ Novo produto</button>`;
+  else if(currentTab==='anuncios') el.innerHTML = '';
   else if(currentTab==='estoque') el.innerHTML = stockTab==='materiais' ? `<button class="btn primary" onclick="openMaterialModal()">+ Nova matéria-prima</button>` : `<button class="btn primary" onclick="switchTab('impressao')">Ir pra Fila de Impressão</button>`;
   else if(currentTab==='impressao') el.innerHTML = `<button class="btn primary" onclick="openPrintJobModal()">+ Nova impressão</button>`;
   else if(currentTab==='calculo') el.innerHTML = `<button class="btn primary" onclick="openSettingsModal()">Gerenciar impressoras</button>`;
@@ -671,6 +677,7 @@ function renderContent(){
   else if(currentTab==='vendas') c.innerHTML = renderVendas();
   else if(currentTab==='clientes') c.innerHTML = renderClientes();
   else if(currentTab==='produtos') c.innerHTML = renderProdutos();
+  else if(currentTab==='anuncios') c.innerHTML = renderAnuncios();
   else if(currentTab==='estoque') c.innerHTML = renderEstoque();
   else if(currentTab==='calculo') c.innerHTML = renderCalculo();
   else if(currentTab==='caixa') c.innerHTML = renderCaixa();
@@ -2644,7 +2651,7 @@ function renderProdutos(){
       <td class="right num" data-label="Preço praticado">${brl(c.practicedPrice)}</td>
       <td class="right num" data-label="Margem" style="color:${c.marginValue<0?'var(--red)':'var(--green)'}">${pct(c.marginPct)}</td>
       <td class="right num" data-label="Estoque">${p.stock<=0?`<span class="badge mut">0</span>`:num(p.stock,0)}</td>
-      <td class="right"><button class="btn ghost sm" onclick="openProductModal('${p.id}')">Editar</button> <button class="btn ghost sm" onclick="duplicateProduct('${p.id}')">Duplicar</button> <button class="btn ghost sm" onclick="openListingModal('${p.id}')">Gerar anúncio (IA)</button> <button class="btn ghost sm" onclick="deleteProduct('${p.id}')">Excluir</button></td>
+      <td class="right"><button class="btn ghost sm" onclick="openProductModal('${p.id}')">Editar</button> <button class="btn ghost sm" onclick="duplicateProduct('${p.id}')">Duplicar</button> <button class="btn ghost sm" onclick="deleteProduct('${p.id}')">Excluir</button></td>
     </tr>`;
   }).join('');
   return `
@@ -2688,21 +2695,62 @@ function duplicateProduct(id){
   toast('Produto duplicado — ajuste o que for diferente');
   openProductModal(copy.id);
 }
-async function openListingModal(id){
+/* ===================== ANÚNCIOS ===================== */
+function listingFor(productId){ return state.listings.find(l=>l.productId===productId); }
+let anunciosFilter = { search:'' };
+function renderAnuncios(){
+  if(state.products.length===0) return `<div class="card">${emptyState('Cadastre um produto primeiro em Produtos')}</div>`;
+  const q = anunciosFilter.search.toLowerCase();
+  const list = q ? state.products.filter(p=>p.name.toLowerCase().includes(q)) : state.products;
+  const searchBar = `<div class="filter-bar">
+    <div class="field"><label>Buscar</label><input value="${anunciosFilter.search}" placeholder="Nome do produto..." oninput="anunciosFilter.search=this.value; renderContent();"></div>
+  </div>`;
+  if(q && list.length===0) return searchBar + `<div class="card">${emptyState('Nenhum produto encontrado')}</div>`;
+  const rows = list.map(p=>{
+    const l = listingFor(p.id);
+    const status = l ? `<span class="badge ok">Rascunho salvo</span> <span style="color:var(--text-faint);font-size:11px;">atualizado ${fmtDate((l.updatedAt||'').slice(0,10))}</span>` : `<span class="badge mut">Sem rascunho</span>`;
+    return `<tr>
+      <td data-label="Produto">${p.name}</td>
+      <td data-label="Preço" class="right num">${brl(calcProduct(p).practicedPrice)}</td>
+      <td data-label="Status">${status}</td>
+      <td class="right"><button class="btn ghost sm" onclick="openListingModal('${p.id}')">${l?'Editar anúncio':'Criar anúncio'}</button></td>
+    </tr>`;
+  }).join('');
+  return searchBar + `<div class="card"><div class="tbl-wrap tbl-responsive"><table>
+    <thead><tr><th>Produto</th><th class="right">Preço</th><th>Status</th><th></th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div></div>`;
+}
+function openListingModal(id){
+  const p = state.products.find(x=>x.id===id);
+  if(!p) return;
+  const l = listingFor(id) || { tituloMl:'', tituloShopee:'', descricao:'' };
+  showModal(`Anúncio — ${p.name}`, `
+    <div class="field hint" style="margin-top:-4px;margin-bottom:12px;">Preencha na mão ou tente gerar um rascunho com IA (opcional) e ajuste o que quiser antes de salvar/exportar.</div>
+    <button class="btn ghost sm" style="margin-bottom:14px;" onclick="tryGenerateWithAI('${id}')">✨ Tentar gerar com IA</button>
+    <div id="listingAiStatus"></div>
+    <div class="field"><label>Título — Mercado Livre</label><textarea id="lstTitleMl" rows="2">${l.tituloMl||''}</textarea></div>
+    <div class="field"><label>Título — Shopee</label><textarea id="lstTitleShopee" rows="2">${l.tituloShopee||''}</textarea></div>
+    <div class="field"><label>Descrição</label><textarea id="lstDesc" rows="8">${l.descricao||''}</textarea></div>
+    <div class="modal-actions" style="justify-content:space-between;flex-wrap:wrap;row-gap:10px;">
+      ${l.tituloMl||l.tituloShopee||l.descricao ? `<button class="btn ghost" style="color:var(--red);" onclick="deleteListingDraft('${id}')">Excluir rascunho</button>` : '<span></span>'}
+      <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        <button class="btn ghost" onclick="closeModal()">Fechar</button>
+        <button class="btn ghost" onclick="exportListingFile('${id}')">Exportar arquivo</button>
+        <button class="btn primary" onclick="saveListingDraft('${id}')">Salvar rascunho</button>
+      </div>
+    </div>
+  `);
+}
+async function tryGenerateWithAI(id){
   const p = state.products.find(x=>x.id===id);
   if(!p) return;
   if(!syncStatus.configured || !syncStatus.email){
     toast('Configure a sincronização com Supabase primeiro (menu lateral → Sincronizar entre dispositivos) — a geração por IA roda numa Edge Function que exige login.','err');
     return;
   }
-  showModal(`Gerar anúncio (IA) — ${p.name}`, `
-    <div class="field hint" style="margin-top:-4px;margin-bottom:12px;">Gerado por IA a partir dos dados já cadastrados. Confira antes de publicar — a IA pode errar ou generalizar demais.</div>
-    <div id="listingResult"><div class="helper-block">Gerando com o Gemini...</div></div>
-    <div class="modal-actions">
-      <button class="btn ghost" onclick="closeModal()">Fechar</button>
-      <button class="btn primary" onclick="openListingModal('${id}')">Gerar de novo</button>
-    </div>
-  `);
+  const statusEl = document.getElementById('listingAiStatus');
+  if(statusEl) statusEl.innerHTML = `<div class="helper-block">Gerando com o Gemini...</div>`;
   try{
     const client = initSupabase();
     if(!client) throw new Error('Supabase não inicializado');
@@ -2725,25 +2773,49 @@ async function openListingModal(id){
       throw new Error(detail);
     }
     if(data && data.error) throw new Error(data.error);
-    const el = document.getElementById('listingResult');
-    if(!el) return; // usuário já fechou ou pediu outra geração antes desta terminar
-    el.innerHTML = `
-      <div class="field"><label>Título — Mercado Livre</label><textarea id="lstTitleMl" rows="2">${data.titulo_ml||''}</textarea></div>
-      <button class="btn ghost sm" style="margin:-8px 0 12px;" onclick="copyListingField('lstTitleMl')">Copiar título ML</button>
-      <div class="field"><label>Título — Shopee</label><textarea id="lstTitleShopee" rows="2">${data.titulo_shopee||''}</textarea></div>
-      <button class="btn ghost sm" style="margin:-8px 0 12px;" onclick="copyListingField('lstTitleShopee')">Copiar título Shopee</button>
-      <div class="field"><label>Descrição</label><textarea id="lstDesc" rows="8">${data.descricao||''}</textarea></div>
-      <button class="btn ghost sm" style="margin-top:-8px;" onclick="copyListingField('lstDesc')">Copiar descrição</button>
-    `;
+    const mlEl = document.getElementById('lstTitleMl'), shEl = document.getElementById('lstTitleShopee'), descEl = document.getElementById('lstDesc');
+    if(!mlEl) return; // modal já foi fechado
+    mlEl.value = data.titulo_ml||''; shEl.value = data.titulo_shopee||''; descEl.value = data.descricao||'';
+    if(statusEl) statusEl.innerHTML = '';
+    toast('Rascunho gerado — confira e ajuste antes de salvar');
   }catch(e){
-    const el = document.getElementById('listingResult');
-    if(el) el.innerHTML = `<div class="field hint" style="color:var(--red);">Erro ao gerar: ${e.message||e}</div>`;
+    if(statusEl) statusEl.innerHTML = `<div class="field hint" style="color:var(--red);">Erro ao gerar: ${e.message||e}</div>`;
   }
 }
-function copyListingField(fieldId){
-  const el = document.getElementById(fieldId);
-  if(!el) return;
-  navigator.clipboard.writeText(el.value).then(()=>toast('Copiado')).catch(()=>toast('Não consegui copiar — selecione o texto manualmente','err'));
+function saveListingDraft(id){
+  const p = state.products.find(x=>x.id===id);
+  if(!p) return;
+  const tituloMl = document.getElementById('lstTitleMl').value.trim();
+  const tituloShopee = document.getElementById('lstTitleShopee').value.trim();
+  const descricao = document.getElementById('lstDesc').value.trim();
+  let l = listingFor(id);
+  if(!l){ l = { id:uid(), productId:id }; state.listings.push(l); }
+  Object.assign(l, { productName:p.name, tituloMl, tituloShopee, descricao, updatedAt: new Date().toISOString() });
+  saveListings();
+  toast('Rascunho salvo');
+  closeModal(); renderContent();
+}
+function deleteListingDraft(id){
+  if(!confirm('Excluir o rascunho desse anúncio?')) return;
+  state.listings = state.listings.filter(l=>l.productId!==id);
+  saveListings();
+  toast('Rascunho excluído');
+  closeModal(); renderContent();
+}
+function exportListingFile(id){
+  const p = state.products.find(x=>x.id===id);
+  if(!p) return;
+  const tituloMl = document.getElementById('lstTitleMl').value.trim();
+  const tituloShopee = document.getElementById('lstTitleShopee').value.trim();
+  const descricao = document.getElementById('lstDesc').value.trim();
+  const text = `Produto: ${p.name}\n\nTítulo (Mercado Livre):\n${tituloMl||'(vazio)'}\n\nTítulo (Shopee):\n${tituloShopee||'(vazio)'}\n\nDescrição:\n${descricao||'(vazio)'}\n`;
+  const blob = new Blob([text], {type:'text/plain;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `anuncio-${p.name.toLowerCase().replace(/[^a-z0-9]+/g,'-')}.txt`;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+  toast('Arquivo exportado');
 }
 function deleteProduct(id){
   const p = state.products.find(x=>x.id===id);
@@ -3797,7 +3869,7 @@ function blankSettings(){
 async function confirmReset(){
   exportBackup(true);
   await new Promise(r=>setTimeout(r,300));
-  state = { materials: [], products: [], sales: [], orders: [], customers: [], printFailures: [], settings: blankSettings() };
+  state = { materials: [], products: [], sales: [], orders: [], customers: [], printFailures: [], listings: [], settings: blankSettings() };
   await saveAll();
   closeModal();
   currentTab = 'dashboard';
@@ -3892,7 +3964,7 @@ function exportAnnualExcel(){
 function exportBackup(silent){
   const data = {
     app:'piece-of-geek-gestao', version:2, exportedAt: new Date().toISOString(),
-    materials: state.materials, products: state.products, sales: state.sales, orders: state.orders, customers: state.customers, printFailures: state.printFailures, settings: state.settings,
+    materials: state.materials, products: state.products, sales: state.sales, orders: state.orders, customers: state.customers, printFailures: state.printFailures, listings: state.listings, settings: state.settings,
   };
   const blob = new Blob([JSON.stringify(data,null,2)], {type:'application/json'});
   const url = URL.createObjectURL(blob);
@@ -3926,6 +3998,7 @@ function importBackup(file){
       state.orders = Array.isArray(data.orders) ? data.orders : [];
       state.customers = Array.isArray(data.customers) ? data.customers : [];
       state.printFailures = migratePrintFailures(Array.isArray(data.printFailures) ? data.printFailures : []);
+      state.listings = Array.isArray(data.listings) ? data.listings : [];
       backfillMachineHours();
       await saveAll();
       toast('Backup importado com sucesso');
