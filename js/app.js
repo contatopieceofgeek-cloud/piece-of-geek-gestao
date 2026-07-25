@@ -440,7 +440,12 @@ function calcProduct(prod){
   const suggestedPriceShopee = suggestedPriceForPlatform(suggestedPrice, 'Shopee');
   const practicedPriceMl = prod.practicedPriceMl || suggestedPriceMl;
   const practicedPriceShopee = prod.practicedPriceShopee || suggestedPriceShopee;
-  return { materialCost, energyCost, boxCost:bCost, bubbleCost, embalagemCost, depreciation, laborCost, failureCost, totalCost, suggestedPrice, suggestedPriceMl, suggestedPriceShopee, practicedPrice, practicedPriceMl, practicedPriceShopee, marginValue, marginPct, desiredMarginPct: desiredMargin*100, machine };
+  const suggestedPriceExtra = {}, practicedPriceExtra = {};
+  extraListingPlatforms().forEach(plat=>{
+    suggestedPriceExtra[plat.id] = suggestedPriceForPlatform(suggestedPrice, plat.name);
+    practicedPriceExtra[plat.id] = (prod.practicedPriceExtra||{})[plat.id] || suggestedPriceExtra[plat.id];
+  });
+  return { materialCost, energyCost, boxCost:bCost, bubbleCost, embalagemCost, depreciation, laborCost, failureCost, totalCost, suggestedPrice, suggestedPriceMl, suggestedPriceShopee, suggestedPriceExtra, practicedPrice, practicedPriceMl, practicedPriceShopee, practicedPriceExtra, marginValue, marginPct, desiredMarginPct: desiredMargin*100, machine };
 }
 // Preço que, depois de descontada a taxa daquela plataforma (fixa ou por
 // faixa, ex: Shopee), ainda rende o mesmo "preço sem taxa" de referência —
@@ -1021,6 +1026,7 @@ function updateQuickQuotePreview(){
     <div class="calc-line total"><span>Preço sugerido — venda própria (margem ${num(draft.desiredMarginPct,0)}%)</span><span style="color:var(--green)">${brl(c.suggestedPrice)}</span></div>
     <div class="calc-line" style="color:var(--text-faint);"><span>↳ Mercado Livre (já com a taxa)</span><span>${brl(c.suggestedPriceMl)}</span></div>
     <div class="calc-line" style="color:var(--text-faint);"><span>↳ Shopee (já com a taxa)</span><span>${brl(c.suggestedPriceShopee)}</span></div>
+    ${extraListingPlatforms().map(plat=>`<div class="calc-line" style="color:var(--text-faint);"><span>↳ ${plat.name} (já com a taxa)</span><span>${brl(c.suggestedPriceExtra[plat.id])}</span></div>`).join('')}
   `;
 }
 function saveQuoteAsProduct(){
@@ -2065,6 +2071,7 @@ function updateCalculoExample(){
       <div class="calc-line"><span>Preço sugerido — venda própria (margem de ${num(c.desiredMarginPct,0)}%)</span><span>${brl(c.suggestedPrice)}</span></div>
       <div class="calc-line" style="color:var(--text-faint);"><span>↳ Mercado Livre (já com a taxa)</span><span>${brl(c.suggestedPriceMl)}</span></div>
       <div class="calc-line" style="color:var(--text-faint);"><span>↳ Shopee (já com a taxa)</span><span>${brl(c.suggestedPriceShopee)}</span></div>
+      ${extraListingPlatforms().map(plat=>`<div class="calc-line" style="color:var(--text-faint);"><span>↳ ${plat.name} (já com a taxa)</span><span>${brl(c.suggestedPriceExtra[plat.id])}</span></div>`).join('')}
       <div class="calc-line"><span>Preço praticado</span><span>${brl(c.practicedPrice)}</span></div>
     </div>
   `;
@@ -2212,9 +2219,13 @@ let cartOrderLinks = {};
 function listingPriceForPlatform(productId, platformName){
   const l = listingFor(productId);
   if(!l) return null;
-  const key = /shopee/i.test(platformName||'') ? 'shopee' : /mercado ?livre/i.test(platformName||'') ? 'ml' : null;
+  let key = /shopee/i.test(platformName||'') ? 'shopee' : /mercado ?livre/i.test(platformName||'') ? 'ml' : null;
+  if(!key){
+    const extraPlat = extraListingPlatforms().find(p=>p.name===platformName);
+    if(extraPlat) key = extraPlat.id;
+  }
   if(!key) return null;
-  const raw = (l[key]||{}).preco;
+  const raw = listingPlatformData(l, key).preco;
   if(!raw) return null;
   const val = parseFloat(String(raw).replace(',','.'));
   return isFinite(val) && val>0 ? val : null;
@@ -2227,6 +2238,8 @@ function cartItemDefaultPrice(productId, platformName){
   const c = calcProduct(prod);
   if(/shopee/i.test(platformName||'')) return c.practicedPriceShopee;
   if(/mercado ?livre/i.test(platformName||'')) return c.practicedPriceMl;
+  const extraPlat = extraListingPlatforms().find(p=>p.name===platformName);
+  if(extraPlat) return (c.practicedPriceExtra||{})[extraPlat.id] || c.practicedPrice;
   return c.practicedPrice;
 }
 function newCartItem(productId, qty, platformName){
@@ -2682,6 +2695,7 @@ function updateKitPreview(){
     <div class="calc-line"><span>Preço sugerido — venda própria (margem ${num(draft.desiredMarginPct,0)}%)</span><span>${brl(c.suggestedPrice)}</span></div>
     <div class="calc-line" style="color:var(--text-faint);"><span>↳ Mercado Livre (já com a taxa)</span><span>${brl(c.suggestedPriceMl)}</span></div>
     <div class="calc-line" style="color:var(--text-faint);"><span>↳ Shopee (já com a taxa)</span><span>${brl(c.suggestedPriceShopee)}</span></div>
+    ${extraListingPlatforms().map(plat=>`<div class="calc-line" style="color:var(--text-faint);"><span>↳ ${plat.name} (já com a taxa)</span><span>${brl(c.suggestedPriceExtra[plat.id])}</span></div>`).join('')}
     <div class="calc-line" style="color:var(--text-faint);"><span>Soma se vendido separado (embalagem individual de cada um)</span><span>${brl(sumIndividual)}</span></div>
     <div class="calc-line total"><span>Preço final do kit${priceField && priceField.value ? ' (definido por você)' : ''}</span><span style="color:${finalMarginPct<0?'var(--red)':'var(--green)'}">${brl(finalPrice)} — margem real ${num(finalMarginPct,1)}%</span></div>
   `;
@@ -2764,7 +2778,7 @@ function renderProdutos(){
       <td class="right num" data-label="Tempo">${num(p.timeH,1)}h</td>
       <td class="right num" data-label="Custo total">${brl(c.totalCost)}</td>
       <td class="right num" data-label="Preço sugerido">${brl(c.suggestedPrice)}</td>
-      <td class="right num" data-label="Preço praticado">${brl(c.practicedPrice)}<div style="font-size:10px;font-weight:400;color:var(--text-faint);white-space:nowrap;">ML ${brl(c.practicedPriceMl)} · Shopee ${brl(c.practicedPriceShopee)}</div></td>
+      <td class="right num" data-label="Preço praticado">${brl(c.practicedPrice)}<div style="font-size:10px;font-weight:400;color:var(--text-faint);white-space:nowrap;">ML ${brl(c.practicedPriceMl)} · Shopee ${brl(c.practicedPriceShopee)}${extraListingPlatforms().map(plat=>` · ${plat.name} ${brl(c.practicedPriceExtra[plat.id])}`).join('')}</div></td>
       <td class="right num" data-label="Margem" style="color:${c.marginValue<0?'var(--red)':'var(--green)'}">${pct(c.marginPct)}</td>
       <td class="right num" data-label="Estoque">${p.stock<=0?`<span class="badge mut">0</span>`:num(p.stock,0)}</td>
       <td class="right"><button class="btn ghost sm" onclick="openProductModal('${p.id}')">Editar</button> <button class="btn ghost sm" onclick="duplicateProduct('${p.id}')">Duplicar</button> <button class="btn ghost sm" onclick="deleteProduct('${p.id}')">Excluir</button></td>
@@ -2858,18 +2872,50 @@ const LISTING_SHARED_FIELDS = [
   {key:'peso', label:'Peso (kg)'},
   {key:'descricao', label:'Descrição', type:'textarea'},
 ];
+// Plataformas além de ML/Shopee que o usuário habilitou com aba de Anúncios
+// (ver Caixa → Configurar → "Aba de Anúncios pra..."), clonando os campos de
+// uma plataforma já existente (ML, Shopee, ou outra plataforma estendida).
+function extraListingPlatforms(){
+  return (state.settings.platforms||[]).filter(p=>p.listingTemplate);
+}
+function platformListingFields(platformId, visited){
+  visited = visited || new Set();
+  if(visited.has(platformId)) return [];
+  visited.add(platformId);
+  const plat = (state.settings.platforms||[]).find(p=>p.id===platformId);
+  if(!plat || !plat.listingTemplate) return [];
+  if(plat.listingTemplate==='ml') return LISTING_FIELDS.ml;
+  if(plat.listingTemplate==='shopee') return LISTING_FIELDS.shopee;
+  return platformListingFields(plat.listingTemplate, visited);
+}
+function listingPlatformDisplayName(idKey){
+  if(idKey==='ml') return 'Mercado Livre';
+  if(idKey==='shopee') return 'Shopee';
+  const plat = (state.settings.platforms||[]).find(p=>p.id===idKey);
+  return plat ? plat.name : idKey;
+}
+// l.ml/l.shopee continuam do jeito que sempre foram (zero risco de regressão);
+// plataformas extras vivem à parte em l.extra, por id da plataforma.
+function listingPlatformData(l, idKey){
+  if(!l) return {};
+  if(idKey==='ml') return l.ml||{};
+  if(idKey==='shopee') return l.shopee||{};
+  return (l.extra||{})[idKey] || {};
+}
 function listingFor(productId){ return state.listings.find(l=>l.productId===productId); }
 function listingHasContent(l){
   if(!l) return false;
   if((l.fotos||[]).length) return true;
-  return ['ml','shopee'].some(plat => LISTING_FIELDS[plat].some(f => (l[plat]||{})[f.key]));
+  if(['ml','shopee'].some(plat => LISTING_FIELDS[plat].some(f => (l[plat]||{})[f.key]))) return true;
+  return extraListingPlatforms().some(plat => platformListingFields(plat.id).some(f => listingPlatformData(l, plat.id)[f.key]));
 }
 function listingIsComplete(l){
   if(!l) return false;
   const na = l.naFields || {};
   const sharedOk = LISTING_SHARED_FIELDS.every(f => na[`shared_${f.key}`] || (l.ml||{})[f.key]);
   const platOk = plat => LISTING_FIELDS[plat].filter(f=>!SHARED_LISTING_KEYS.includes(f.key)).every(f => na[`${plat}_${f.key}`] || (l[plat]||{})[f.key]);
-  return sharedOk && platOk('ml') && platOk('shopee');
+  const extraOk = extraListingPlatforms().every(plat => platformListingFields(plat.id).filter(f=>!SHARED_LISTING_KEYS.includes(f.key)).every(f => na[`${plat.id}_${f.key}`] || listingPlatformData(l, plat.id)[f.key]));
+  return sharedOk && platOk('ml') && platOk('shopee') && extraOk;
 }
 // SKU curto e determinístico a partir do nome do produto, ex: "Espaço Cafe" -> "POG-ESPACO-CAFE".
 const ACCENT_MAP = {'á':'a','à':'a','â':'a','ã':'a','ä':'a','é':'e','è':'e','ê':'e','ë':'e','í':'i','ì':'i','î':'i','ï':'i','ó':'o','ò':'o','ô':'o','õ':'o','ö':'o','ú':'u','ù':'u','û':'u','ü':'u','ç':'c','ñ':'n'};
@@ -2889,10 +2935,21 @@ function defaultListingDraft(p){
   const c = calcProduct(p);
   const peso = num(totalWeight(p)/1000,2);
   const sku = generateSku(p);
-  return {
+  const out = {
     ml: { titulo:p.name.slice(0,60), preco:num(c.practicedPriceMl,2), estoque:p.stock, sku, condicao:'Novo', marca:'Piece of Geek 3D', peso, tipoAnuncio:'Clássico' },
     shopee: { nome:p.name.slice(0,120), preco:num(c.practicedPriceShopee,2), estoque:p.stock, sku, marca:'Piece of Geek 3D', peso },
+    extra: {},
   };
+  extraListingPlatforms().forEach(plat=>{
+    const fields = platformListingFields(plat.id);
+    const titleField = fields.find(f=>f.key==='titulo'||f.key==='nome');
+    const base = { preco:num((c.suggestedPriceExtra[plat.id]!=null?c.practicedPriceExtra[plat.id]:0),2), estoque:p.stock, sku, marca:'Piece of Geek 3D', peso };
+    if(titleField) base[titleField.key] = p.name.slice(0, titleField.maxlength||120);
+    if(fields.some(f=>f.key==='condicao')) base.condicao = 'Novo';
+    if(fields.some(f=>f.key==='tipoAnuncio')) base.tipoAnuncio = 'Clássico';
+    out.extra[plat.id] = base;
+  });
+  return out;
 }
 // Preenche os campos em branco com o valor automático, mas nunca sobrescreve o que o usuário já preencheu.
 function mergeListingValues(auto, existing){
@@ -2902,7 +2959,7 @@ function mergeListingValues(auto, existing){
 }
 function listingFieldSuggestions(idKey, key, presets){
   const platform = idKey==='shared' ? 'ml' : idKey;
-  const fromHistory = state.listings.map(l=>(l[platform]||{})[key]).filter(Boolean);
+  const fromHistory = state.listings.map(l=>listingPlatformData(l, platform)[key]).filter(Boolean);
   return Array.from(new Set([...(presets||[]), ...fromHistory]));
 }
 let anunciosFilter = { search:'' };
@@ -2926,9 +2983,11 @@ function groupProductsByCategory(products){
   return keys.map(category=>({category, products:groups[category]}));
 }
 function listingPriceDisplay(l, p){
-  const precoMl = l.ml.preco, precoShopee = l.shopee.preco;
-  if(precoMl && precoShopee && precoMl!==precoShopee) return `ML ${brl(parseFloat(precoMl.replace(',','.'))||0)} · Shopee ${brl(parseFloat(precoShopee.replace(',','.'))||0)}`;
-  return brl(parseFloat((precoMl||precoShopee||'').replace(',','.')) || calcProduct(p).practicedPrice);
+  const entries = [['ML', l.ml.preco], ['Shopee', l.shopee.preco], ...extraListingPlatforms().map(plat=>[plat.name, listingPlatformData(l, plat.id).preco])].filter(([,v])=>v);
+  if(entries.length===0) return brl(calcProduct(p).practicedPrice);
+  const allSame = entries.every(([,v])=>v===entries[0][1]);
+  if(allSame) return brl(parseFloat(String(entries[0][1]).replace(',','.'))||0);
+  return entries.map(([name,v])=>`${name} ${brl(parseFloat(String(v).replace(',','.'))||0)}`).join(' · ');
 }
 function renderAnunciosLista(){
   const q = anunciosFilter.search.toLowerCase();
@@ -2970,7 +3029,13 @@ function renderAnunciosProntos(){
   const grouped = groupProductsByCategory(ready.map(r=>r.p)).map(({category, products})=>{
     const cards = products.map(p=>{
       const l = listingFor(p.id);
-      const titulo = l.ml.titulo || l.shopee.nome || p.name;
+      const extras = extraListingPlatforms();
+      const tituloExtra = extras.map(plat=>{
+        const fields = platformListingFields(plat.id);
+        const titleKey = fields.some(f=>f.key==='titulo') ? 'titulo' : 'nome';
+        return listingPlatformData(l, plat.id)[titleKey];
+      }).find(Boolean);
+      const titulo = l.ml.titulo || l.shopee.nome || tituloExtra || p.name;
       const estoque = l.ml.estoque || l.shopee.estoque || p.stock;
       const descricao = l.ml.descricao || l.shopee.descricao || '';
       const photos = [...(p.photo?[p.photo]:[]), ...(l.fotos||[])];
@@ -2986,9 +3051,10 @@ function renderAnunciosProntos(){
           <div style="color:var(--nozzle);font-weight:700;font-family:var(--font-mono);font-size:14px;">${listingPriceDisplay(l,p)}</div>
           <div style="font-size:12px;color:var(--text-dim);">Estoque: ${estoque}</div>
           ${descricao ? `<div style="font-size:12px;color:var(--text-dim);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;">${descricao}</div>` : ''}
-          ${(l.ml.link||l.shopee.link) ? `<div style="display:flex;gap:6px;flex-wrap:wrap;">
+          ${(l.ml.link||l.shopee.link||extras.some(plat=>listingPlatformData(l,plat.id).link)) ? `<div style="display:flex;gap:6px;flex-wrap:wrap;">
             ${l.ml.link?`<a href="${l.ml.link}" target="_blank" rel="noopener noreferrer" style="font-size:11px;">ML ↗</a>`:''}
             ${l.shopee.link?`<a href="${l.shopee.link}" target="_blank" rel="noopener noreferrer" style="font-size:11px;">Shopee ↗</a>`:''}
+            ${extras.map(plat=>{ const link = listingPlatformData(l,plat.id).link; return link ? `<a href="${link}" target="_blank" rel="noopener noreferrer" style="font-size:11px;">${plat.name} ↗</a>` : ''; }).join('')}
           </div>` : ''}
           <div style="margin-top:auto;display:flex;gap:6px;flex-wrap:wrap;">
             <button class="btn ghost sm" style="flex:1;" onclick="openListingViewModal('${p.id}')">Ver anúncio</button>
@@ -3006,7 +3072,7 @@ function renderAnunciosProntos(){
 // conta pro status Pronto/Incompleto (só existe depois de publicar) e não
 // entra no Excel exportado (é só referência interna, não um dado do anúncio).
 function renderListingLinkField(platform, val){
-  const platName = platform==='ml' ? 'Mercado Livre' : 'Shopee';
+  const platName = listingPlatformDisplayName(platform);
   const openLink = val ? `<a href="${val}" target="_blank" rel="noopener noreferrer" class="btn ghost sm" style="margin-top:6px;display:inline-flex;">Abrir anúncio ↗</a>` : '';
   return `<div class="field"><label>Link do anúncio publicado na ${platName} (opcional)</label><input id="lst_${platform}_link" type="url" value="${val||''}" placeholder="Cole aqui depois de publicar">${openLink}</div>`;
 }
@@ -3037,7 +3103,7 @@ function renderListingField(idKey, f, val, isNa){
       <input id="${id}" value="${val!=null?val:''}" placeholder="Digite a nova opção" style="margin-top:6px;display:${isCustomVal?'block':'none'};" ${dis}>
     </div>`;
   }
-  const isPreco = f.key==='preco' && (idKey==='ml'||idKey==='shopee');
+  const isPreco = f.key==='preco' && idKey!=='shared';
   const syncAttr = (idKey==='ml' && f.key==='titulo') ? `oninput="syncListingTitle(this.value)"` : isPreco ? `oninput="updateListingFeeHint('${idKey}')"` : '';
   const feeHint = isPreco ? `<div id="lstFeeHint_${idKey}" class="field hint" style="margin-top:-8px;"></div>` : '';
   return `<div class="field"><label>${f.label}${naBox}</label><input id="${id}" ${f.maxlength?`maxlength="${f.maxlength}"`:''} value="${val!=null?val:''}" ${dis} ${syncAttr}></div>${feeHint}`;
@@ -3056,7 +3122,7 @@ function updateListingFeeHint(idKey){
   const el = document.getElementById(`lst_${idKey}_preco`);
   const hintEl = document.getElementById(`lstFeeHint_${idKey}`);
   if(!el || !hintEl) return;
-  const platformName = idKey==='ml' ? 'Mercado Livre' : 'Shopee';
+  const platformName = listingPlatformDisplayName(idKey);
   const price = parseFloat((el.value||'').replace(',','.'));
   const plat = (state.settings.platforms||[]).find(pl=>pl.name===platformName);
   if(!price || price<=0 || !plat){ hintEl.textContent = ''; return; }
@@ -3072,24 +3138,35 @@ function toggleListingFieldNa(fieldId, naKey, checked){
   if(sel){ sel.disabled = checked; if(checked) sel.value = ''; }
 }
 function switchListingTab(platform){
-  document.getElementById('lstPanelMl').style.display = platform==='ml' ? '' : 'none';
-  document.getElementById('lstPanelShopee').style.display = platform==='shopee' ? '' : 'none';
-  document.getElementById('lstTabBtnMl').classList.toggle('active', platform==='ml');
-  document.getElementById('lstTabBtnShopee').classList.toggle('active', platform==='shopee');
+  const allKeys = ['ml','shopee', ...extraListingPlatforms().map(p=>p.id)];
+  allKeys.forEach(key=>{
+    const panel = document.getElementById(`lstPanel_${key}`);
+    const btn = document.getElementById(`lstTabBtn_${key}`);
+    if(panel) panel.style.display = key===platform ? '' : 'none';
+    if(btn) btn.classList.toggle('active', key===platform);
+  });
 }
 function openListingModal(id){
   const p = state.products.find(x=>x.id===id);
   if(!p) return;
   const existing = listingFor(id);
   const auto = defaultListingDraft(p);
-  const draft = { ml: mergeListingValues(auto.ml, existing && existing.ml), shopee: mergeListingValues(auto.shopee, existing && existing.shopee) };
+  const extras = extraListingPlatforms();
+  const draft = { ml: mergeListingValues(auto.ml, existing && existing.ml), shopee: mergeListingValues(auto.shopee, existing && existing.shopee), extra: {} };
+  extras.forEach(plat=>{ draft.extra[plat.id] = mergeListingValues(auto.extra[plat.id], existing && existing.extra && existing.extra[plat.id]); });
   editingListingPhotos = (existing && existing.fotos) ? existing.fotos.slice() : [];
   editingNaFields = Object.assign({}, existing && existing.naFields);
   Object.keys(editingNaFields).forEach(naKey=>{
     const [platKey, fieldKey] = [naKey.slice(0,naKey.indexOf('_')), naKey.slice(naKey.indexOf('_')+1)];
     if(platKey==='shared'){ draft.ml[fieldKey]=''; draft.shopee[fieldKey]=''; }
-    else if(draft[platKey]) draft[platKey][fieldKey] = '';
+    else if(platKey==='ml'||platKey==='shopee'){ draft[platKey][fieldKey] = ''; }
+    else if(draft.extra[platKey]) draft.extra[platKey][fieldKey] = '';
   });
+  const extraTabsHtml = extras.map(plat=>`<button type="button" class="tabbtn" id="lstTabBtn_${plat.id}" onclick="switchListingTab('${plat.id}')">${plat.name}</button>`).join('');
+  const extraPanelsHtml = extras.map(plat=>{
+    const fields = platformListingFields(plat.id).filter(f=>!SHARED_LISTING_KEYS.includes(f.key));
+    return `<div id="lstPanel_${plat.id}" style="display:none;">${renderListingLinkField(plat.id, draft.extra[plat.id].link)}${fields.map(f=>renderListingField(plat.id, f, (draft.extra[plat.id]||{})[f.key], !!editingNaFields[`${plat.id}_${f.key}`])).join('')}</div>`;
+  }).join('');
   showModal(`Anúncio — ${p.name}`, `
     <div class="field hint" style="margin-top:-4px;margin-bottom:12px;">Campos iguais aos da planilha de exportação — preencha, salve o rascunho e exporte o Excel pra colar no formulário de cada marketplace. Marque "não se aplica" pra um campo não contar como pendente.</div>
     <div style="display:flex;gap:12px;align-items:center;margin-bottom:14px;">
@@ -3101,14 +3178,16 @@ function openListingModal(id){
       <input type="file" accept="image/*" multiple id="lstPhotoInput" onchange="handleListingPhotoUpload(this)">
     </div>
     <div id="lstPhotoPreview" style="margin-bottom:14px;"></div>
-    <div class="field hint" style="margin:0 0 4px;font-weight:600;color:var(--text-dim);">Campos comuns (usados nos dois marketplaces)</div>
+    <div class="field hint" style="margin:0 0 4px;font-weight:600;color:var(--text-dim);">Campos comuns (usados em todas as plataformas)</div>
     ${LISTING_SHARED_FIELDS.map(f=>renderListingField('shared', f, (draft.ml||{})[f.key], !!editingNaFields[`shared_${f.key}`])).join('')}
     <div class="tabbar">
-      <button type="button" class="tabbtn active" id="lstTabBtnMl" onclick="switchListingTab('ml')">Mercado Livre</button>
-      <button type="button" class="tabbtn" id="lstTabBtnShopee" onclick="switchListingTab('shopee')">Shopee</button>
+      <button type="button" class="tabbtn active" id="lstTabBtn_ml" onclick="switchListingTab('ml')">Mercado Livre</button>
+      <button type="button" class="tabbtn" id="lstTabBtn_shopee" onclick="switchListingTab('shopee')">Shopee</button>
+      ${extraTabsHtml}
     </div>
-    <div id="lstPanelMl">${renderListingLinkField('ml', draft.ml.link)}${LISTING_FIELDS.ml.filter(f=>!SHARED_LISTING_KEYS.includes(f.key)).map(f=>renderListingField('ml', f, (draft.ml||{})[f.key], !!editingNaFields[`ml_${f.key}`])).join('')}</div>
-    <div id="lstPanelShopee" style="display:none;">${renderListingLinkField('shopee', draft.shopee.link)}${LISTING_FIELDS.shopee.filter(f=>!SHARED_LISTING_KEYS.includes(f.key)).map(f=>renderListingField('shopee', f, (draft.shopee||{})[f.key], !!editingNaFields[`shopee_${f.key}`])).join('')}</div>
+    <div id="lstPanel_ml">${renderListingLinkField('ml', draft.ml.link)}${LISTING_FIELDS.ml.filter(f=>!SHARED_LISTING_KEYS.includes(f.key)).map(f=>renderListingField('ml', f, (draft.ml||{})[f.key], !!editingNaFields[`ml_${f.key}`])).join('')}</div>
+    <div id="lstPanel_shopee" style="display:none;">${renderListingLinkField('shopee', draft.shopee.link)}${LISTING_FIELDS.shopee.filter(f=>!SHARED_LISTING_KEYS.includes(f.key)).map(f=>renderListingField('shopee', f, (draft.shopee||{})[f.key], !!editingNaFields[`shopee_${f.key}`])).join('')}</div>
+    ${extraPanelsHtml}
     <div class="modal-actions" style="justify-content:space-between;flex-wrap:wrap;row-gap:10px;">
       ${listingHasContent(existing) ? `<button class="btn ghost" style="color:var(--red);" onclick="deleteListingDraft('${id}')">Excluir rascunho</button>` : '<span></span>'}
       <div style="display:flex;gap:10px;flex-wrap:wrap;">
@@ -3121,9 +3200,10 @@ function openListingModal(id){
   renderListingPhotoPreview();
   updateListingFeeHint('ml');
   updateListingFeeHint('shopee');
+  extras.forEach(plat=>updateListingFeeHint(plat.id));
 }
 function readListingForm(){
-  const out = { ml:{}, shopee:{} };
+  const out = { ml:{}, shopee:{}, extra:{} };
   ['ml','shopee'].forEach(platform=>{
     LISTING_FIELDS[platform].forEach(f=>{
       const idKey = SHARED_LISTING_KEYS.includes(f.key) ? 'shared' : platform;
@@ -3132,6 +3212,17 @@ function readListingForm(){
     });
     const linkEl = document.getElementById(`lst_${platform}_link`);
     out[platform].link = linkEl ? linkEl.value.trim() : '';
+  });
+  extraListingPlatforms().forEach(plat=>{
+    const data = {};
+    platformListingFields(plat.id).forEach(f=>{
+      const idKey = SHARED_LISTING_KEYS.includes(f.key) ? 'shared' : plat.id;
+      const el = document.getElementById(`lst_${idKey}_${f.key}`);
+      data[f.key] = el ? el.value.trim() : '';
+    });
+    const linkEl = document.getElementById(`lst_${plat.id}_link`);
+    data.link = linkEl ? linkEl.value.trim() : '';
+    out.extra[plat.id] = data;
   });
   return out;
 }
@@ -3180,7 +3271,7 @@ function saveListingDraft(id){
   const values = readListingForm();
   let l = listingFor(id);
   if(!l){ l = { id:uid(), productId:id }; state.listings.push(l); }
-  Object.assign(l, { productName:p.name, ml:values.ml, shopee:values.shopee, fotos:editingListingPhotos.slice(), naFields:Object.assign({},editingNaFields), updatedAt: new Date().toISOString() });
+  Object.assign(l, { productName:p.name, ml:values.ml, shopee:values.shopee, extra:values.extra, fotos:editingListingPhotos.slice(), naFields:Object.assign({},editingNaFields), updatedAt: new Date().toISOString() });
   saveListings();
   toast('Salvo');
   closeModal(); renderContent();
@@ -3192,6 +3283,11 @@ function deleteListingDraft(id){
   toast('Rascunho excluído');
   closeModal(); renderContent();
 }
+// Nomes de aba do Excel têm limite de 31 caracteres e não aceitam alguns
+// símbolos — sanitiza pra não travar a exportação com nome de plataforma livre.
+function sanitizeSheetName(name){
+  return (name||'Plataforma').replace(/[\\/*?:\[\]]/g,'').slice(0,31) || 'Plataforma';
+}
 function exportListingXlsx(id){
   const p = state.products.find(x=>x.id===id);
   if(!p) return;
@@ -3201,6 +3297,12 @@ function exportListingXlsx(id){
   ['ml','shopee'].forEach(platform=>{
     const rows = [LISTING_FIELDS[platform].map(f=>f.label), LISTING_FIELDS[platform].map(f=>values[platform][f.key]||'')];
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), platform==='ml'?'Mercado Livre':'Shopee');
+  });
+  extraListingPlatforms().forEach(plat=>{
+    const fields = platformListingFields(plat.id);
+    const data = values.extra[plat.id]||{};
+    const rows = [fields.map(f=>f.label), fields.map(f=>data[f.key]||'')];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), sanitizeSheetName(plat.name));
   });
   XLSX.writeFile(wb, `anuncio-${p.name.toLowerCase().replace(/[^a-z0-9]+/g,'-')}.xlsx`);
   toast('Excel exportado');
@@ -3214,6 +3316,12 @@ function exportAllReadyListingsXlsx(){
     const rows = [LISTING_FIELDS[platform].map(f=>f.label)];
     ready.forEach(l=> rows.push(LISTING_FIELDS[platform].map(f=>(l[platform]||{})[f.key]||'')));
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), platform==='ml'?'Mercado Livre':'Shopee');
+  });
+  extraListingPlatforms().forEach(plat=>{
+    const fields = platformListingFields(plat.id);
+    const rows = [fields.map(f=>f.label)];
+    ready.forEach(l=> rows.push(fields.map(f=>listingPlatformData(l, plat.id)[f.key]||'')));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), sanitizeSheetName(plat.name));
   });
   XLSX.writeFile(wb, `anuncios-prontos-${todayStr()}.xlsx`);
   toast(`${ready.length} anúncio(s) exportado(s)`);
@@ -3256,9 +3364,16 @@ function duplicateListingToProduct(sourceId, targetId){
     if(LISTING_FIELDS.ml.some(f=>f.key===key) && source.ml && source.ml[key]) base.ml[key] = source.ml[key];
     if(LISTING_FIELDS.shopee.some(f=>f.key===key) && source.shopee && source.shopee[key]) base.shopee[key] = source.shopee[key];
   });
+  extraListingPlatforms().forEach(plat=>{
+    const fields = platformListingFields(plat.id);
+    const sourceData = listingPlatformData(source, plat.id);
+    DUPLICATE_CARRY_KEYS.forEach(key=>{
+      if(fields.some(f=>f.key===key) && sourceData[key]) base.extra[plat.id][key] = sourceData[key];
+    });
+  });
   let target = listingFor(targetId);
   if(!target){ target = { id:uid(), productId:targetId }; state.listings.push(target); }
-  Object.assign(target, { productName:targetProduct.name, ml:base.ml, shopee:base.shopee, naFields:Object.assign({}, source.naFields), updatedAt: new Date().toISOString() });
+  Object.assign(target, { productName:targetProduct.name, ml:base.ml, shopee:base.shopee, extra:base.extra, naFields:Object.assign({}, source.naFields), updatedAt: new Date().toISOString() });
   closeModal();
   openListingModal(targetId);
   toast('Anúncio duplicado — confira os campos e salve');
@@ -3269,13 +3384,18 @@ function openListingViewModal(id){
   const p = state.products.find(x=>x.id===id);
   const l = listingFor(id);
   if(!p || !l) return;
+  const extras = extraListingPlatforms();
+  const extraTabsHtml = extras.map(plat=>`<button type="button" class="tabbtn" id="viewTabBtn_${plat.id}" onclick="switchListingViewTab('${plat.id}')">${plat.name}</button>`).join('');
+  const extraPanelsHtml = extras.map(plat=>`<div id="viewPanel_${plat.id}" style="display:none;">${renderListingViewPanel(p, l, plat.id)}</div>`).join('');
   showModal(`Anúncio — ${p.name}`, `
     <div class="tabbar">
-      <button type="button" class="tabbtn active" id="viewTabBtnMl" onclick="switchListingViewTab('ml')">Mercado Livre</button>
-      <button type="button" class="tabbtn" id="viewTabBtnShopee" onclick="switchListingViewTab('shopee')">Shopee</button>
+      <button type="button" class="tabbtn active" id="viewTabBtn_ml" onclick="switchListingViewTab('ml')">Mercado Livre</button>
+      <button type="button" class="tabbtn" id="viewTabBtn_shopee" onclick="switchListingViewTab('shopee')">Shopee</button>
+      ${extraTabsHtml}
     </div>
-    <div id="viewPanelMl">${renderListingViewPanel(p, l, 'ml')}</div>
-    <div id="viewPanelShopee" style="display:none;">${renderListingViewPanel(p, l, 'shopee')}</div>
+    <div id="viewPanel_ml">${renderListingViewPanel(p, l, 'ml')}</div>
+    <div id="viewPanel_shopee" style="display:none;">${renderListingViewPanel(p, l, 'shopee')}</div>
+    ${extraPanelsHtml}
     <div class="modal-actions">
       <button class="btn ghost" onclick="closeModal()">Fechar</button>
       <button class="btn primary" onclick="openListingModal('${id}')">Editar</button>
@@ -3283,20 +3403,24 @@ function openListingViewModal(id){
   `);
 }
 function switchListingViewTab(platform){
-  document.getElementById('viewPanelMl').style.display = platform==='ml' ? '' : 'none';
-  document.getElementById('viewPanelShopee').style.display = platform==='shopee' ? '' : 'none';
-  document.getElementById('viewTabBtnMl').classList.toggle('active', platform==='ml');
-  document.getElementById('viewTabBtnShopee').classList.toggle('active', platform==='shopee');
+  const allKeys = ['ml','shopee', ...extraListingPlatforms().map(p=>p.id)];
+  allKeys.forEach(key=>{
+    const panel = document.getElementById(`viewPanel_${key}`);
+    const btn = document.getElementById(`viewTabBtn_${key}`);
+    if(panel) panel.style.display = key===platform ? '' : 'none';
+    if(btn) btn.classList.toggle('active', key===platform);
+  });
 }
 function renderListingViewPanel(p, l, platform){
-  const data = l[platform] || {};
-  const titleKey = platform==='ml' ? 'titulo' : 'nome';
+  const data = listingPlatformData(l, platform);
+  const fields = platform==='ml' ? LISTING_FIELDS.ml : platform==='shopee' ? LISTING_FIELDS.shopee : platformListingFields(platform);
+  const titleKey = fields.some(f=>f.key==='titulo') ? 'titulo' : 'nome';
   const titulo = data[titleKey] || p.name;
   const preco = data.preco;
   const photos = [...(p.photo?[p.photo]:[]), ...(l.fotos||[])];
   const cover = photos[0];
   const thumbs = photos.length>1 ? `<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">${photos.slice(1,6).map(ph=>`<img src="${ph}" style="width:52px;height:52px;object-fit:cover;border-radius:6px;border:1px solid var(--line);">`).join('')}</div>` : '';
-  const specFields = LISTING_FIELDS[platform].filter(f=>f.key!==titleKey && f.key!=='descricao' && data[f.key]);
+  const specFields = fields.filter(f=>f.key!==titleKey && f.key!=='descricao' && data[f.key]);
   const specsHtml = specFields.map(f=>`<div style="display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-bottom:1px solid var(--line-soft);font-size:13px;"><span style="color:var(--text-dim);">${f.label.replace(/\s*\(.*?\)/,'')}</span><span style="font-weight:500;text-align:right;">${data[f.key]}</span></div>`).join('');
   return `
     <div style="display:flex;gap:20px;flex-wrap:wrap;margin-top:14px;">
@@ -3388,6 +3512,7 @@ function openProductModal(id){
       <div class="field"><label>Preço praticado — Mercado Livre (R$)</label><input type="number" id="pPriceMl" value="${p.practicedPriceMl||''}" step="0.01" placeholder="deixe em branco = preço sugerido" oninput="this.dataset.touched='1'"></div>
       <div class="field"><label>Preço praticado — Shopee (R$)</label><input type="number" id="pPriceShopee" value="${p.practicedPriceShopee||''}" step="0.01" placeholder="deixe em branco = preço sugerido" oninput="this.dataset.touched='1'"></div>
     </div>
+    ${extraListingPlatforms().map(plat=>`<div class="field"><label>Preço praticado — ${plat.name} (R$)</label><input type="number" id="pPriceExtra_${plat.id}" value="${(p.practicedPriceExtra||{})[plat.id]||''}" step="0.01" placeholder="deixe em branco = preço sugerido" oninput="this.dataset.touched='1'"></div>`).join('')}
     <div class="field"><label>Estoque inicial (un)</label><input type="number" id="pStock" value="${p.stock}" step="1"></div>
     <div class="helper-block" id="productPreview"></div>
     <div class="modal-actions">
@@ -3514,6 +3639,7 @@ function updateProductPreview(){
     <div class="calc-line"><span>Preço sugerido — venda própria (margem de ${num(form.desiredMarginPct,0)}%)</span><span>${brl(c.suggestedPrice)}</span></div>
     <div class="calc-line" style="color:var(--text-faint);"><span>↳ Mercado Livre (já com a taxa)</span><span>${brl(c.suggestedPriceMl)}</span></div>
     <div class="calc-line" style="color:var(--text-faint);"><span>↳ Shopee (já com a taxa)</span><span>${brl(c.suggestedPriceShopee)}</span></div>
+    ${extraListingPlatforms().map(plat=>`<div class="calc-line" style="color:var(--text-faint);"><span>↳ ${plat.name} (já com a taxa)</span><span>${brl(c.suggestedPriceExtra[plat.id])}</span></div>`).join('')}
   `;
   const priceInput = document.getElementById('pPrice');
   if(priceInput && !priceInput.dataset.touched && document.activeElement!==priceInput){
@@ -3527,6 +3653,12 @@ function updateProductPreview(){
   if(priceShopeeInput && !priceShopeeInput.dataset.touched && document.activeElement!==priceShopeeInput){
     priceShopeeInput.placeholder = 'sugerido: '+c.suggestedPriceShopee.toFixed(2);
   }
+  extraListingPlatforms().forEach(plat=>{
+    const inputEl = document.getElementById(`pPriceExtra_${plat.id}`);
+    if(inputEl && !inputEl.dataset.touched && document.activeElement!==inputEl){
+      inputEl.placeholder = 'sugerido: '+c.suggestedPriceExtra[plat.id].toFixed(2);
+    }
+  });
 }
 function confirmProduct(id){
   const form = readProductForm();
@@ -3541,12 +3673,17 @@ function confirmProduct(id){
   const practicedPrice = priceRaw ? parseFloat(priceRaw) : c.suggestedPrice;
   const practicedPriceMl = priceMlRaw ? parseFloat(priceMlRaw) : c.suggestedPriceMl;
   const practicedPriceShopee = priceShopeeRaw ? parseFloat(priceShopeeRaw) : c.suggestedPriceShopee;
-  if(practicedPrice<0 || stock<0 || practicedPriceMl<0 || practicedPriceShopee<0){ toast('Preço e estoque não podem ser negativos','err'); return; }
+  const practicedPriceExtra = {};
+  extraListingPlatforms().forEach(plat=>{
+    const raw = (document.getElementById(`pPriceExtra_${plat.id}`)||{}).value;
+    practicedPriceExtra[plat.id] = raw ? parseFloat(raw) : c.suggestedPriceExtra[plat.id];
+  });
+  if(practicedPrice<0 || stock<0 || practicedPriceMl<0 || practicedPriceShopee<0 || Object.values(practicedPriceExtra).some(v=>v<0)){ toast('Preço e estoque não podem ser negativos','err'); return; }
   if(id){
     const p = state.products.find(x=>x.id===id);
-    Object.assign(p, form, { practicedPrice, practicedPriceMl, practicedPriceShopee, stock, photo: editingPhotoData });
+    Object.assign(p, form, { practicedPrice, practicedPriceMl, practicedPriceShopee, practicedPriceExtra, stock, photo: editingPhotoData });
   } else {
-    state.products.push({ id:uid(), ...form, practicedPrice, practicedPriceMl, practicedPriceShopee, stock, photo: editingPhotoData });
+    state.products.push({ id:uid(), ...form, practicedPrice, practicedPriceMl, practicedPriceShopee, practicedPriceExtra, stock, photo: editingPhotoData });
   }
   saveProducts();
   toast(id?'Produto atualizado':'Produto criado');
@@ -4118,8 +4255,10 @@ function renderPlatformRows(){
   el.innerHTML = editingPlatforms.map((p,i)=>{
     const isML = /mercado\s*livre/i.test(p.name);
     const isShopee = /shopee/i.test(p.name) && p.tiers;
+    const canHaveListing = !isML && !isShopee;
+    const otherTemplateOptions = canHaveListing ? editingPlatforms.filter((op,oi)=>oi!==i && op.listingTemplate && !/mercado\s*livre/i.test(op.name) && !(/shopee/i.test(op.name)&&op.tiers)) : [];
     return `
-    <div style="display:grid;grid-template-columns:minmax(0,2.2fr) minmax(0,0.8fr) minmax(0,0.8fr) 28px;gap:8px;align-items:end;margin-bottom:${isML||isShopee?4:8}px;">
+    <div style="display:grid;grid-template-columns:minmax(0,2.2fr) minmax(0,0.8fr) minmax(0,0.8fr) 28px;gap:8px;align-items:end;margin-bottom:${(isML||isShopee||canHaveListing)?4:8}px;">
       <div class="field" style="margin-bottom:0;min-width:0;">${i===0?'<label>Plataforma</label>':''}<input value="${p.name}" style="min-width:0;" oninput="editingPlatforms[${i}].name=this.value"></div>
       <div class="field" style="margin-bottom:0;min-width:0;">${i===0?'<label>Taxa %</label>':''}<input type="number" step="0.01" value="${p.pct}" style="min-width:0;" oninput="editingPlatforms[${i}].pct=parseFloat(this.value)||0"></div>
       <div class="field" style="margin-bottom:0;min-width:0;">${i===0?'<label>Taxa fixa R$</label>':''}<input type="number" step="0.01" value="${p.fixed}" style="min-width:0;" oninput="editingPlatforms[${i}].fixed=parseFloat(this.value)||0"></div>
@@ -4130,10 +4269,19 @@ function renderPlatformRows(){
       </div>
       <div class="field hint" style="margin-top:-8px;margin-bottom:12px;">Estimativas por grupo de categoria (2026) — o Mercado Livre tem ~477 categorias com percentuais próprios. Confira o valor exato no Seller Center do seu anúncio antes de confiar cegamente.</div>` : ''}
     ${isShopee ? `<div class="field hint" style="margin-top:-8px;margin-bottom:12px;">Taxa % e fixa aqui são só o padrão de fallback — nas vendas, a faixa oficial da Shopee (por valor do produto) é aplicada automaticamente.</div>` : ''}
+    ${canHaveListing ? `<div class="field" style="margin-bottom:12px;"><label>Aba de Anúncios pra "${p.name}"</label>
+      <select onchange="editingPlatforms[${i}].listingTemplate=this.value||null; renderPlatformRows();">
+        <option value="">Sem aba de Anúncios (só taxa pra Vendas)</option>
+        <option value="ml" ${p.listingTemplate==='ml'?'selected':''}>Copiar campos do Mercado Livre</option>
+        <option value="shopee" ${p.listingTemplate==='shopee'?'selected':''}>Copiar campos da Shopee</option>
+        ${otherTemplateOptions.map(op=>`<option value="${op.id}" ${p.listingTemplate===op.id?'selected':''}>Copiar campos de "${op.name}"</option>`).join('')}
+      </select>
+      <div class="field hint" style="margin-top:4px;">${p.listingTemplate?'Produtos ganha um preço próprio pra essa plataforma, e Anúncios ganha uma aba com os mesmos campos da plataforma copiada.':'Sem aba de Anúncios, essa plataforma entra só no cálculo de taxa das vendas.'}</div>
+    </div>` : ''}
   `;}).join('');
 }
 function addPlatformRow(){
-  editingPlatforms.push({id:uid(),name:'Nova plataforma',pct:0,fixed:0});
+  editingPlatforms.push({id:uid(),name:'Nova plataforma',pct:0,fixed:0,listingTemplate:null});
   renderPlatformRows();
 }
 function removePlatformRow(i){
