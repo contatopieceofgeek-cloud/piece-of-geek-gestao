@@ -436,7 +436,22 @@ function calcProduct(prod){
   const practicedPrice = prod.practicedPrice || suggestedPrice;
   const marginValue = practicedPrice - totalCost;
   const marginPct = practicedPrice > 0 ? (marginValue/practicedPrice)*100 : 0;
-  return { materialCost, energyCost, boxCost:bCost, bubbleCost, embalagemCost, depreciation, laborCost, failureCost, totalCost, suggestedPrice, practicedPrice, marginValue, marginPct, desiredMarginPct: desiredMargin*100, machine };
+  const suggestedPriceMl = suggestedPriceForPlatform(suggestedPrice, 'Mercado Livre');
+  const suggestedPriceShopee = suggestedPriceForPlatform(suggestedPrice, 'Shopee');
+  return { materialCost, energyCost, boxCost:bCost, bubbleCost, embalagemCost, depreciation, laborCost, failureCost, totalCost, suggestedPrice, suggestedPriceMl, suggestedPriceShopee, practicedPrice, marginValue, marginPct, desiredMarginPct: desiredMargin*100, machine };
+}
+// Preço que, depois de descontada a taxa daquela plataforma (fixa ou por
+// faixa, ex: Shopee), ainda rende o mesmo "preço sem taxa" de referência —
+// resolvido por aproximações sucessivas pra funcionar com taxa em faixas.
+function suggestedPriceForPlatform(targetNet, platformName){
+  const plat = (state.settings.platforms||[]).find(pl=>pl.name===platformName);
+  if(!plat) return targetNet;
+  let price = targetNet;
+  for(let i=0;i<20;i++){
+    const fee = plat.tiers ? computeTieredFee(plat.tiers, price).fee : price*(plat.pct/100)+(plat.fixed||0);
+    price = targetNet + fee;
+  }
+  return price;
 }
 
 function salesInMonth(ym){ return state.sales.filter(s=>s.date && s.date.slice(0,7)===ym); }
@@ -1001,7 +1016,9 @@ function updateQuickQuotePreview(){
     <div class="calc-line"><span>Mão de obra</span><span>${brl(c.laborCost)}</span></div>
     <div class="calc-line"><span>Margem de falha</span><span>${brl(c.failureCost)}</span></div>
     <div class="calc-line total"><span>Custo total</span><span>${brl(c.totalCost)}</span></div>
-    <div class="calc-line total"><span>Preço sugerido (margem ${num(draft.desiredMarginPct,0)}%)</span><span style="color:var(--green)">${brl(c.suggestedPrice)}</span></div>
+    <div class="calc-line total"><span>Preço sugerido — venda própria (margem ${num(draft.desiredMarginPct,0)}%)</span><span style="color:var(--green)">${brl(c.suggestedPrice)}</span></div>
+    <div class="calc-line" style="color:var(--text-faint);"><span>↳ Mercado Livre (já com a taxa)</span><span>${brl(c.suggestedPriceMl)}</span></div>
+    <div class="calc-line" style="color:var(--text-faint);"><span>↳ Shopee (já com a taxa)</span><span>${brl(c.suggestedPriceShopee)}</span></div>
   `;
 }
 function saveQuoteAsProduct(){
@@ -2008,7 +2025,9 @@ function updateCalculoExample(){
       <div class="calc-line"><span>Mão de obra (${prod.laborMinutes||0}min × ${brl(state.settings.laborHourlyRate||0)}/h)</span><span>${brl(c.laborCost)}</span></div>
       <div class="calc-line"><span>Custo de falha (${num(prod.failureMarginPct*100,0)}% sobre material+energia+depreciação)</span><span>${brl(c.failureCost)}</span></div>
       <div class="calc-line total"><span>Custo total</span><span>${brl(c.totalCost)}</span></div>
-      <div class="calc-line"><span>Preço sugerido (margem de ${num(c.desiredMarginPct,0)}%)</span><span>${brl(c.suggestedPrice)}</span></div>
+      <div class="calc-line"><span>Preço sugerido — venda própria (margem de ${num(c.desiredMarginPct,0)}%)</span><span>${brl(c.suggestedPrice)}</span></div>
+      <div class="calc-line" style="color:var(--text-faint);"><span>↳ Mercado Livre (já com a taxa)</span><span>${brl(c.suggestedPriceMl)}</span></div>
+      <div class="calc-line" style="color:var(--text-faint);"><span>↳ Shopee (já com a taxa)</span><span>${brl(c.suggestedPriceShopee)}</span></div>
       <div class="calc-line"><span>Preço praticado</span><span>${brl(c.practicedPrice)}</span></div>
     </div>
   `;
@@ -2617,7 +2636,9 @@ function updateKitPreview(){
     <div class="calc-line"><span>Material + energia + depreciação + mão de obra + falha</span><span>${brl(c.totalCost-c.embalagemCost)}</span></div>
     <div class="calc-line"><span>Embalagem do kit (1 caixa em vez de ${draft.items.length})</span><span>${brl(c.embalagemCost)}</span></div>
     <div class="calc-line total"><span>Custo total do kit</span><span>${brl(c.totalCost)}</span></div>
-    <div class="calc-line"><span>Preço sugerido (margem ${num(draft.desiredMarginPct,0)}%)</span><span>${brl(c.suggestedPrice)}</span></div>
+    <div class="calc-line"><span>Preço sugerido — venda própria (margem ${num(draft.desiredMarginPct,0)}%)</span><span>${brl(c.suggestedPrice)}</span></div>
+    <div class="calc-line" style="color:var(--text-faint);"><span>↳ Mercado Livre (já com a taxa)</span><span>${brl(c.suggestedPriceMl)}</span></div>
+    <div class="calc-line" style="color:var(--text-faint);"><span>↳ Shopee (já com a taxa)</span><span>${brl(c.suggestedPriceShopee)}</span></div>
     <div class="calc-line" style="color:var(--text-faint);"><span>Soma se vendido separado (embalagem individual de cada um)</span><span>${brl(sumIndividual)}</span></div>
     <div class="calc-line total"><span>Preço final do kit${priceField && priceField.value ? ' (definido por você)' : ''}</span><span style="color:${finalMarginPct<0?'var(--red)':'var(--green)'}">${brl(finalPrice)} — margem real ${num(finalMarginPct,1)}%</span></div>
   `;
@@ -3357,7 +3378,9 @@ function updateProductPreview(){
     <div class="calc-line"><span>Mão de obra</span><span>${brl(c.laborCost)}</span></div>
     <div class="calc-line"><span>Custo de falha</span><span>${brl(c.failureCost)}</span></div>
     <div class="calc-line total"><span>Custo total</span><span>${brl(c.totalCost)}</span></div>
-    <div class="calc-line"><span>Preço sugerido (margem de ${num(form.desiredMarginPct,0)}%)</span><span>${brl(c.suggestedPrice)}</span></div>
+    <div class="calc-line"><span>Preço sugerido — venda própria (margem de ${num(form.desiredMarginPct,0)}%)</span><span>${brl(c.suggestedPrice)}</span></div>
+    <div class="calc-line" style="color:var(--text-faint);"><span>↳ Mercado Livre (já com a taxa)</span><span>${brl(c.suggestedPriceMl)}</span></div>
+    <div class="calc-line" style="color:var(--text-faint);"><span>↳ Shopee (já com a taxa)</span><span>${brl(c.suggestedPriceShopee)}</span></div>
   `;
   const priceInput = document.getElementById('pPrice');
   if(priceInput && !priceInput.dataset.touched && document.activeElement!==priceInput){
