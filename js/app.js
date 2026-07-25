@@ -2820,7 +2820,10 @@ function renderAnunciosLista(){
       <td data-label="Produto">${p.name}</td>
       <td data-label="Preço" class="right num">${brl(calcProduct(p).practicedPrice)}</td>
       <td data-label="Status">${status}</td>
-      <td class="right"><button class="btn ghost sm" onclick="openListingModal('${p.id}')">${hasContent?'Editar anúncio':'Criar anúncio'}</button></td>
+      <td class="right">
+        <button class="btn ghost sm" onclick="openListingModal('${p.id}')">${hasContent?'Editar anúncio':'Criar anúncio'}</button>
+        ${hasContent?`<button class="btn ghost sm" onclick="openDuplicateListingModal('${p.id}')">Duplicar</button>`:''}
+      </td>
     </tr>`;
   }).join('');
   return searchBar + `<div class="card"><div class="tbl-wrap tbl-responsive"><table>
@@ -2831,6 +2834,7 @@ function renderAnunciosLista(){
 function renderAnunciosProntos(){
   const ready = state.products.map(p=>({p, l:listingFor(p.id)})).filter(({l})=>listingIsComplete(l));
   if(ready.length===0) return `<div class="card">${emptyState('Nenhum anúncio pronto ainda — complete todos os campos de um produto na aba Lista')}</div>`;
+  const toolbar = `<div style="margin-bottom:14px;"><button class="btn ghost sm" onclick="exportAllReadyListingsXlsx()">Exportar todos os prontos (Excel)</button></div>`;
   const cards = ready.map(({p,l})=>{
     const titulo = l.ml.titulo || l.shopee.nome || p.name;
     const preco = l.ml.preco || l.shopee.preco || num(calcProduct(p).practicedPrice,2);
@@ -2849,11 +2853,14 @@ function renderAnunciosProntos(){
         <div style="color:var(--nozzle);font-weight:700;font-family:var(--font-mono);font-size:15px;">R$ ${preco}</div>
         <div style="font-size:12px;color:var(--text-dim);">Estoque: ${estoque}</div>
         ${descricao ? `<div style="font-size:12px;color:var(--text-dim);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;">${descricao}</div>` : ''}
-        <button class="btn ghost sm" style="margin-top:auto;" onclick="openListingModal('${p.id}')">Editar anúncio</button>
+        <div style="margin-top:auto;display:flex;gap:6px;">
+          <button class="btn ghost sm" style="flex:1;" onclick="openListingModal('${p.id}')">Editar</button>
+          <button class="btn ghost sm" style="flex:1;" onclick="openDuplicateListingModal('${p.id}')">Duplicar</button>
+        </div>
       </div>
     </div>`;
   }).join('');
-  return `<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(190px,1fr));">${cards}</div>`;
+  return toolbar + `<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(190px,1fr));">${cards}</div>`;
 }
 function renderListingField(idKey, f, val, isNa){
   const id = `lst_${idKey}_${f.key}`;
@@ -3018,6 +3025,64 @@ function exportListingXlsx(id){
   });
   XLSX.writeFile(wb, `anuncio-${p.name.toLowerCase().replace(/[^a-z0-9]+/g,'-')}.xlsx`);
   toast('Excel exportado');
+}
+function exportAllReadyListingsXlsx(){
+  if(typeof XLSX==='undefined'){ toast('Biblioteca de exportação não carregou — verifique sua conexão e tente de novo','err'); return; }
+  const ready = state.products.map(p=>listingFor(p.id)).filter(l=>listingIsComplete(l));
+  if(ready.length===0){ toast('Nenhum anúncio pronto pra exportar','err'); return; }
+  const wb = XLSX.utils.book_new();
+  ['ml','shopee'].forEach(platform=>{
+    const rows = [LISTING_FIELDS[platform].map(f=>f.label)];
+    ready.forEach(l=> rows.push(LISTING_FIELDS[platform].map(f=>(l[platform]||{})[f.key]||'')));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), platform==='ml'?'Mercado Livre':'Shopee');
+  });
+  XLSX.writeFile(wb, `anuncios-prontos-${todayStr()}.xlsx`);
+  toast(`${ready.length} anúncio(s) exportado(s)`);
+}
+// Copia decisões de cadastro (categoria, condição, garantia, tipo de anúncio,
+// variações, pré-venda, envio) de um anúncio pra outro produto — útil pra
+// famílias de produtos parecidos (ex: os vários Skeleton de dinossauro).
+// Preço/estoque/peso/SKU/título são gerados do zero pro produto de destino;
+// modelo/GTIN/dimensões/descrição/fotos ficam em branco pra conferir.
+const DUPLICATE_CARRY_KEYS = ['categoria','condicao','garantia','tipoAnuncio','variacoes','preVenda','envio'];
+function openDuplicateListingModal(sourceId){
+  const source = listingFor(sourceId);
+  const sourceProduct = state.products.find(x=>x.id===sourceId);
+  if(!source || !sourceProduct) return;
+  const others = state.products.filter(x=>x.id!==sourceId);
+  if(others.length===0){ toast('Não há outro produto pra duplicar esse anúncio','err'); return; }
+  showModal(`Duplicar anúncio de "${sourceProduct.name}"`, `
+    <div class="field hint" style="margin-top:-4px;">Copia categoria, condição, garantia, tipo de anúncio, variações, pré-venda e opções de envio. Título, preço, estoque, peso e SKU são gerados do zero pro produto escolhido; modelo, GTIN, dimensões, descrição e fotos ficam em branco pra você preencher.</div>
+    <div class="field"><label>Duplicar para</label><select id="dupTargetProduct">
+      ${others.map(p=>`<option value="${p.id}">${p.name}${listingHasContent(listingFor(p.id))?' (já tem anúncio)':''}</option>`).join('')}
+    </select></div>
+    <div class="modal-actions">
+      <button class="btn ghost" onclick="closeModal()">Cancelar</button>
+      <button class="btn primary" onclick="confirmDuplicateListing('${sourceId}')">Duplicar</button>
+    </div>
+  `);
+}
+function confirmDuplicateListing(sourceId){
+  const targetId = document.getElementById('dupTargetProduct').value;
+  const targetListing = listingFor(targetId);
+  if(listingHasContent(targetListing) && !confirm('Esse produto já tem um anúncio com informações preenchidas. Duplicar vai sobrescrever os campos copiados. Continuar?')) return;
+  duplicateListingToProduct(sourceId, targetId);
+}
+function duplicateListingToProduct(sourceId, targetId){
+  const source = listingFor(sourceId);
+  const targetProduct = state.products.find(x=>x.id===targetId);
+  if(!source || !targetProduct) return;
+  const base = defaultListingDraft(targetProduct);
+  DUPLICATE_CARRY_KEYS.forEach(key=>{
+    if(LISTING_FIELDS.ml.some(f=>f.key===key) && source.ml && source.ml[key]) base.ml[key] = source.ml[key];
+    if(LISTING_FIELDS.shopee.some(f=>f.key===key) && source.shopee && source.shopee[key]) base.shopee[key] = source.shopee[key];
+  });
+  let target = listingFor(targetId);
+  if(!target){ target = { id:uid(), productId:targetId }; state.listings.push(target); }
+  Object.assign(target, { productName:targetProduct.name, ml:base.ml, shopee:base.shopee, naFields:Object.assign({}, source.naFields), updatedAt: new Date().toISOString() });
+  closeModal();
+  openListingModal(targetId);
+  toast('Anúncio duplicado — confira os campos e salve');
 }
 function deleteProduct(id){
   const p = state.products.find(x=>x.id===id);
