@@ -2750,10 +2750,12 @@ function renderProdutos(){
   }
   const groups = {};
   list.forEach(item=>{
-    const cat = (item.p.category||'').trim() || 'Sem categoria';
+    const isKit = item.p.kitComponents && item.p.kitComponents.length;
+    const cat = isKit ? 'Kits' : ((item.p.category||'').trim() || 'Sem categoria');
     (groups[cat] = groups[cat]||[]).push(item);
   });
-  const catKeys = Object.keys(groups).filter(k=>k!=='Sem categoria').sort((a,b)=>a.localeCompare(b,'pt-BR'));
+  const catKeys = Object.keys(groups).filter(k=>k!=='Kits' && k!=='Sem categoria').sort((a,b)=>a.localeCompare(b,'pt-BR'));
+  if(groups['Kits']) catKeys.unshift('Kits');
   if(groups['Sem categoria']) catKeys.push('Sem categoria');
   const sections = catKeys.map(cat=>`<div class="section-title">${cat}</div><div class="card"><div class="tbl-wrap tbl-responsive tbl-compact-mobile"><table>${theadHtml}<tbody>${groups[cat].map(rowHtml).join('')}</tbody></table></div></div>`).join('');
   return filterBar + sections;
