@@ -2836,7 +2836,7 @@ function renderAnunciosProntos(){
     const preco = l.ml.preco || l.shopee.preco || num(calcProduct(p).practicedPrice,2);
     const estoque = l.ml.estoque || l.shopee.estoque || p.stock;
     const descricao = l.ml.descricao || l.shopee.descricao || '';
-    const photos = [...(l.fotos||[]), ...(p.photo?[p.photo]:[])];
+    const photos = [...(p.photo?[p.photo]:[]), ...(l.fotos||[])];
     const cover = photos[0];
     const thumbs = photos.length>1 ? `<div style="display:flex;gap:4px;padding:0 16px;">${photos.slice(1,5).map(ph=>`<img src="${ph}" style="width:28px;height:28px;object-fit:cover;border-radius:4px;border:1px solid var(--line);">`).join('')}</div>` : '';
     return `<div class="card" style="padding:0;overflow:hidden;display:flex;flex-direction:column;">
@@ -2876,7 +2876,12 @@ function renderListingField(idKey, f, val, isNa){
       <datalist id="${listId}">${opts.map(o=>`<option value="${o}"></option>`).join('')}</datalist>
     </div>`;
   }
-  return `<div class="field"><label>${f.label}${naBox}</label><input id="${id}" ${f.maxlength?`maxlength="${f.maxlength}"`:''} value="${val!=null?val:''}" ${dis}></div>`;
+  const syncAttr = (idKey==='ml' && f.key==='titulo') ? `oninput="syncListingTitle(this.value)"` : '';
+  return `<div class="field"><label>${f.label}${naBox}</label><input id="${id}" ${f.maxlength?`maxlength="${f.maxlength}"`:''} value="${val!=null?val:''}" ${dis} ${syncAttr}></div>`;
+}
+function syncListingTitle(val){
+  const el = document.getElementById('lst_shopee_nome');
+  if(el) el.value = val.slice(0,120);
 }
 let editingNaFields = {};
 function toggleListingFieldNa(fieldId, naKey, checked){
