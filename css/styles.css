@@ -106,7 +106,7 @@ input,select,textarea{font-family:var(--font-body);}
 }
 .topbar h1{font-family:var(--font-display);font-size:19px;font-weight:600;margin:0;}
 .topbar p{margin:2px 0 0;color:var(--text-faint);font-size:12.5px;}
-.content{padding:24px 32px 60px;max-width:1760px;}
+.content{padding:24px 32px 60px;max-width:2000px;}
 
 /* ---------- COMMON ---------- */
 .grid{display:grid;gap:14px;}
