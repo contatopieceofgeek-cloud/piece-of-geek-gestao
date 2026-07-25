@@ -2729,7 +2729,7 @@ function renderProdutos(){
       <td class="right num" data-label="Tempo">${num(p.timeH,1)}h</td>
       <td class="right num" data-label="Custo total">${brl(c.totalCost)}</td>
       <td class="right num" data-label="Preço sugerido">${brl(c.suggestedPrice)}</td>
-      <td class="right num" data-label="Preço praticado" title="Venda própria: ${brl(c.practicedPrice)} · Mercado Livre: ${brl(c.practicedPriceMl)} · Shopee: ${brl(c.practicedPriceShopee)}">${brl(c.practicedPrice)}</td>
+      <td class="right num" data-label="Preço praticado">${brl(c.practicedPrice)}<div style="font-size:10px;font-weight:400;color:var(--text-faint);white-space:nowrap;">ML ${brl(c.practicedPriceMl)} · Shopee ${brl(c.practicedPriceShopee)}</div></td>
       <td class="right num" data-label="Margem" style="color:${c.marginValue<0?'var(--red)':'var(--green)'}">${pct(c.marginPct)}</td>
       <td class="right num" data-label="Estoque">${p.stock<=0?`<span class="badge mut">0</span>`:num(p.stock,0)}</td>
       <td class="right"><button class="btn ghost sm" onclick="openProductModal('${p.id}')">Editar</button> <button class="btn ghost sm" onclick="duplicateProduct('${p.id}')">Duplicar</button> <button class="btn ghost sm" onclick="deleteProduct('${p.id}')">Excluir</button></td>
