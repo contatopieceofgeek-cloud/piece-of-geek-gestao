@@ -2733,9 +2733,11 @@ const LISTING_FIELDS = {
 };
 // Campos com o mesmo valor nos dois marketplaces — preenchidos uma vez só
 // (fica de fora das abas ML/Shopee, mas é salvo/exportado nos dois).
-const SHARED_LISTING_KEYS = ['preco','estoque','marca','sku','gtin','peso','descricao'];
+// Preço fica de fora dos campos comuns de propósito — cada marketplace cobra
+// uma taxa diferente, então o preço praticado costuma precisar ser diferente
+// em cada um pra manter a mesma margem líquida.
+const SHARED_LISTING_KEYS = ['estoque','marca','sku','gtin','peso','descricao'];
 const LISTING_SHARED_FIELDS = [
-  {key:'preco', label:'Preço (R$)'},
   {key:'estoque', label:'Estoque'},
   {key:'marca', label:'Marca'},
   {key:'sku', label:'SKU / Código do produto'},
@@ -2801,6 +2803,21 @@ function renderAnuncios(){
   </div>`;
   return tabs + (anunciosView==='prontos' ? renderAnunciosProntos() : renderAnunciosLista());
 }
+function groupProductsByCategory(products){
+  const groups = {};
+  products.forEach(p=>{
+    const cat = (p.category||'').trim() || 'Sem categoria';
+    (groups[cat] = groups[cat]||[]).push(p);
+  });
+  const keys = Object.keys(groups).filter(k=>k!=='Sem categoria').sort((a,b)=>a.localeCompare(b,'pt-BR'));
+  if(groups['Sem categoria']) keys.push('Sem categoria');
+  return keys.map(category=>({category, products:groups[category]}));
+}
+function listingPriceDisplay(l, p){
+  const precoMl = l.ml.preco, precoShopee = l.shopee.preco;
+  if(precoMl && precoShopee && precoMl!==precoShopee) return `ML ${brl(parseFloat(precoMl.replace(',','.'))||0)} · Shopee ${brl(parseFloat(precoShopee.replace(',','.'))||0)}`;
+  return brl(parseFloat((precoMl||precoShopee||'').replace(',','.')) || calcProduct(p).practicedPrice);
+}
 function renderAnunciosLista(){
   const q = anunciosFilter.search.toLowerCase();
   const list = q ? state.products.filter(p=>p.name.toLowerCase().includes(q)) : state.products;
@@ -2808,59 +2825,65 @@ function renderAnunciosLista(){
     <div class="field"><label>Buscar</label><input value="${anunciosFilter.search}" placeholder="Nome do produto..." oninput="anunciosFilter.search=this.value; renderContent();"></div>
   </div>`;
   if(q && list.length===0) return searchBar + `<div class="card">${emptyState('Nenhum produto encontrado')}</div>`;
-  const rows = list.map(p=>{
-    const l = listingFor(p.id);
-    const hasContent = listingHasContent(l);
-    const complete = listingIsComplete(l);
-    const updatedTag = `<span style="color:var(--text-faint);font-size:11px;">atualizado ${fmtDate(((l&&l.updatedAt)||'').slice(0,10))}</span>`;
-    const status = !hasContent ? `<span class="badge mut">Sem anúncio</span>`
-      : complete ? `<span class="badge ok">Pronto</span> ${updatedTag}`
-      : `<span class="badge warn">Incompleto</span> ${updatedTag}`;
-    return `<tr>
-      <td data-label="Produto">${p.name}</td>
-      <td data-label="Preço" class="right num">${brl(calcProduct(p).practicedPrice)}</td>
-      <td data-label="Status">${status}</td>
-      <td class="right">
-        <button class="btn ghost sm" onclick="openListingModal('${p.id}')">${hasContent?'Editar anúncio':'Criar anúncio'}</button>
-        ${hasContent?`<button class="btn ghost sm" onclick="openDuplicateListingModal('${p.id}')">Duplicar</button>`:''}
-      </td>
-    </tr>`;
+  const sections = groupProductsByCategory(list).map(({category, products})=>{
+    const rows = products.map(p=>{
+      const l = listingFor(p.id);
+      const hasContent = listingHasContent(l);
+      const complete = listingIsComplete(l);
+      const updatedTag = `<span style="color:var(--text-faint);font-size:11px;">atualizado ${fmtDate(((l&&l.updatedAt)||'').slice(0,10))}</span>`;
+      const status = !hasContent ? `<span class="badge mut">Sem anúncio</span>`
+        : complete ? `<span class="badge ok">Pronto</span> ${updatedTag}`
+        : `<span class="badge warn">Incompleto</span> ${updatedTag}`;
+      return `<tr>
+        <td data-label="Produto">${p.name}</td>
+        <td data-label="Preço" class="right num">${hasContent ? listingPriceDisplay(l,p) : brl(calcProduct(p).practicedPrice)}</td>
+        <td data-label="Status">${status}</td>
+        <td class="right">
+          <button class="btn ghost sm" onclick="openListingModal('${p.id}')">${hasContent?'Editar anúncio':'Criar anúncio'}</button>
+          ${hasContent?`<button class="btn ghost sm" onclick="openDuplicateListingModal('${p.id}')">Duplicar</button>`:''}
+        </td>
+      </tr>`;
+    }).join('');
+    return `<div class="section-title">${category}</div><div class="card"><div class="tbl-wrap tbl-responsive"><table>
+      <thead><tr><th>Produto</th><th class="right">Preço</th><th>Status</th><th></th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div></div>`;
   }).join('');
-  return searchBar + `<div class="card"><div class="tbl-wrap tbl-responsive"><table>
-    <thead><tr><th>Produto</th><th class="right">Preço</th><th>Status</th><th></th></tr></thead>
-    <tbody>${rows}</tbody>
-  </table></div></div>`;
+  return searchBar + sections;
 }
 function renderAnunciosProntos(){
   const ready = state.products.map(p=>({p, l:listingFor(p.id)})).filter(({l})=>listingIsComplete(l));
   if(ready.length===0) return `<div class="card">${emptyState('Nenhum anúncio pronto ainda — complete todos os campos de um produto na aba Lista')}</div>`;
   const toolbar = `<div style="margin-bottom:14px;"><button class="btn ghost sm" onclick="exportAllReadyListingsXlsx()">Exportar todos os prontos (Excel)</button></div>`;
-  const cards = ready.map(({p,l})=>{
-    const titulo = l.ml.titulo || l.shopee.nome || p.name;
-    const preco = l.ml.preco || l.shopee.preco || num(calcProduct(p).practicedPrice,2);
-    const estoque = l.ml.estoque || l.shopee.estoque || p.stock;
-    const descricao = l.ml.descricao || l.shopee.descricao || '';
-    const photos = [...(p.photo?[p.photo]:[]), ...(l.fotos||[])];
-    const cover = photos[0];
-    const thumbs = photos.length>1 ? `<div style="display:flex;gap:4px;padding:0 16px;">${photos.slice(1,5).map(ph=>`<img src="${ph}" style="width:28px;height:28px;object-fit:cover;border-radius:4px;border:1px solid var(--line);">`).join('')}</div>` : '';
-    return `<div class="card" style="padding:0;overflow:hidden;display:flex;flex-direction:column;">
-      <div style="aspect-ratio:1/1;background:var(--panel-2);display:flex;align-items:center;justify-content:center;">
-        ${cover ? `<img src="${cover}" alt="${p.name}" style="width:100%;height:100%;object-fit:cover;">` : `<span style="color:var(--text-faint);font-size:11px;">Sem foto</span>`}
-      </div>
-      ${thumbs}
-      <div style="padding:14px 16px;display:flex;flex-direction:column;gap:6px;flex:1;">
-        <div style="font-family:var(--font-display);font-weight:600;font-size:14px;line-height:1.3;">${titulo}</div>
-        <div style="color:var(--nozzle);font-weight:700;font-family:var(--font-mono);font-size:15px;">R$ ${preco}</div>
-        <div style="font-size:12px;color:var(--text-dim);">Estoque: ${estoque}</div>
-        ${descricao ? `<div style="font-size:12px;color:var(--text-dim);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;">${descricao}</div>` : ''}
-        <div style="margin-top:auto;display:flex;gap:6px;">
-          <button class="btn ghost sm" style="flex:1;" onclick="openListingModal('${p.id}')">Editar</button>
-          <button class="btn ghost sm" style="flex:1;" onclick="openDuplicateListingModal('${p.id}')">Duplicar</button>
+  const grouped = groupProductsByCategory(ready.map(r=>r.p)).map(({category, products})=>{
+    const cards = products.map(p=>{
+      const l = listingFor(p.id);
+      const titulo = l.ml.titulo || l.shopee.nome || p.name;
+      const estoque = l.ml.estoque || l.shopee.estoque || p.stock;
+      const descricao = l.ml.descricao || l.shopee.descricao || '';
+      const photos = [...(p.photo?[p.photo]:[]), ...(l.fotos||[])];
+      const cover = photos[0];
+      const thumbs = photos.length>1 ? `<div style="display:flex;gap:4px;padding:0 16px;">${photos.slice(1,5).map(ph=>`<img src="${ph}" style="width:28px;height:28px;object-fit:cover;border-radius:4px;border:1px solid var(--line);">`).join('')}</div>` : '';
+      return `<div class="card" style="padding:0;overflow:hidden;display:flex;flex-direction:column;">
+        <div style="aspect-ratio:1/1;background:var(--panel-2);display:flex;align-items:center;justify-content:center;">
+          ${cover ? `<img src="${cover}" alt="${p.name}" style="width:100%;height:100%;object-fit:cover;">` : `<span style="color:var(--text-faint);font-size:11px;">Sem foto</span>`}
         </div>
-      </div>
-    </div>`;
+        ${thumbs}
+        <div style="padding:14px 16px;display:flex;flex-direction:column;gap:6px;flex:1;">
+          <div style="font-family:var(--font-display);font-weight:600;font-size:14px;line-height:1.3;">${titulo}</div>
+          <div style="color:var(--nozzle);font-weight:700;font-family:var(--font-mono);font-size:14px;">${listingPriceDisplay(l,p)}</div>
+          <div style="font-size:12px;color:var(--text-dim);">Estoque: ${estoque}</div>
+          ${descricao ? `<div style="font-size:12px;color:var(--text-dim);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;">${descricao}</div>` : ''}
+          <div style="margin-top:auto;display:flex;gap:6px;">
+            <button class="btn ghost sm" style="flex:1;" onclick="openListingModal('${p.id}')">Editar</button>
+            <button class="btn ghost sm" style="flex:1;" onclick="openDuplicateListingModal('${p.id}')">Duplicar</button>
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+    return `<div class="section-title">${category}</div><div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(190px,1fr));">${cards}</div>`;
   }).join('');
-  return toolbar + `<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(190px,1fr));">${cards}</div>`;
+  return toolbar + grouped;
 }
 function renderListingField(idKey, f, val, isNa){
   const id = `lst_${idKey}_${f.key}`;
@@ -2883,12 +2906,25 @@ function renderListingField(idKey, f, val, isNa){
       <datalist id="${listId}">${opts.map(o=>`<option value="${o}"></option>`).join('')}</datalist>
     </div>`;
   }
-  const syncAttr = (idKey==='ml' && f.key==='titulo') ? `oninput="syncListingTitle(this.value)"` : '';
-  return `<div class="field"><label>${f.label}${naBox}</label><input id="${id}" ${f.maxlength?`maxlength="${f.maxlength}"`:''} value="${val!=null?val:''}" ${dis} ${syncAttr}></div>`;
+  const isPreco = f.key==='preco' && (idKey==='ml'||idKey==='shopee');
+  const syncAttr = (idKey==='ml' && f.key==='titulo') ? `oninput="syncListingTitle(this.value)"` : isPreco ? `oninput="updateListingFeeHint('${idKey}')"` : '';
+  const feeHint = isPreco ? `<div id="lstFeeHint_${idKey}" class="field hint" style="margin-top:-8px;"></div>` : '';
+  return `<div class="field"><label>${f.label}${naBox}</label><input id="${id}" ${f.maxlength?`maxlength="${f.maxlength}"`:''} value="${val!=null?val:''}" ${dis} ${syncAttr}></div>${feeHint}`;
 }
 function syncListingTitle(val){
   const el = document.getElementById('lst_shopee_nome');
   if(el) el.value = val.slice(0,120);
+}
+function updateListingFeeHint(idKey){
+  const el = document.getElementById(`lst_${idKey}_preco`);
+  const hintEl = document.getElementById(`lstFeeHint_${idKey}`);
+  if(!el || !hintEl) return;
+  const platformName = idKey==='ml' ? 'Mercado Livre' : 'Shopee';
+  const price = parseFloat((el.value||'').replace(',','.'));
+  const plat = (state.settings.platforms||[]).find(pl=>pl.name===platformName);
+  if(!price || price<=0 || !plat){ hintEl.textContent = ''; return; }
+  const fee = plat.tiers ? computeTieredFee(plat.tiers, price).fee : price*(plat.pct/100)+(plat.fixed||0);
+  hintEl.textContent = `Taxa estimada (${platformName}): ${brl(fee)} → líquido ${brl(price-fee)}`;
 }
 let editingNaFields = {};
 function toggleListingFieldNa(fieldId, naKey, checked){
@@ -2944,6 +2980,8 @@ function openListingModal(id){
     </div>
   `);
   renderListingPhotoPreview();
+  updateListingFeeHint('ml');
+  updateListingFeeHint('shopee');
 }
 function readListingForm(){
   const out = { ml:{}, shopee:{} };
@@ -3114,6 +3152,9 @@ function openProductModal(id){
   const boxes = boxOpts;
   showModal(editing?'Editar produto':'Novo produto', `
     <div class="field"><label>Nome do produto</label><input id="pName" value="${p.name}" placeholder="Ex: Kit Escritório"></div>
+    <div class="field"><label>Categoria (opcional)</label><input id="pCategory" list="pCategoryOpts" value="${p.category||''}" placeholder="Ex: Dinossauros, Kits, Suportes...">
+      <datalist id="pCategoryOpts">${productCategorySuggestions().map(c=>`<option value="${c}"></option>`).join('')}</datalist>
+    </div>
     <div class="field"><label>Foto (opcional)</label><input type="file" accept="image/*" id="pPhotoInput" onchange="handlePhotoUpload(this)"></div>
     <div id="pPhotoPreview"></div>
 
@@ -3230,9 +3271,13 @@ function removeFilamentRow(i){
   renderFilamentRows();
   updateProductPreview();
 }
+function productCategorySuggestions(){
+  return Array.from(new Set(state.products.map(p=>p.category).filter(Boolean))).sort((a,b)=>a.localeCompare(b,'pt-BR'));
+}
 function readProductForm(){
   return {
     name: document.getElementById('pName').value.trim(),
+    category: document.getElementById('pCategory').value.trim(),
     filaments: editingFilaments,
     boxType: document.getElementById('pBox').value,
     machineId: document.getElementById('pMachine').value,
