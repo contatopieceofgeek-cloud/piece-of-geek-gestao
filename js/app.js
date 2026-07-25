@@ -2986,6 +2986,10 @@ function renderAnunciosProntos(){
           <div style="color:var(--nozzle);font-weight:700;font-family:var(--font-mono);font-size:14px;">${listingPriceDisplay(l,p)}</div>
           <div style="font-size:12px;color:var(--text-dim);">Estoque: ${estoque}</div>
           ${descricao ? `<div style="font-size:12px;color:var(--text-dim);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;">${descricao}</div>` : ''}
+          ${(l.ml.link||l.shopee.link) ? `<div style="display:flex;gap:6px;flex-wrap:wrap;">
+            ${l.ml.link?`<a href="${l.ml.link}" target="_blank" rel="noopener noreferrer" style="font-size:11px;">ML ↗</a>`:''}
+            ${l.shopee.link?`<a href="${l.shopee.link}" target="_blank" rel="noopener noreferrer" style="font-size:11px;">Shopee ↗</a>`:''}
+          </div>` : ''}
           <div style="margin-top:auto;display:flex;gap:6px;flex-wrap:wrap;">
             <button class="btn ghost sm" style="flex:1;" onclick="openListingViewModal('${p.id}')">Ver anúncio</button>
             <button class="btn ghost sm" style="flex:1;" onclick="openListingModal('${p.id}')">Editar</button>
@@ -2997,6 +3001,14 @@ function renderAnunciosProntos(){
     return `<div class="section-title">${category}</div><div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(190px,1fr));">${cards}</div>`;
   }).join('');
   return toolbar + grouped;
+}
+// Link do anúncio já publicado — fora do LISTING_FIELDS de propósito: não
+// conta pro status Pronto/Incompleto (só existe depois de publicar) e não
+// entra no Excel exportado (é só referência interna, não um dado do anúncio).
+function renderListingLinkField(platform, val){
+  const platName = platform==='ml' ? 'Mercado Livre' : 'Shopee';
+  const openLink = val ? `<a href="${val}" target="_blank" rel="noopener noreferrer" class="btn ghost sm" style="margin-top:6px;display:inline-flex;">Abrir anúncio ↗</a>` : '';
+  return `<div class="field"><label>Link do anúncio publicado na ${platName} (opcional)</label><input id="lst_${platform}_link" type="url" value="${val||''}" placeholder="Cole aqui depois de publicar">${openLink}</div>`;
 }
 function renderListingField(idKey, f, val, isNa){
   const id = `lst_${idKey}_${f.key}`;
@@ -3095,8 +3107,8 @@ function openListingModal(id){
       <button type="button" class="tabbtn active" id="lstTabBtnMl" onclick="switchListingTab('ml')">Mercado Livre</button>
       <button type="button" class="tabbtn" id="lstTabBtnShopee" onclick="switchListingTab('shopee')">Shopee</button>
     </div>
-    <div id="lstPanelMl">${LISTING_FIELDS.ml.filter(f=>!SHARED_LISTING_KEYS.includes(f.key)).map(f=>renderListingField('ml', f, (draft.ml||{})[f.key], !!editingNaFields[`ml_${f.key}`])).join('')}</div>
-    <div id="lstPanelShopee" style="display:none;">${LISTING_FIELDS.shopee.filter(f=>!SHARED_LISTING_KEYS.includes(f.key)).map(f=>renderListingField('shopee', f, (draft.shopee||{})[f.key], !!editingNaFields[`shopee_${f.key}`])).join('')}</div>
+    <div id="lstPanelMl">${renderListingLinkField('ml', draft.ml.link)}${LISTING_FIELDS.ml.filter(f=>!SHARED_LISTING_KEYS.includes(f.key)).map(f=>renderListingField('ml', f, (draft.ml||{})[f.key], !!editingNaFields[`ml_${f.key}`])).join('')}</div>
+    <div id="lstPanelShopee" style="display:none;">${renderListingLinkField('shopee', draft.shopee.link)}${LISTING_FIELDS.shopee.filter(f=>!SHARED_LISTING_KEYS.includes(f.key)).map(f=>renderListingField('shopee', f, (draft.shopee||{})[f.key], !!editingNaFields[`shopee_${f.key}`])).join('')}</div>
     <div class="modal-actions" style="justify-content:space-between;flex-wrap:wrap;row-gap:10px;">
       ${listingHasContent(existing) ? `<button class="btn ghost" style="color:var(--red);" onclick="deleteListingDraft('${id}')">Excluir rascunho</button>` : '<span></span>'}
       <div style="display:flex;gap:10px;flex-wrap:wrap;">
@@ -3118,6 +3130,8 @@ function readListingForm(){
       const el = document.getElementById(`lst_${idKey}_${f.key}`);
       out[platform][f.key] = el ? el.value.trim() : '';
     });
+    const linkEl = document.getElementById(`lst_${platform}_link`);
+    out[platform].link = linkEl ? linkEl.value.trim() : '';
   });
   return out;
 }
@@ -3295,6 +3309,7 @@ function renderListingViewPanel(p, l, platform){
       <div style="flex:1;min-width:240px;">
         <h2 style="font-family:var(--font-display);font-size:19px;margin:0 0 8px;">${titulo}</h2>
         <div style="font-family:var(--font-mono);font-size:25px;font-weight:700;color:var(--nozzle);margin-bottom:12px;">${preco?'R$ '+preco:'—'}</div>
+        ${data.link ? `<a href="${data.link}" target="_blank" rel="noopener noreferrer" class="btn ghost sm" style="margin-bottom:12px;display:inline-flex;">Abrir anúncio publicado ↗</a>` : ''}
         ${specsHtml || `<div class="field hint" style="margin:0;">Nenhuma informação adicional preenchida.</div>`}
       </div>
     </div>
