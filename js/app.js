@@ -7,8 +7,8 @@ let salesFilter = { platform:'', product:'', from:'', to:'' };
 let stockTab = 'materiais';
 
 const uid = () => Math.random().toString(36).slice(2,10);
-const brl = (n) => (isFinite(n)?n:0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
-const num = (n,d=2) => (isFinite(n)?n:0).toLocaleString('pt-BR',{minimumFractionDigits:d,maximumFractionDigits:d});
+const brl = (n) => (typeof n==='number' && isFinite(n) ? n : 0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+const num = (n,d=2) => (typeof n==='number' && isFinite(n) ? n : 0).toLocaleString('pt-BR',{minimumFractionDigits:d,maximumFractionDigits:d});
 const pct = (n,d=1) => (isFinite(n)?n:0).toLocaleString('pt-BR',{minimumFractionDigits:d,maximumFractionDigits:d})+'%';
 const monthLabel = (ym) => { const [y,m]=ym.split('-'); return new Date(y,m-1,1).toLocaleDateString('pt-BR',{month:'long',year:'numeric'}); };
 function monthDiff(fromYm, toYm){
@@ -153,6 +153,14 @@ function migrateSettings(settings){
         {max:Infinity,pct:14,fixed:26},
       ];
     }
+    // JSON não tem representação pra Infinity — todo save/load vira null aqui,
+    // o que quebrava o cálculo/exibição da última faixa. Repara pra Infinity de novo.
+    settings.platforms.forEach(plat=>{
+      if(Array.isArray(plat.tiers) && plat.tiers.length){
+        const last = plat.tiers[plat.tiers.length-1];
+        if(last.max==null || !isFinite(last.max)) last.max = Infinity;
+      }
+    });
   }
   if(!Array.isArray(settings.expenses)){
     settings.expenses = settings.opExpenses ? [{id:uid(),name:'Despesas operacionais (migrado)',value:settings.opExpenses}] : [];
@@ -2142,13 +2150,30 @@ function deleteSale(id){
 }
 let cartItems = [];
 let cartOrderLinks = {};
-function newCartItem(productId, qty){
+// Se o produto tem um anúncio com preço específico pra essa plataforma
+// (Mercado Livre/Shopee — ver aba Anúncios), usa ele; senão cai no preço
+// praticado genérico do produto.
+function listingPriceForPlatform(productId, platformName){
+  const l = listingFor(productId);
+  if(!l) return null;
+  const key = /shopee/i.test(platformName||'') ? 'shopee' : /mercado ?livre/i.test(platformName||'') ? 'ml' : null;
+  if(!key) return null;
+  const raw = (l[key]||{}).preco;
+  if(!raw) return null;
+  const val = parseFloat(String(raw).replace(',','.'));
+  return isFinite(val) && val>0 ? val : null;
+}
+function cartItemDefaultPrice(productId, platformName){
+  const prod = state.products.find(p=>p.id===productId);
+  return listingPriceForPlatform(productId, platformName) || (prod?calcProduct(prod).practicedPrice:0);
+}
+function newCartItem(productId, qty, platformName){
   const prod = state.products.find(p=>p.id===productId) || state.products[0];
-  return { rowId: uid(), productId: prod.id, qty: qty||1, unitPrice: calcProduct(prod).practicedPrice };
+  return { rowId: uid(), productId: prod.id, qty: qty||1, unitPrice: cartItemDefaultPrice(prod.id, platformName), priceTouched:false };
 }
 function openSaleModal(presetProductId, presetQty, presetOrderId){
   if(state.products.length===0){ toast('Cadastre um produto antes de registrar vendas','err'); return; }
-  cartItems = [ newCartItem(presetProductId || state.products[0].id, presetQty||1) ];
+  cartItems = [ newCartItem(presetProductId || state.products[0].id, presetQty||1, state.settings.platforms[0].name) ];
   cartOrderLinks = {};
   if(presetOrderId){ cartOrderLinks[cartItems[0].productId] = presetOrderId; }
   showModal('Nova venda', `
@@ -2163,7 +2188,7 @@ function openSaleModal(presetProductId, presetQty, presetOrderId){
       </select></div>
     </div>
     <div class="row3">
-      <div class="field"><label>Plataforma</label><select id="sPlat" onchange="updateFeeDefaults(); updateSalePreview()">
+      <div class="field"><label>Plataforma</label><select id="sPlat" onchange="onSalePlatformChange()">
         ${state.settings.platforms.map(p=>`<option value="${p.name}">${p.name} (${num(p.pct,0)}%${p.fixed?' + '+brl(p.fixed):''})</option>`).join('')}
       </select></div>
       <div class="field"><label>Taxa nessa venda (%)</label><input type="number" id="sFeePct" step="0.01" oninput="this.dataset.touched='1'; updateSalePreview()"></div>
@@ -2188,8 +2213,12 @@ function openSaleModal(presetProductId, presetQty, presetOrderId){
   updateFeeDefaults();
   updateSalePreview();
 }
+function currentSalePlatform(){
+  const el = document.getElementById('sPlat');
+  return el ? el.value : state.settings.platforms[0].name;
+}
 function addCartItem(){
-  cartItems.push(newCartItem(state.products[0].id, 1));
+  cartItems.push(newCartItem(state.products[0].id, 1, currentSalePlatform()));
   renderCartItemsList();
   updateSalePreview();
 }
@@ -2204,13 +2233,22 @@ function updateCartItem(rowId, field, val){
   if(!item) return;
   if(field==='productId'){
     item.productId = val;
-    item.unitPrice = calcProduct(state.products.find(p=>p.id===val)).practicedPrice;
+    item.unitPrice = cartItemDefaultPrice(val, currentSalePlatform());
+    item.priceTouched = false;
     renderCartItemsList();
   } else if(field==='qty'){
     item.qty = Math.max(1, parseInt(val)||1);
   } else if(field==='unitPrice'){
     item.unitPrice = parseFloat(val)||0;
+    item.priceTouched = true;
   }
+  updateSalePreview();
+}
+function onSalePlatformChange(){
+  const platform = currentSalePlatform();
+  cartItems.forEach(item=>{ if(!item.priceTouched) item.unitPrice = cartItemDefaultPrice(item.productId, platform); });
+  renderCartItemsList();
+  updateFeeDefaults();
   updateSalePreview();
 }
 function renderCartItemsList(){
@@ -2267,7 +2305,7 @@ function updateSalePreview(){
     const { tier } = computeTieredFee(plat.tiers, totalGross);
     pctEl.value = tier.pct;
     fixedEl.value = tier.fixed;
-    tierNote = `<div class="field hint" style="margin-top:-8px;margin-bottom:12px;color:var(--teal);">Faixa aplicada automaticamente: até ${tier.max===Infinity?'qualquer valor':brl(tier.max)} → ${tier.pct}%${tier.fixed?' + '+brl(tier.fixed):''} (tabela oficial Shopee 2026)</div>`;
+    tierNote = `<div class="field hint" style="margin-top:-8px;margin-bottom:12px;color:var(--teal);">Faixa aplicada automaticamente: até ${(tier.max==null||!isFinite(tier.max))?'qualquer valor':brl(tier.max)} → ${tier.pct}%${tier.fixed?' + '+brl(tier.fixed):''} (tabela oficial Shopee 2026)</div>`;
   }
   const tierNoteEl = document.getElementById('sTierNote');
   if(tierNoteEl) tierNoteEl.innerHTML = tierNote;
@@ -2637,7 +2675,21 @@ function renderProdutos(){
     }
   };
   list.sort((a,b)=>{ const va=getVal(a), vb=getVal(b); return va<vb?-1*dir:va>vb?1*dir:0; });
-  const rows = list.map(({p,c})=>{
+  const theadHtml = `<thead><tr>
+      <th></th>
+      <th style="cursor:pointer;" onclick="toggleProductSort('name')">Produto${sortArrow(produtosFilter,'name')}</th>
+      <th>Filamentos</th>
+      <th>Impressora</th>
+      <th class="right" style="cursor:pointer;" onclick="toggleProductSort('weight')">Peso total${sortArrow(produtosFilter,'weight')}</th>
+      <th class="right" style="cursor:pointer;" onclick="toggleProductSort('time')">Tempo${sortArrow(produtosFilter,'time')}</th>
+      <th class="right" style="cursor:pointer;" onclick="toggleProductSort('cost')">Custo total${sortArrow(produtosFilter,'cost')}</th>
+      <th class="right" style="cursor:pointer;" onclick="toggleProductSort('suggested')">Preço sugerido${sortArrow(produtosFilter,'suggested')}</th>
+      <th class="right" style="cursor:pointer;" onclick="toggleProductSort('practiced')">Preço praticado${sortArrow(produtosFilter,'practiced')}</th>
+      <th class="right" style="cursor:pointer;" onclick="toggleProductSort('margin')">Margem${sortArrow(produtosFilter,'margin')}</th>
+      <th class="right" style="cursor:pointer;" onclick="toggleProductSort('stock')">Estoque${sortArrow(produtosFilter,'stock')}</th>
+      <th></th>
+    </tr></thead>`;
+  const rowHtml = ({p,c}) => {
     const filSummary = (p.filaments||[]).map(f=>`${f.materialName} ${num(f.weightG,0)}g`).join(' + ');
     return `<tr>
       <td data-label="Foto">${p.photo ? `<img src="${p.photo}" alt="${p.name}" style="width:36px;height:36px;object-fit:cover;border-radius:6px;">` : `<div style="width:36px;height:36px;border-radius:6px;background:var(--panel-2);"></div>`}</td>
@@ -2653,8 +2705,8 @@ function renderProdutos(){
       <td class="right num" data-label="Estoque">${p.stock<=0?`<span class="badge mut">0</span>`:num(p.stock,0)}</td>
       <td class="right"><button class="btn ghost sm" onclick="openProductModal('${p.id}')">Editar</button> <button class="btn ghost sm" onclick="duplicateProduct('${p.id}')">Duplicar</button> <button class="btn ghost sm" onclick="deleteProduct('${p.id}')">Excluir</button></td>
     </tr>`;
-  }).join('');
-  return `
+  };
+  const filterBar = `
     <div class="filter-bar">
       <div class="field"><label>Buscar</label><input value="${produtosFilter.search}" placeholder="Nome ou filamento..." oninput="produtosFilter.search=this.value; renderContent();"></div>
       <div class="field"><label>Impressora</label><select onchange="produtosFilter.machineId=this.value; renderContent();">
@@ -2663,24 +2715,19 @@ function renderProdutos(){
       </select></div>
       <div class="field hint" style="padding-top:9px;">${list.length} de ${state.products.length} produto(s) · clique no cabeçalho pra ordenar</div>
       ${(produtosFilter.search||produtosFilter.machineId) ? `<button class="btn ghost sm" onclick="produtosFilter.search=''; produtosFilter.machineId=''; renderContent();">Limpar filtros</button>` : ''}
-    </div>
-    <div class="card"><div class="tbl-wrap tbl-responsive tbl-compact-mobile"><table>
-    <thead><tr>
-      <th></th>
-      <th style="cursor:pointer;" onclick="toggleProductSort('name')">Produto${sortArrow(produtosFilter,'name')}</th>
-      <th>Filamentos</th>
-      <th>Impressora</th>
-      <th class="right" style="cursor:pointer;" onclick="toggleProductSort('weight')">Peso total${sortArrow(produtosFilter,'weight')}</th>
-      <th class="right" style="cursor:pointer;" onclick="toggleProductSort('time')">Tempo${sortArrow(produtosFilter,'time')}</th>
-      <th class="right" style="cursor:pointer;" onclick="toggleProductSort('cost')">Custo total${sortArrow(produtosFilter,'cost')}</th>
-      <th class="right" style="cursor:pointer;" onclick="toggleProductSort('suggested')">Preço sugerido${sortArrow(produtosFilter,'suggested')}</th>
-      <th class="right" style="cursor:pointer;" onclick="toggleProductSort('practiced')">Preço praticado${sortArrow(produtosFilter,'practiced')}</th>
-      <th class="right" style="cursor:pointer;" onclick="toggleProductSort('margin')">Margem${sortArrow(produtosFilter,'margin')}</th>
-      <th class="right" style="cursor:pointer;" onclick="toggleProductSort('stock')">Estoque${sortArrow(produtosFilter,'stock')}</th>
-      <th></th>
-    </tr></thead>
-    <tbody>${rows || `<tr><td colspan="12" style="text-align:center;color:var(--text-faint);padding:20px;">Nenhum produto encontrado</td></tr>`}</tbody>
-  </table></div></div>`;
+    </div>`;
+  if(list.length===0){
+    return filterBar + `<div class="card"><div class="tbl-wrap tbl-responsive tbl-compact-mobile"><table>${theadHtml}<tbody><tr><td colspan="12" style="text-align:center;color:var(--text-faint);padding:20px;">Nenhum produto encontrado</td></tr></tbody></table></div></div>`;
+  }
+  const groups = {};
+  list.forEach(item=>{
+    const cat = (item.p.category||'').trim() || 'Sem categoria';
+    (groups[cat] = groups[cat]||[]).push(item);
+  });
+  const catKeys = Object.keys(groups).filter(k=>k!=='Sem categoria').sort((a,b)=>a.localeCompare(b,'pt-BR'));
+  if(groups['Sem categoria']) catKeys.push('Sem categoria');
+  const sections = catKeys.map(cat=>`<div class="section-title">${cat}</div><div class="card"><div class="tbl-wrap tbl-responsive tbl-compact-mobile"><table>${theadHtml}<tbody>${groups[cat].map(rowHtml).join('')}</tbody></table></div></div>`).join('');
+  return filterBar + sections;
 }
 function duplicateProduct(id){
   const p = state.products.find(x=>x.id===id);
@@ -3152,8 +3199,13 @@ function openProductModal(id){
   const boxes = boxOpts;
   showModal(editing?'Editar produto':'Novo produto', `
     <div class="field"><label>Nome do produto</label><input id="pName" value="${p.name}" placeholder="Ex: Kit Escritório"></div>
-    <div class="field"><label>Categoria (opcional)</label><input id="pCategory" list="pCategoryOpts" value="${p.category||''}" placeholder="Ex: Dinossauros, Kits, Suportes...">
-      <datalist id="pCategoryOpts">${productCategorySuggestions().map(c=>`<option value="${c}"></option>`).join('')}</datalist>
+    <div class="field"><label>Categoria (opcional)</label>
+      <select id="pCategory" onchange="toggleNewCategoryInput(this.value)">
+        <option value="">Sem categoria</option>
+        ${productCategorySuggestions().map(c=>`<option value="${c}" ${p.category===c?'selected':''}>${c}</option>`).join('')}
+        <option value="__new__" ${p.category && !productCategorySuggestions().includes(p.category)?'selected':''}>+ Nova categoria...</option>
+      </select>
+      <input id="pCategoryNew" placeholder="Nome da nova categoria" style="margin-top:6px;display:${p.category && !productCategorySuggestions().includes(p.category)?'block':'none'};" value="${p.category && !productCategorySuggestions().includes(p.category)?p.category:''}">
     </div>
     <div class="field"><label>Foto (opcional)</label><input type="file" accept="image/*" id="pPhotoInput" onchange="handlePhotoUpload(this)"></div>
     <div id="pPhotoPreview"></div>
@@ -3274,10 +3326,15 @@ function removeFilamentRow(i){
 function productCategorySuggestions(){
   return Array.from(new Set(state.products.map(p=>p.category).filter(Boolean))).sort((a,b)=>a.localeCompare(b,'pt-BR'));
 }
+function toggleNewCategoryInput(val){
+  const el = document.getElementById('pCategoryNew');
+  if(el){ el.style.display = val==='__new__' ? 'block' : 'none'; if(val!=='__new__') el.value=''; }
+}
 function readProductForm(){
+  const catSel = document.getElementById('pCategory').value;
   return {
     name: document.getElementById('pName').value.trim(),
-    category: document.getElementById('pCategory').value.trim(),
+    category: catSel==='__new__' ? document.getElementById('pCategoryNew').value.trim() : catSel,
     filaments: editingFilaments,
     boxType: document.getElementById('pBox').value,
     machineId: document.getElementById('pMachine').value,
