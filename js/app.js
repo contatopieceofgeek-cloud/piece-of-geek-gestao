@@ -438,7 +438,9 @@ function calcProduct(prod){
   const marginPct = practicedPrice > 0 ? (marginValue/practicedPrice)*100 : 0;
   const suggestedPriceMl = suggestedPriceForPlatform(suggestedPrice, 'Mercado Livre');
   const suggestedPriceShopee = suggestedPriceForPlatform(suggestedPrice, 'Shopee');
-  return { materialCost, energyCost, boxCost:bCost, bubbleCost, embalagemCost, depreciation, laborCost, failureCost, totalCost, suggestedPrice, suggestedPriceMl, suggestedPriceShopee, practicedPrice, marginValue, marginPct, desiredMarginPct: desiredMargin*100, machine };
+  const practicedPriceMl = prod.practicedPriceMl || suggestedPriceMl;
+  const practicedPriceShopee = prod.practicedPriceShopee || suggestedPriceShopee;
+  return { materialCost, energyCost, boxCost:bCost, bubbleCost, embalagemCost, depreciation, laborCost, failureCost, totalCost, suggestedPrice, suggestedPriceMl, suggestedPriceShopee, practicedPrice, practicedPriceMl, practicedPriceShopee, marginValue, marginPct, desiredMarginPct: desiredMargin*100, machine };
 }
 // Preço que, depois de descontada a taxa daquela plataforma (fixa ou por
 // faixa, ex: Shopee), ainda rende o mesmo "preço sem taxa" de referência —
@@ -2184,7 +2186,13 @@ function listingPriceForPlatform(productId, platformName){
 }
 function cartItemDefaultPrice(productId, platformName){
   const prod = state.products.find(p=>p.id===productId);
-  return listingPriceForPlatform(productId, platformName) || (prod?calcProduct(prod).practicedPrice:0);
+  const fromListing = listingPriceForPlatform(productId, platformName);
+  if(fromListing) return fromListing;
+  if(!prod) return 0;
+  const c = calcProduct(prod);
+  if(/shopee/i.test(platformName||'')) return c.practicedPriceShopee;
+  if(/mercado ?livre/i.test(platformName||'')) return c.practicedPriceMl;
+  return c.practicedPrice;
 }
 function newCartItem(productId, qty, platformName){
   const prod = state.products.find(p=>p.id===productId) || state.products[0];
@@ -2721,7 +2729,7 @@ function renderProdutos(){
       <td class="right num" data-label="Tempo">${num(p.timeH,1)}h</td>
       <td class="right num" data-label="Custo total">${brl(c.totalCost)}</td>
       <td class="right num" data-label="Preço sugerido">${brl(c.suggestedPrice)}</td>
-      <td class="right num" data-label="Preço praticado">${brl(c.practicedPrice)}</td>
+      <td class="right num" data-label="Preço praticado" title="Venda própria: ${brl(c.practicedPrice)} · Mercado Livre: ${brl(c.practicedPriceMl)} · Shopee: ${brl(c.practicedPriceShopee)}">${brl(c.practicedPrice)}</td>
       <td class="right num" data-label="Margem" style="color:${c.marginValue<0?'var(--red)':'var(--green)'}">${pct(c.marginPct)}</td>
       <td class="right num" data-label="Estoque">${p.stock<=0?`<span class="badge mut">0</span>`:num(p.stock,0)}</td>
       <td class="right"><button class="btn ghost sm" onclick="openProductModal('${p.id}')">Editar</button> <button class="btn ghost sm" onclick="duplicateProduct('${p.id}')">Duplicar</button> <button class="btn ghost sm" onclick="deleteProduct('${p.id}')">Excluir</button></td>
@@ -2842,12 +2850,11 @@ function generateSku(p){
 }
 function defaultListingDraft(p){
   const c = calcProduct(p);
-  const preco = num(c.practicedPrice,2);
   const peso = num(totalWeight(p)/1000,2);
   const sku = generateSku(p);
   return {
-    ml: { titulo:p.name.slice(0,60), preco, estoque:p.stock, sku, condicao:'Novo', marca:'Piece of Geek 3D', peso, tipoAnuncio:'Clássico' },
-    shopee: { nome:p.name.slice(0,120), preco, estoque:p.stock, sku, marca:'Piece of Geek 3D', peso },
+    ml: { titulo:p.name.slice(0,60), preco:num(c.practicedPriceMl,2), estoque:p.stock, sku, condicao:'Novo', marca:'Piece of Geek 3D', peso, tipoAnuncio:'Clássico' },
+    shopee: { nome:p.name.slice(0,120), preco:num(c.practicedPriceShopee,2), estoque:p.stock, sku, marca:'Piece of Geek 3D', peso },
   };
 }
 // Preenche os campos em branco com o valor automático, mas nunca sobrescreve o que o usuário já preencheu.
@@ -3253,7 +3260,11 @@ function openProductModal(id){
     </div>
     <div class="row2">
       <div class="field"><label>Margem de lucro desejada (%)</label><input type="number" id="pMargin" value="${(p.desiredMarginPct!=null ? p.desiredMarginPct : calcProduct(p).desiredMarginPct).toFixed(0)}" step="1" oninput="document.getElementById('pPrice').dataset.touched=''; updateProductPreview()"></div>
-      <div class="field"><label>Preço praticado (R$)</label><input type="number" id="pPrice" value="${p.practicedPrice||''}" step="0.01" placeholder="deixe em branco = preço sugerido" oninput="this.dataset.touched='1'"></div>
+      <div class="field"><label>Preço praticado — Venda própria (R$)</label><input type="number" id="pPrice" value="${p.practicedPrice||''}" step="0.01" placeholder="deixe em branco = preço sugerido" oninput="this.dataset.touched='1'"></div>
+    </div>
+    <div class="row2">
+      <div class="field"><label>Preço praticado — Mercado Livre (R$)</label><input type="number" id="pPriceMl" value="${p.practicedPriceMl||''}" step="0.01" placeholder="deixe em branco = preço sugerido" oninput="this.dataset.touched='1'"></div>
+      <div class="field"><label>Preço praticado — Shopee (R$)</label><input type="number" id="pPriceShopee" value="${p.practicedPriceShopee||''}" step="0.01" placeholder="deixe em branco = preço sugerido" oninput="this.dataset.touched='1'"></div>
     </div>
     <div class="field"><label>Estoque inicial (un)</label><input type="number" id="pStock" value="${p.stock}" step="1"></div>
     <div class="helper-block" id="productPreview"></div>
@@ -3386,6 +3397,14 @@ function updateProductPreview(){
   if(priceInput && !priceInput.dataset.touched && document.activeElement!==priceInput){
     priceInput.placeholder = 'sugerido: '+c.suggestedPrice.toFixed(2);
   }
+  const priceMlInput = document.getElementById('pPriceMl');
+  if(priceMlInput && !priceMlInput.dataset.touched && document.activeElement!==priceMlInput){
+    priceMlInput.placeholder = 'sugerido: '+c.suggestedPriceMl.toFixed(2);
+  }
+  const priceShopeeInput = document.getElementById('pPriceShopee');
+  if(priceShopeeInput && !priceShopeeInput.dataset.touched && document.activeElement!==priceShopeeInput){
+    priceShopeeInput.placeholder = 'sugerido: '+c.suggestedPriceShopee.toFixed(2);
+  }
 }
 function confirmProduct(id){
   const form = readProductForm();
@@ -3393,15 +3412,19 @@ function confirmProduct(id){
   const dup = state.products.find(x=>x.id!==id && x.name.trim().toLowerCase()===form.name.trim().toLowerCase());
   if(dup){ toast(`Já existe um produto chamado "${dup.name}" — use outro nome`,'err'); return; }
   const priceRaw = document.getElementById('pPrice').value;
+  const priceMlRaw = document.getElementById('pPriceMl').value;
+  const priceShopeeRaw = document.getElementById('pPriceShopee').value;
   const stock = parseFloat(document.getElementById('pStock').value)||0;
   const c = calcProduct(form);
   const practicedPrice = priceRaw ? parseFloat(priceRaw) : c.suggestedPrice;
-  if((practicedPrice!=null && practicedPrice<0) || stock<0){ toast('Preço e estoque não podem ser negativos','err'); return; }
+  const practicedPriceMl = priceMlRaw ? parseFloat(priceMlRaw) : c.suggestedPriceMl;
+  const practicedPriceShopee = priceShopeeRaw ? parseFloat(priceShopeeRaw) : c.suggestedPriceShopee;
+  if(practicedPrice<0 || stock<0 || practicedPriceMl<0 || practicedPriceShopee<0){ toast('Preço e estoque não podem ser negativos','err'); return; }
   if(id){
     const p = state.products.find(x=>x.id===id);
-    Object.assign(p, form, { practicedPrice, stock, photo: editingPhotoData });
+    Object.assign(p, form, { practicedPrice, practicedPriceMl, practicedPriceShopee, stock, photo: editingPhotoData });
   } else {
-    state.products.push({ id:uid(), ...form, practicedPrice, stock, photo: editingPhotoData });
+    state.products.push({ id:uid(), ...form, practicedPrice, practicedPriceMl, practicedPriceShopee, stock, photo: editingPhotoData });
   }
   saveProducts();
   toast(id?'Produto atualizado':'Produto criado');
