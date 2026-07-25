@@ -1779,43 +1779,53 @@ function renderImpressao(){
     <div class="card">
       <div class="card-title">Histórico de impressões<span class="sub">mais recentes primeiro</span></div>
       ${recent.length ? `<div class="tbl-wrap tbl-responsive"><table>
-        <thead><tr><th>Data</th><th>Produto</th><th class="right">Qtd</th><th>Resultado</th><th class="right">Prejuízo</th><th>Obs.</th><th></th></tr></thead>
-        <tbody>${recent.map(f=>`<tr>
+        <thead><tr><th>Data</th><th>Produto</th><th class="right">Qtd</th><th>Filamento gasto</th><th>Resultado</th><th class="right">Prejuízo</th><th>Obs.</th><th></th></tr></thead>
+        <tbody>${recent.map(f=>{
+          const filamentSummary = (f.filamentUsage||[]).map(u=>`${u.materialName} ${num(u.qty,1)}${u.unit}`).join(' + ') || '—';
+          return `<tr>
           <td class="num" data-label="Data">${fmtDate(f.date)}</td>
           <td data-label="Produto">${f.productName}</td>
           <td class="right num" data-label="Qtd">${num(f.qty||1,0)}${f.outcome==='failure'&&f.pctComplete<100?` (${num(f.pctComplete,0)}%)`:''}</td>
+          <td data-label="Filamento gasto" title="${filamentSummary}">${filamentSummary}</td>
           <td data-label="Resultado">${outcomeBadge(f.outcome)}</td>
           <td class="right num" data-label="Prejuízo" style="color:var(--red)">${f.totalLoss?brl(f.totalLoss):'—'}</td>
           <td data-label="Obs.">${f.notes||'—'}</td>
-          <td class="right"><button class="btn ghost sm" onclick="deletePrintJob('${f.id}')">Excluir</button></td>
-        </tr>`).join('')}</tbody>
+          <td class="right"><button class="btn ghost sm" onclick="openPrintJobModal('${f.productId}', ${f.qty||1}, '${f.outcome}', '${f.id}')">Editar</button> <button class="btn ghost sm" onclick="deletePrintJob('${f.id}')">Excluir</button></td>
+        </tr>`;
+        }).join('')}</tbody>
       </table></div>` : emptyState('Nenhuma impressão registrada ainda. Clique em "Nova impressão" pra começar.')}
     </div>
   `;
 }
-function openPrintJobModal(productId, presetQty, presetOutcome){
+let editingPrintJobId = null;
+let printJobFirstRender = false;
+function openPrintJobModal(productId, presetQty, presetOutcome, editId){
   if(state.products.length===0){ toast('Cadastre um produto antes de registrar uma impressão','err'); return; }
-  const selId = productId || state.products[0].id;
-  showModal('Nova impressão', `
+  editingPrintJobId = editId || null;
+  printJobFirstRender = !!editingPrintJobId;
+  const editing = editingPrintJobId ? state.printFailures.find(x=>x.id===editingPrintJobId) : null;
+  const selId = productId || (editing && editing.productId) || state.products[0].id;
+  const outcomeVal = editing ? editing.outcome : (presetOutcome||'success');
+  showModal(editing?'Editar impressão':'Nova impressão', `
     <div class="field"><label>Produto</label><select id="pjProd" onchange="updatePrintJobPreview()">
       ${state.products.map(p=>`<option value="${p.id}" ${p.id===selId?'selected':''}>${p.name}</option>`).join('')}
     </select></div>
     <div class="row3">
-      <div class="field"><label>Quantidade</label><input type="number" id="pjQty" value="${presetQty||1}" min="1" oninput="updatePrintJobPreview()"></div>
-      <div class="field"><label>Data</label><input type="date" id="pjDate" value="${todayStr()}"></div>
+      <div class="field"><label>Quantidade</label><input type="number" id="pjQty" value="${editing?editing.qty:(presetQty||1)}" min="1" oninput="updatePrintJobPreview()"></div>
+      <div class="field"><label>Data</label><input type="date" id="pjDate" value="${editing?editing.date:todayStr()}"></div>
       <div class="field"><label>Resultado</label><select id="pjOutcome" onchange="updatePrintJobPreview()">
-        <option value="success" ${(!presetOutcome||presetOutcome==='success')?'selected':''}>Sucesso — vai pro estoque</option>
-        <option value="test" ${presetOutcome==='test'?'selected':''}>Teste — não vai pro estoque de venda</option>
-        <option value="failure" ${presetOutcome==='failure'?'selected':''}>Falhou</option>
+        <option value="success" ${outcomeVal==='success'?'selected':''}>Sucesso — vai pro estoque</option>
+        <option value="test" ${outcomeVal==='test'?'selected':''}>Teste — não vai pro estoque de venda</option>
+        <option value="failure" ${outcomeVal==='failure'?'selected':''}>Falhou</option>
       </select></div>
     </div>
-    <div id="pjPctBlock" style="display:none;"><div class="field"><label>% concluído antes de falhar</label><input type="number" id="pjPct" value="100" min="1" max="100" oninput="updatePrintJobPreview()"></div></div>
-    <div class="field"><label>Observações (opcional)</label><input id="pjNotes" placeholder="Ex: descolou da mesa, entupiu o bico..."></div>
+    <div id="pjPctBlock" style="display:${outcomeVal==='failure'?'block':'none'};"><div class="field"><label>% concluído antes de falhar</label><input type="number" id="pjPct" value="${editing?editing.pctComplete:100}" min="1" max="100" oninput="updatePrintJobPreview()"></div></div>
+    <div class="field"><label>Observações (opcional)</label><input id="pjNotes" value="${editing?(editing.notes||''):''}" placeholder="Ex: descolou da mesa, entupiu o bico..."></div>
     <div class="field hint" style="margin-top:-8px;">Caixa e plástico bolha não são descontados aqui — só saem do estoque na hora da venda. Só o filamento sai agora.</div>
     <div class="helper-block" id="pjPreview"></div>
     <div class="modal-actions">
       <button class="btn ghost" onclick="closeModal()">Cancelar</button>
-      <button class="btn primary" onclick="confirmPrintJob()">Registrar impressão</button>
+      <button class="btn primary" onclick="confirmPrintJob()">${editing?'Salvar alterações':'Registrar impressão'}</button>
     </div>
   `);
   updatePrintJobPreview();
@@ -1827,16 +1837,38 @@ function updatePrintJobPreview(){
   document.getElementById('pjPctBlock').style.display = outcome==='failure' ? 'block' : 'none';
   const pct = outcome==='failure' ? Math.min(100,Math.max(1,parseFloat(document.getElementById('pjPct').value)||100)) : 100;
   const recipe = printJobRecipe(prod);
-  const lines = recipe.map(r=>{
+  const editing = editingPrintJobId ? state.printFailures.find(x=>x.id===editingPrintJobId) : null;
+  const useStored = printJobFirstRender && editing && editing.filamentUsage;
+  const lines = recipe.map((r,i)=>{
     const mat = materialByName(r.materialName);
-    const need = r.qty*qty*(pct/100);
-    const after = mat ? mat.stock-need : -need;
-    return `<div class="calc-line"><span>${r.materialName} (${num(need,1)} ${mat?mat.unit:''})</span><span style="color:${after<0?'var(--red)':'var(--text-dim)'}">${mat?num(mat.stock,1):'0'} → ${num(after,1)}</span></div>`;
+    const calcNeed = r.qty*qty*(pct/100);
+    const storedU = useStored ? editing.filamentUsage.find(u=>u.materialName===r.materialName) : null;
+    const need = storedU ? storedU.qty : calcNeed;
+    return `<div class="calc-line" style="align-items:center;">
+      <span>${r.materialName} <span style="color:var(--text-faint);font-size:11px;">(estoque: ${mat?num(mat.stock,1):'0'}${mat?mat.unit:'g'})</span></span>
+      <span><input type="number" id="pjFil_${i}" value="${(need||0).toFixed(1)}" step="0.1" style="width:80px;padding:4px 6px;text-align:right;"> ${mat?mat.unit:'g'}</span>
+    </div>`;
   }).join('');
   const stockLine = outcome==='success'
     ? `<div class="calc-line total"><span>Estoque de "${prod.name}" após produção</span><span>${num(prod.stock,0)} → ${num(prod.stock+qty,0)}</span></div>`
     : `<div class="field hint" style="margin-top:6px;">${outcome==='test'?'Teste não soma no estoque disponível pra venda.':'Falha não soma no estoque.'}</div>`;
-  document.getElementById('pjPreview').innerHTML = lines + stockLine;
+  document.getElementById('pjPreview').innerHTML = `<div class="field hint" style="margin:0 0 6px;">Quantidade de filamento — já calculada pela receita do produto, edite se o valor real foi diferente:</div>` + lines + stockLine;
+  printJobFirstRender = false;
+}
+// Desfaz os efeitos de estoque/horas de máquina de um registro de impressão
+// já salvo — usado tanto pra excluir quanto pra reaplicar depois de editar.
+function reversePrintJobEffects(j){
+  const prod = state.products.find(p=>p.id===j.productId);
+  if(!prod) return;
+  const usage = (j.filamentUsage && j.filamentUsage.length) ? j.filamentUsage : printJobRecipe(prod).map(r=>({materialName:r.materialName, qty:r.qty*(j.qty||1)*(j.pctComplete/100)}));
+  usage.forEach(u=>{
+    const mat = materialByName(u.materialName);
+    if(mat) mat.stock += u.qty;
+  });
+  if(j.outcome==='success') prod.stock = Math.max(0, prod.stock - (j.qty||1));
+  const machines = state.settings.machines||[];
+  const machine = machines.find(m=>m.id===prod.machineId) || machines[0];
+  if(machine) machine.hoursUsed = Math.max(0, (machine.hoursUsed||0) - (j.qty||1)*(prod.timeH||0)*(j.pctComplete/100));
 }
 function confirmPrintJob(){
   const prod = state.products.find(p=>p.id===document.getElementById('pjProd').value);
@@ -1847,48 +1879,51 @@ function confirmPrintJob(){
   const notes = document.getElementById('pjNotes').value.trim();
   const pctComplete = outcome==='failure' ? Math.min(100,Math.max(1,parseFloat(document.getElementById('pjPct').value)||100)) : 100;
 
-  const c = calcProduct(prod);
   const recipe = printJobRecipe(prod);
+  const filamentUsage = recipe.map((r,i)=>{
+    const input = document.getElementById(`pjFil_${i}`);
+    const qtyUsed = input ? Math.max(0, parseFloat(input.value)||0) : r.qty*qty*(pctComplete/100);
+    return { materialName:r.materialName, qty:qtyUsed, unit:(materialByName(r.materialName)||{}).unit||'g' };
+  });
+
+  const oldJob = editingPrintJobId ? state.printFailures.find(x=>x.id===editingPrintJobId) : null;
+  if(oldJob) reversePrintJobEffects(oldJob);
+
   let negativeWarn = false;
-  recipe.forEach(r=>{
-    const mat = materialByName(r.materialName);
-    if(mat){ mat.stock -= r.qty*qty*(pctComplete/100); if(mat.stock<0) negativeWarn=true; }
+  filamentUsage.forEach(u=>{
+    const mat = materialByName(u.materialName);
+    if(mat){ mat.stock -= u.qty; if(mat.stock<0) negativeWarn=true; }
   });
 
   let totalLoss = 0, materialCost = 0, energyCost = 0;
   if(outcome==='success') prod.stock += qty;
   if(outcome==='failure'){
-    materialCost = c.materialCost*qty*(pctComplete/100);
-    energyCost = c.energyCost*qty*(pctComplete/100);
+    materialCost = filamentUsage.reduce((sum,u)=>sum+u.qty*filamentCost(u.materialName),0);
+    energyCost = calcProduct(prod).energyCost*qty*(pctComplete/100);
     totalLoss = materialCost+energyCost;
   }
   const machines = state.settings.machines||[];
   const machine = machines.find(m=>m.id===prod.machineId) || machines[0];
   if(machine){ machine.hoursUsed = (machine.hoursUsed||0) + qty*(prod.timeH||0)*(pctComplete/100); }
 
-  state.printFailures.push({ id:uid(), date, productId:prod.id, productName:prod.name, qty, outcome, pctComplete, materialCost, energyCost, totalLoss, notes });
-  saveMaterials(); savePrintFailures(); if(outcome==='success') saveProducts(); if(machine) saveSettings();
+  if(oldJob){
+    Object.assign(oldJob, { date, productId:prod.id, productName:prod.name, qty, outcome, pctComplete, materialCost, energyCost, totalLoss, notes, filamentUsage });
+  } else {
+    state.printFailures.push({ id:uid(), date, productId:prod.id, productName:prod.name, qty, outcome, pctComplete, materialCost, energyCost, totalLoss, notes, filamentUsage });
+  }
+  saveMaterials(); savePrintFailures(); saveProducts(); if(machine) saveSettings();
 
   const msgs = { success:'Impressão registrada — estoque atualizado', test:'Impressão de teste registrada', failure:`Falha registrada — prejuízo de ${brl(totalLoss)}` };
-  toast((negativeWarn?'Atenção: estoque de matéria-prima negativo — ':'') + msgs[outcome], negativeWarn?'err':'');
+  toast((negativeWarn?'Atenção: estoque de matéria-prima negativo — ':'') + (oldJob?'Registro atualizado':msgs[outcome]), negativeWarn?'err':'');
+  editingPrintJobId = null;
   closeModal(); renderContent();
 }
 function deletePrintJob(id){
   const j = state.printFailures.find(x=>x.id===id);
   if(!j) return;
   if(!confirm(`Excluir esse registro de impressão? O material usado volta pro estoque${j.outcome==='success'?' e o estoque do produto é ajustado':''}.`)) return;
-  const prod = state.products.find(p=>p.id===j.productId);
-  if(prod){
-    printJobRecipe(prod).forEach(r=>{
-      const mat = materialByName(r.materialName);
-      if(mat) mat.stock += r.qty * (j.qty||1) * (j.pctComplete/100);
-    });
-    if(j.outcome==='success') prod.stock = Math.max(0, prod.stock - (j.qty||1));
-    const machines = state.settings.machines||[];
-    const machine = machines.find(m=>m.id===prod.machineId) || machines[0];
-    if(machine){ machine.hoursUsed = Math.max(0, (machine.hoursUsed||0) - (j.qty||1)*(prod.timeH||0)*(j.pctComplete/100)); saveSettings(); }
-    saveMaterials(); if(j.outcome==='success') saveProducts();
-  }
+  reversePrintJobEffects(j);
+  saveMaterials(); saveProducts(); saveSettings();
   state.printFailures = state.printFailures.filter(x=>x.id!==id);
   savePrintFailures();
   toast('Registro excluído');
