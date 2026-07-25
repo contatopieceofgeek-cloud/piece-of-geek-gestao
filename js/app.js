@@ -3013,16 +3013,28 @@ function renderListingField(idKey, f, val, isNa){
     return `<div class="field"><label>${f.label}${naBox}</label><textarea id="${id}" rows="5" ${dis}>${val!=null?val:''}</textarea></div>`;
   }
   if(f.presets){
-    const listId = `${id}_opts`;
     const opts = listingFieldSuggestions(idKey, f.key, f.presets);
-    return `<div class="field"><label>${f.label}${naBox}</label><input id="${id}" list="${listId}" ${f.maxlength?`maxlength="${f.maxlength}"`:''} value="${val!=null?val:''}" ${dis}>
-      <datalist id="${listId}">${opts.map(o=>`<option value="${o}"></option>`).join('')}</datalist>
+    const isCustomVal = val && !opts.includes(val);
+    const selId = `${id}_sel`;
+    return `<div class="field"><label>${f.label}${naBox}</label>
+      <select id="${selId}" onchange="toggleListingPresetNew('${selId}','${id}',this.value)" ${dis}>
+        <option value="">Selecione...</option>
+        ${opts.map(o=>`<option value="${o}" ${val===o?'selected':''}>${o}</option>`).join('')}
+        <option value="__new__" ${isCustomVal?'selected':''}>+ Nova opção...</option>
+      </select>
+      <input id="${id}" value="${val!=null?val:''}" placeholder="Digite a nova opção" style="margin-top:6px;display:${isCustomVal?'block':'none'};" ${dis}>
     </div>`;
   }
   const isPreco = f.key==='preco' && (idKey==='ml'||idKey==='shopee');
   const syncAttr = (idKey==='ml' && f.key==='titulo') ? `oninput="syncListingTitle(this.value)"` : isPreco ? `oninput="updateListingFeeHint('${idKey}')"` : '';
   const feeHint = isPreco ? `<div id="lstFeeHint_${idKey}" class="field hint" style="margin-top:-8px;"></div>` : '';
   return `<div class="field"><label>${f.label}${naBox}</label><input id="${id}" ${f.maxlength?`maxlength="${f.maxlength}"`:''} value="${val!=null?val:''}" ${dis} ${syncAttr}></div>${feeHint}`;
+}
+function toggleListingPresetNew(selId, inputId, val){
+  const input = document.getElementById(inputId);
+  if(!input) return;
+  if(val==='__new__'){ input.style.display='block'; input.value=''; input.focus(); }
+  else{ input.style.display='none'; input.value = val; }
 }
 function syncListingTitle(val){
   const el = document.getElementById('lst_shopee_nome');
@@ -3044,6 +3056,8 @@ function toggleListingFieldNa(fieldId, naKey, checked){
   if(checked) editingNaFields[naKey] = true; else delete editingNaFields[naKey];
   const el = document.getElementById(fieldId);
   if(el){ el.disabled = checked; if(checked) el.value = ''; }
+  const sel = document.getElementById(`${fieldId}_sel`);
+  if(sel){ sel.disabled = checked; if(checked) sel.value = ''; }
 }
 function switchListingTab(platform){
   document.getElementById('lstPanelMl').style.display = platform==='ml' ? '' : 'none';
