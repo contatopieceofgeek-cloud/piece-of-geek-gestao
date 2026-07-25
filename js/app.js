@@ -2986,7 +2986,8 @@ function renderAnunciosProntos(){
           <div style="color:var(--nozzle);font-weight:700;font-family:var(--font-mono);font-size:14px;">${listingPriceDisplay(l,p)}</div>
           <div style="font-size:12px;color:var(--text-dim);">Estoque: ${estoque}</div>
           ${descricao ? `<div style="font-size:12px;color:var(--text-dim);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;">${descricao}</div>` : ''}
-          <div style="margin-top:auto;display:flex;gap:6px;">
+          <div style="margin-top:auto;display:flex;gap:6px;flex-wrap:wrap;">
+            <button class="btn ghost sm" style="flex:1;" onclick="openListingViewModal('${p.id}')">Ver anúncio</button>
             <button class="btn ghost sm" style="flex:1;" onclick="openListingModal('${p.id}')">Editar</button>
             <button class="btn ghost sm" style="flex:1;" onclick="openDuplicateListingModal('${p.id}')">Duplicar</button>
           </div>
@@ -3233,6 +3234,61 @@ function duplicateListingToProduct(sourceId, targetId){
   closeModal();
   openListingModal(targetId);
   toast('Anúncio duplicado — confira os campos e salve');
+}
+// Prévia somente leitura, como se fosse a página real do anúncio no
+// Mercado Livre/Shopee — sem campos editáveis, sem checkbox de "não se aplica".
+function openListingViewModal(id){
+  const p = state.products.find(x=>x.id===id);
+  const l = listingFor(id);
+  if(!p || !l) return;
+  showModal(`Anúncio — ${p.name}`, `
+    <div class="tabbar">
+      <button type="button" class="tabbtn active" id="viewTabBtnMl" onclick="switchListingViewTab('ml')">Mercado Livre</button>
+      <button type="button" class="tabbtn" id="viewTabBtnShopee" onclick="switchListingViewTab('shopee')">Shopee</button>
+    </div>
+    <div id="viewPanelMl">${renderListingViewPanel(p, l, 'ml')}</div>
+    <div id="viewPanelShopee" style="display:none;">${renderListingViewPanel(p, l, 'shopee')}</div>
+    <div class="modal-actions">
+      <button class="btn ghost" onclick="closeModal()">Fechar</button>
+      <button class="btn primary" onclick="openListingModal('${id}')">Editar</button>
+    </div>
+  `);
+}
+function switchListingViewTab(platform){
+  document.getElementById('viewPanelMl').style.display = platform==='ml' ? '' : 'none';
+  document.getElementById('viewPanelShopee').style.display = platform==='shopee' ? '' : 'none';
+  document.getElementById('viewTabBtnMl').classList.toggle('active', platform==='ml');
+  document.getElementById('viewTabBtnShopee').classList.toggle('active', platform==='shopee');
+}
+function renderListingViewPanel(p, l, platform){
+  const data = l[platform] || {};
+  const titleKey = platform==='ml' ? 'titulo' : 'nome';
+  const titulo = data[titleKey] || p.name;
+  const preco = data.preco;
+  const photos = [...(p.photo?[p.photo]:[]), ...(l.fotos||[])];
+  const cover = photos[0];
+  const thumbs = photos.length>1 ? `<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">${photos.slice(1,6).map(ph=>`<img src="${ph}" style="width:52px;height:52px;object-fit:cover;border-radius:6px;border:1px solid var(--line);">`).join('')}</div>` : '';
+  const specFields = LISTING_FIELDS[platform].filter(f=>f.key!==titleKey && f.key!=='descricao' && data[f.key]);
+  const specsHtml = specFields.map(f=>`<div style="display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-bottom:1px solid var(--line-soft);font-size:13px;"><span style="color:var(--text-dim);">${f.label.replace(/\s*\(.*?\)/,'')}</span><span style="font-weight:500;text-align:right;">${data[f.key]}</span></div>`).join('');
+  return `
+    <div style="display:flex;gap:20px;flex-wrap:wrap;margin-top:14px;">
+      <div style="flex:0 0 220px;">
+        <div style="width:220px;height:220px;background:var(--panel-2);border-radius:10px;overflow:hidden;display:flex;align-items:center;justify-content:center;">
+          ${cover?`<img src="${cover}" alt="${p.name}" style="width:100%;height:100%;object-fit:cover;">`:`<span style="color:var(--text-faint);font-size:12px;">Sem foto</span>`}
+        </div>
+        ${thumbs}
+      </div>
+      <div style="flex:1;min-width:240px;">
+        <h2 style="font-family:var(--font-display);font-size:19px;margin:0 0 8px;">${titulo}</h2>
+        <div style="font-family:var(--font-mono);font-size:25px;font-weight:700;color:var(--nozzle);margin-bottom:12px;">${preco?'R$ '+preco:'—'}</div>
+        ${specsHtml || `<div class="field hint" style="margin:0;">Nenhuma informação adicional preenchida.</div>`}
+      </div>
+    </div>
+    <div style="margin-top:18px;">
+      <div style="font-weight:600;font-size:13px;margin-bottom:6px;">Descrição</div>
+      <div style="white-space:pre-wrap;font-size:13.5px;color:var(--text-dim);line-height:1.6;">${data.descricao || 'Sem descrição.'}</div>
+    </div>
+  `;
 }
 function deleteProduct(id){
   const p = state.products.find(x=>x.id===id);
