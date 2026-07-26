@@ -96,6 +96,10 @@ function seedData(){
         {max:99.99,pct:14,fixed:16},
         {max:199.99,pct:14,fixed:20},
         {max:Infinity,pct:14,fixed:26},
+      ], freightCapTiers:[
+        {max:79.99,cap:20},
+        {max:199.99,cap:30},
+        {max:Infinity,cap:40},
       ]},
       {id:uid(),name:'Site Próprio',pct:0,fixed:0},
       {id:uid(),name:'Outro',pct:0,fixed:0},
@@ -155,11 +159,22 @@ function migrateSettings(settings){
         {max:Infinity,pct:14,fixed:26},
       ];
     }
+    if(shopee && !shopee.freightCapTiers){
+      shopee.freightCapTiers = [
+        {max:79.99,cap:20},
+        {max:199.99,cap:30},
+        {max:Infinity,cap:40},
+      ];
+    }
     // JSON não tem representação pra Infinity — todo save/load vira null aqui,
     // o que quebrava o cálculo/exibição da última faixa. Repara pra Infinity de novo.
     settings.platforms.forEach(plat=>{
       if(Array.isArray(plat.tiers) && plat.tiers.length){
         const last = plat.tiers[plat.tiers.length-1];
+        if(last.max==null || !isFinite(last.max)) last.max = Infinity;
+      }
+      if(Array.isArray(plat.freightCapTiers) && plat.freightCapTiers.length){
+        const last = plat.freightCapTiers[plat.freightCapTiers.length-1];
         if(last.max==null || !isFinite(last.max)) last.max = Infinity;
       }
     });
@@ -516,7 +531,17 @@ function calcProduct(prod){
     suggestedPriceExtra[plat.id] = suggestedPriceForPlatform(suggestedPrice, plat.name);
     practicedPriceExtra[plat.id] = (prod.practicedPriceExtra||{})[plat.id] || suggestedPriceExtra[plat.id];
   });
-  return { materialCost, energyCost, boxCost:bCost, bubbleCost, embalagemCost, depreciation, laborCost, failureCost, totalCost, suggestedPrice, suggestedPriceMl, suggestedPriceShopee, suggestedPriceExtra, practicedPrice, practicedPriceMl, practicedPriceShopee, practicedPriceExtra, marginValue, marginPct, desiredMarginPct: desiredMargin*100, machine };
+  const estimatedShopeeFreightCap = shopeeFreightCap(practicedPriceShopee);
+  return { materialCost, energyCost, boxCost:bCost, bubbleCost, embalagemCost, depreciation, laborCost, failureCost, totalCost, suggestedPrice, suggestedPriceMl, suggestedPriceShopee, suggestedPriceExtra, practicedPrice, practicedPriceMl, practicedPriceShopee, practicedPriceExtra, estimatedShopeeFreightCap, marginValue, marginPct, desiredMarginPct: desiredMargin*100, machine };
+}
+// Teto do cupom de frete grátis que a Shopee subsidia (obrigatório desde mar/2026) —
+// é só uma estimativa de custo (o frete real pode custar menos que o teto), por
+// isso não entra em suggestedPriceShopee, só é exibida como referência.
+function shopeeFreightCap(price){
+  const shopee = (state.settings.platforms||[]).find(p=>p.name==='Shopee');
+  if(!shopee || !Array.isArray(shopee.freightCapTiers) || !shopee.freightCapTiers.length) return null;
+  const tier = shopee.freightCapTiers.find(t=>price<=t.max) || shopee.freightCapTiers[shopee.freightCapTiers.length-1];
+  return tier.cap;
 }
 // Preço que, depois de descontada a taxa daquela plataforma (fixa ou por
 // faixa, ex: Shopee), ainda rende o mesmo "preço sem taxa" de referência —
@@ -1097,6 +1122,7 @@ function updateQuickQuotePreview(){
     <div class="calc-line total"><span>Preço sugerido — venda própria (margem ${num(draft.desiredMarginPct,0)}%)</span><span style="color:var(--green)">${brl(c.suggestedPrice)}</span></div>
     <div class="calc-line" style="color:var(--text-faint);"><span>↳ Mercado Livre (já com a taxa)</span><span>${brl(c.suggestedPriceMl)}</span></div>
     <div class="calc-line" style="color:var(--text-faint);"><span>↳ Shopee (já com a taxa)</span><span>${brl(c.suggestedPriceShopee)}</span></div>
+    ${c.estimatedShopeeFreightCap!=null ? `<div class="calc-line" style="color:var(--text-faint);"><span>↳ Shopee — custo estimado de frete (teto do cupom)</span><span>${brl(c.estimatedShopeeFreightCap)}</span></div>` : ''}
     ${extraListingPlatforms().map(plat=>`<div class="calc-line" style="color:var(--text-faint);"><span>↳ ${plat.name} (já com a taxa)</span><span>${brl(c.suggestedPriceExtra[plat.id])}</span></div>`).join('')}
   `;
 }
@@ -2267,6 +2293,7 @@ function updateCalculoExample(){
       <div class="calc-line"><span>Preço sugerido — venda própria (margem de ${num(c.desiredMarginPct,0)}%)</span><span>${brl(c.suggestedPrice)}</span></div>
       <div class="calc-line" style="color:var(--text-faint);"><span>↳ Mercado Livre (já com a taxa)</span><span>${brl(c.suggestedPriceMl)}</span></div>
       <div class="calc-line" style="color:var(--text-faint);"><span>↳ Shopee (já com a taxa)</span><span>${brl(c.suggestedPriceShopee)}</span></div>
+    ${c.estimatedShopeeFreightCap!=null ? `<div class="calc-line" style="color:var(--text-faint);"><span>↳ Shopee — custo estimado de frete (teto do cupom)</span><span>${brl(c.estimatedShopeeFreightCap)}</span></div>` : ''}
       ${extraListingPlatforms().map(plat=>`<div class="calc-line" style="color:var(--text-faint);"><span>↳ ${plat.name} (já com a taxa)</span><span>${brl(c.suggestedPriceExtra[plat.id])}</span></div>`).join('')}
       <div class="calc-line"><span>Preço praticado</span><span>${brl(c.practicedPrice)}</span></div>
     </div>
@@ -2891,6 +2918,7 @@ function updateKitPreview(){
     <div class="calc-line"><span>Preço sugerido — venda própria (margem ${num(draft.desiredMarginPct,0)}%)</span><span>${brl(c.suggestedPrice)}</span></div>
     <div class="calc-line" style="color:var(--text-faint);"><span>↳ Mercado Livre (já com a taxa)</span><span>${brl(c.suggestedPriceMl)}</span></div>
     <div class="calc-line" style="color:var(--text-faint);"><span>↳ Shopee (já com a taxa)</span><span>${brl(c.suggestedPriceShopee)}</span></div>
+    ${c.estimatedShopeeFreightCap!=null ? `<div class="calc-line" style="color:var(--text-faint);"><span>↳ Shopee — custo estimado de frete (teto do cupom)</span><span>${brl(c.estimatedShopeeFreightCap)}</span></div>` : ''}
     ${extraListingPlatforms().map(plat=>`<div class="calc-line" style="color:var(--text-faint);"><span>↳ ${plat.name} (já com a taxa)</span><span>${brl(c.suggestedPriceExtra[plat.id])}</span></div>`).join('')}
     <div class="calc-line" style="color:var(--text-faint);"><span>Soma se vendido separado (embalagem individual de cada um)</span><span>${brl(sumIndividual)}</span></div>
     <div class="calc-line total"><span>Preço final do kit${priceField && priceField.value ? ' (definido por você)' : ''}</span><span style="color:${finalMarginPct<0?'var(--red)':'var(--green)'}">${brl(finalPrice)} — margem real ${num(finalMarginPct,1)}%</span></div>
@@ -3835,6 +3863,7 @@ function updateProductPreview(){
     <div class="calc-line"><span>Preço sugerido — venda própria (margem de ${num(form.desiredMarginPct,0)}%)</span><span>${brl(c.suggestedPrice)}</span></div>
     <div class="calc-line" style="color:var(--text-faint);"><span>↳ Mercado Livre (já com a taxa)</span><span>${brl(c.suggestedPriceMl)}</span></div>
     <div class="calc-line" style="color:var(--text-faint);"><span>↳ Shopee (já com a taxa)</span><span>${brl(c.suggestedPriceShopee)}</span></div>
+    ${c.estimatedShopeeFreightCap!=null ? `<div class="calc-line" style="color:var(--text-faint);"><span>↳ Shopee — custo estimado de frete (teto do cupom)</span><span>${brl(c.estimatedShopeeFreightCap)}</span></div>` : ''}
     ${extraListingPlatforms().map(plat=>`<div class="calc-line" style="color:var(--text-faint);"><span>↳ ${plat.name} (já com a taxa)</span><span>${brl(c.suggestedPriceExtra[plat.id])}</span></div>`).join('')}
   `;
   const priceInput = document.getElementById('pPrice');
