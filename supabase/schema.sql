@@ -21,6 +21,11 @@ alter table app_data enable row level security;
 create policy "own data" on app_data for all
   using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
+-- Liga a replicação Realtime pra essa tabela — sem isso, o app não recebe
+-- atualização automática quando outro dispositivo salva algo (é preciso dar F5).
+-- Já protegido pela RLS acima; o Realtime respeita a mesma política.
+alter publication supabase_realtime add table app_data;
+
 -- Chaves usadas pelo app: 'materials', 'products', 'sales', 'orders',
 -- 'customers', 'printFailures', 'settings'.
 --

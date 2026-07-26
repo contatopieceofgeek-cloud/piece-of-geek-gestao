@@ -295,43 +295,99 @@ async function refreshSyncStatus(){
   syncStatus.email = syncStatus.configured ? (await getSyncUser())?.email || null : null;
 }
 
+/* ---------- Atualização em tempo real entre dispositivos (Supabase Realtime) ----------
+   Assina mudanças na tabela app_data pra puxar e re-renderizar automaticamente quando
+   outro dispositivo salvar algo, em vez de exigir um F5 manual pra ver o dado novo.
+   Precisa da replicação Realtime ligada pra tabela app_data no projeto Supabase
+   (ver ALTER PUBLICATION no supabase/schema.sql e no passo a passo de conexão). */
+let syncChannel = null;
+let lastLocalSaveAt = 0;
+let pendingRemoteReload = false;
+let remoteRefreshTimer = null;
+async function startRealtimeSync(){
+  const client = initSupabase();
+  if(!client || syncChannel) return;
+  const user = await getSyncUser();
+  if(!user) return;
+  syncChannel = client
+    .channel('app_data_changes_'+user.id)
+    .on('postgres_changes', { event:'*', schema:'public', table:'app_data', filter:`user_id=eq.${user.id}` }, onRemoteDataChange)
+    .subscribe();
+}
+function stopRealtimeSync(){
+  if(syncChannel){ try{ syncChannel.unsubscribe(); }catch(e){} syncChannel = null; }
+}
+function onRemoteDataChange(){
+  if(Date.now() - lastLocalSaveAt < 3000) return; // provavelmente eco do nosso próprio save
+  clearTimeout(remoteRefreshTimer);
+  remoteRefreshTimer = setTimeout(()=>{
+    if(document.getElementById('overlay').classList.contains('show')){
+      pendingRemoteReload = true;
+      toast('Dados atualizados em outro dispositivo — serão aplicados ao fechar esta janela');
+    } else {
+      refreshFromRemote();
+    }
+  }, 800);
+}
+
+// Timestamp local de cada chave (guardado ao lado do valor no IndexedDB/localStorage),
+// pra comparar com o updated_at do Supabase antes de aceitar o dado remoto — sem isso,
+// uma edição feita offline podia ser sobrescrita silenciosamente ao reabrir o app já
+// online (o storageGet antigo sempre preferia a nuvem, sem checar qual era mais recente).
+async function getLocalWithTimestamp(key){
+  try{
+    await migrateLocalStorageToIdb();
+    const val = await idbGet(key);
+    const updatedAt = await idbGet(key+'__updatedAt');
+    if(val!=null) return { value: val, updatedAt };
+  }catch(e){ /* segue pro fallback localStorage */ }
+  return { value: localStorage.getItem(STORAGE_PREFIX+key), updatedAt: localStorage.getItem(STORAGE_PREFIX+key+'__updatedAt') };
+}
 async function storageGet(key){
   if(hasCloudStorage()){
     try{ const r = await window.storage.get(key); return r ? r.value : null; }catch(e){ return null; }
   }
+  const local = await getLocalWithTimestamp(key);
   if(syncStatus.configured && syncStatus.email){
     try{
       const client = initSupabase();
       const user = await getSyncUser();
       if(client && user){
-        const { data, error } = await client.from('app_data').select('value').eq('user_id',user.id).eq('key',key).maybeSingle();
-        if(!error) return data ? data.value : null;
+        const { data, error } = await client.from('app_data').select('value,updated_at').eq('user_id',user.id).eq('key',key).maybeSingle();
+        if(!error){
+          if(!data) return local.value;
+          const remoteIsNewer = !local.updatedAt || new Date(data.updated_at) > new Date(local.updatedAt);
+          if(remoteIsNewer) return data.value;
+          // Local tem uma edição mais recente que a nuvem (ex: feita offline) — usa o
+          // local e reenvia pra nuvem em segundo plano, pra não perder essa edição.
+          lastLocalSaveAt = Date.now();
+          client.from('app_data').upsert(
+            { user_id:user.id, key, value:local.value, updated_at:local.updatedAt },
+            { onConflict:'user_id,key' }
+          ).then(()=>{}).catch(()=>{});
+          return local.value;
+        }
       }
     }catch(e){ /* sem conexão — cai pro cache local */ }
   }
-  try{
-    await migrateLocalStorageToIdb();
-    const val = await idbGet(key);
-    if(val!=null) return val;
-    return localStorage.getItem(STORAGE_PREFIX+key);
-  }catch(e){
-    return localStorage.getItem(STORAGE_PREFIX+key);
-  }
+  return local.value;
 }
 async function storageSet(key, value){
   if(hasCloudStorage()){
     try{ await window.storage.set(key, value); return true; }catch(e){ /* fall through to local storage as backup */ }
   }
+  const nowIso = new Date().toISOString();
   let localOk = false;
-  try{ await idbSet(key, value); localOk = true; }
-  catch(e){ try{ localStorage.setItem(STORAGE_PREFIX+key, value); localOk = true; }catch(e2){} }
+  try{ await idbSet(key, value); await idbSet(key+'__updatedAt', nowIso); localOk = true; }
+  catch(e){ try{ localStorage.setItem(STORAGE_PREFIX+key, value); localStorage.setItem(STORAGE_PREFIX+key+'__updatedAt', nowIso); localOk = true; }catch(e2){} }
   if(syncStatus.configured && syncStatus.email){
     try{
       const client = initSupabase();
       const user = await getSyncUser();
       if(client && user){
+        lastLocalSaveAt = Date.now();
         await client.from('app_data').upsert(
-          { user_id:user.id, key, value, updated_at:new Date().toISOString() },
+          { user_id:user.id, key, value, updated_at:nowIso },
           { onConflict:'user_id,key' }
         );
       }
@@ -340,8 +396,7 @@ async function storageSet(key, value){
   return localOk;
 }
 
-async function loadState(){
-  await refreshSyncStatus();
+async function applyLoadedState(){
   try{
     const [m,p,s,o,cu,c,pf,li] = await Promise.all([
       storageGet('materials'), storageGet('products'), storageGet('sales'), storageGet('orders'), storageGet('customers'), storageGet('settings'), storageGet('printFailures'), storageGet('listings'),
@@ -370,11 +425,23 @@ async function loadState(){
     console.error('storage load error', e);
     state = seedData();
   }
+}
+async function loadState(){
+  await refreshSyncStatus();
+  await applyLoadedState();
   render();
   if(!hasCloudStorage()){
     if(syncStatus.email) toast(`Sincronizado como ${syncStatus.email}`);
     else toast('Salvando no navegador (IndexedDB) — evite navegação anônima para não perder dados.');
   }
+  if(syncStatus.configured && syncStatus.email) startRealtimeSync();
+}
+// Puxa os dados de novo (sem o toast de primeira carga) quando outro dispositivo
+// salva algo — chamado pelo listener do Supabase Realtime, ver startRealtimeSync().
+async function refreshFromRemote(){
+  await applyLoadedState();
+  render();
+  toast('Dados atualizados a partir de outro dispositivo');
 }
 async function saveMaterials(){ const ok = await storageSet('materials', JSON.stringify(state.materials)); if(!ok) toast('Erro ao salvar estoque','err'); }
 async function saveProducts(){ const ok = await storageSet('products', JSON.stringify(state.products)); if(!ok) toast('Erro ao salvar produtos','err'); }
@@ -4366,7 +4433,10 @@ function showModal(title, bodyHtml){
   document.getElementById('overlay').classList.add('show');
   modal.focus();
 }
-function closeModal(){ document.getElementById('overlay').classList.remove('show'); }
+function closeModal(){
+  document.getElementById('overlay').classList.remove('show');
+  if(pendingRemoteReload){ pendingRemoteReload = false; refreshFromRemote(); }
+}
 document.getElementById('overlay').addEventListener('click', (e)=>{ if(e.target.id==='overlay') closeModal(); });
 document.addEventListener('keydown', (e)=>{ if(e.key==='Escape' && document.getElementById('overlay').classList.contains('show')) closeModal(); });
 
@@ -4425,7 +4495,7 @@ function openSyncModal(){
         <li>Crie uma conta grátis em <strong>supabase.com</strong> e clique em "New Project".</li>
         <li>No projeto criado, abra <strong>SQL Editor</strong> → "New query", cole o código abaixo e clique em "Run":</li>
       </ol>
-      <textarea readonly style="width:100%;height:110px;font-family:var(--font-mono);font-size:10px;margin:8px 0;resize:vertical;" onclick="this.select()">create table app_data (
+      <textarea readonly style="width:100%;height:130px;font-family:var(--font-mono);font-size:10px;margin:8px 0;resize:vertical;" onclick="this.select()">create table app_data (
   user_id uuid references auth.users not null,
   key text not null,
   value text not null,
@@ -4434,7 +4504,8 @@ function openSyncModal(){
 );
 alter table app_data enable row level security;
 create policy "own data" on app_data for all
-  using (auth.uid() = user_id) with check (auth.uid() = user_id);</textarea>
+  using (auth.uid() = user_id) with check (auth.uid() = user_id);
+alter publication supabase_realtime add table app_data;</textarea>
       <ol start="3" style="font-size:12.5px;color:var(--text-dim);line-height:2;padding-left:20px;margin:0;">
         <li>Vá em <strong>Settings → API Keys</strong>, copie a <strong>Project URL</strong> e a <strong>Publishable key</strong> (chamada de "anon key" em projetos mais antigos) e cole nos dois campos acima.</li>
         <li>Pra abrir esse app no celular, salve esse arquivo .html em algum lugar acessível por link — o jeito mais simples é arrastar o arquivo em <strong>netlify.com/drop</strong>, que gera um link na hora, sem precisar criar conta.</li>
@@ -4460,6 +4531,8 @@ create policy "own data" on app_data for all
   }
   showModal('Sincronização', `
     <div class="field">Conectado como <strong>${syncStatus.email}</strong>. Os dados são compartilhados entre todos os dispositivos onde você fizer login com essa conta.</div>
+    <div class="field hint" style="margin-top:-4px;">Se você conectou esse projeto antes desta versão, as mudanças de outro dispositivo só aparecem depois de recarregar a página. Pra ativar a atualização automática, rode uma vez no <strong>SQL Editor</strong> do seu projeto Supabase:</div>
+    <textarea readonly style="width:100%;height:32px;font-family:var(--font-mono);font-size:10px;margin:0 0 12px;resize:vertical;" onclick="this.select()">alter publication supabase_realtime add table app_data;</textarea>
     <div class="modal-actions" style="justify-content:space-between;">
       <button class="btn ghost" onclick="disconnectSync()">Esquecer neste dispositivo</button>
       <button class="btn" onclick="doSyncSignOut()">Sair da conta</button>
@@ -4517,8 +4590,10 @@ async function afterSyncLogin(){
       await loadState();
     }
   }catch(e){ /* silencioso — segue com o que tem local */ }
+  startRealtimeSync();
 }
 async function doSyncSignOut(){
+  stopRealtimeSync();
   const client = initSupabase();
   if(client){ try{ await client.auth.signOut(); }catch(e){} }
   await refreshSyncStatus();
@@ -4527,6 +4602,7 @@ async function doSyncSignOut(){
 }
 function disconnectSync(){
   if(!confirm('Isso desconecta a sincronização neste dispositivo (os dados continuam salvos na nuvem, se você já tiver enviado algum). Continuar?')) return;
+  stopRealtimeSync();
   clearSyncConfig();
   syncStatus = { configured:false, email:null };
   toast('Sincronização desconectada neste dispositivo');
