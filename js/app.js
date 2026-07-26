@@ -1701,12 +1701,17 @@ function printSaleReceipt(saleId){
     </div>
   `);
 }
+// Ícones simples e legíveis (não são o logotipo oficial pixel-a-pixel) —
+// mantidos como formas geométricas básicas de propósito, pra renderizar de
+// forma confiável tanto no HTML impresso quanto desenhados no canvas do PNG.
+const WHATSAPP_ICON_SVG = '<svg width="15" height="15" viewBox="0 0 24 24" style="vertical-align:-3px;margin-right:3px;"><circle cx="12" cy="12" r="12" fill="#25D366"/><path d="M7 8.5A2.5 2.5 0 0 1 9.5 6h5A2.5 2.5 0 0 1 17 8.5v3A2.5 2.5 0 0 1 14.5 14H11l-2.8 2.1c-.3.2-.7 0-.7-.4V14h-.5A2.5 2.5 0 0 1 7 11.5v-3Z" fill="#fff"/></svg>';
+const INSTAGRAM_ICON_SVG = '<svg width="15" height="15" viewBox="0 0 24 24" style="vertical-align:-3px;margin-right:3px;"><rect x="2.5" y="2.5" width="19" height="19" rx="6" fill="none" stroke="#C13584" stroke-width="2"/><circle cx="12" cy="12" r="5" fill="none" stroke="#C13584" stroke-width="2"/><circle cx="17.3" cy="6.7" r="1.2" fill="#C13584"/></svg>';
 function catalogContactLine(){
   const s = state.settings;
   const parts = [];
-  if(s.whatsapp) parts.push(`WhatsApp: ${s.whatsapp}`);
-  if(s.instagram) parts.push(`Instagram: @${s.instagram}`);
-  return parts.join(' &nbsp;·&nbsp; ');
+  if(s.whatsapp) parts.push(`<span style="white-space:nowrap;">${WHATSAPP_ICON_SVG}${s.whatsapp}</span>`);
+  if(s.instagram) parts.push(`<span style="white-space:nowrap;">${INSTAGRAM_ICON_SVG}@${s.instagram}</span>`);
+  return parts.join(' &nbsp;&nbsp; ');
 }
 function exportCatalogPDF(){
   if(state.products.length===0){ toast('Cadastre produtos antes de exportar o catálogo','err'); return; }
@@ -1715,8 +1720,10 @@ function exportCatalogPDF(){
   const cards = items.map(p=>{
     const price = calcProduct(p).practicedPrice;
     return `<div style="page-break-inside:avoid;border:1px solid #E2E4E9;border-radius:16px;overflow:hidden;background:#fff;">
-      <div style="aspect-ratio:1/1;background:#F6F7F9;display:flex;align-items:center;justify-content:center;">
-        ${p.photo ? `<img src="${p.photo}" alt="${p.name}" style="width:100%;height:100%;object-fit:cover;">` : `<span style="font-family:var(--font-body);font-size:11px;font-weight:700;letter-spacing:.05em;color:#B9BEC9;">SEM FOTO</span>`}
+      <div style="position:relative;width:100%;padding-top:100%;background:#F6F7F9;">
+        <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;overflow:hidden;">
+          ${p.photo ? `<img src="${p.photo}" alt="${p.name}" style="width:100%;height:100%;object-fit:cover;">` : `<span style="font-family:var(--font-body);font-size:11px;font-weight:700;letter-spacing:.05em;color:#B9BEC9;">SEM FOTO</span>`}
+        </div>
       </div>
       <div style="padding:14px 16px;">
         <div style="font-family:var(--font-display);font-weight:600;font-size:14.5px;color:#1A1D23;margin-bottom:10px;line-height:1.3;">${p.name}</div>
@@ -1793,6 +1800,40 @@ function canvasWrapText(ctx, text, x, y, maxWidth, lineHeight, maxLines){
   }
   lines.forEach((l,i)=>ctx.fillText(l, x, y+i*lineHeight));
   return lines.length;
+}
+// Desenha os mesmos ícones de contato do HTML impresso, só que como formas
+// de canvas (o PNG exportado não pode usar as tags <svg> do catalogContactLine).
+function drawContactIconsCanvas(ctx, startX, y){
+  const s = state.settings;
+  let x = startX;
+  const iconSize = 15;
+  ctx.font = "12px 'Inter', sans-serif";
+  ctx.textAlign = 'left';
+  if(s.whatsapp){
+    ctx.fillStyle = '#25D366';
+    ctx.beginPath(); ctx.arc(x+iconSize/2, y-iconSize/2+3, iconSize/2, 0, Math.PI*2); ctx.fill();
+    ctx.save();
+    ctx.translate(x, y-iconSize+3);
+    ctx.scale(iconSize/24, iconSize/24);
+    ctx.fillStyle = '#fff';
+    ctx.fill(new Path2D('M7 8.5A2.5 2.5 0 0 1 9.5 6h5A2.5 2.5 0 0 1 17 8.5v3A2.5 2.5 0 0 1 14.5 14H11l-2.8 2.1c-.3.2-.7 0-.7-.4V14h-.5A2.5 2.5 0 0 1 7 11.5v-3Z'));
+    ctx.restore();
+    x += iconSize + 4;
+    ctx.fillStyle = '#686D7C';
+    ctx.fillText(s.whatsapp, x, y);
+    x += ctx.measureText(s.whatsapp).width + 22;
+  }
+  if(s.instagram){
+    ctx.strokeStyle = '#C13584'; ctx.lineWidth = 1.6;
+    canvasRoundRectPath(ctx, x+1, y-iconSize+2, iconSize-2, iconSize-2, 4);
+    ctx.stroke();
+    ctx.beginPath(); ctx.arc(x+iconSize/2, y-iconSize/2+2, iconSize/2-4, 0, Math.PI*2); ctx.stroke();
+    ctx.fillStyle = '#C13584';
+    ctx.beginPath(); ctx.arc(x+iconSize-3, y-iconSize+4, 1.1, 0, Math.PI*2); ctx.fill();
+    x += iconSize + 4;
+    ctx.fillStyle = '#686D7C';
+    ctx.fillText('@'+s.instagram, x, y);
+  }
 }
 async function exportCatalogImage(){
   if(state.products.length===0){ toast('Cadastre produtos antes de exportar o catálogo','err'); return; }
@@ -1899,9 +1940,9 @@ async function exportCatalogImage(){
   ctx.beginPath(); ctx.moveTo(margin,footerY-14); ctx.lineTo(width-margin,footerY-14); ctx.stroke();
   ctx.fillStyle = '#686D7C';
   ctx.font = "12px 'Inter', sans-serif";
+  ctx.textAlign = 'left';
   ctx.fillText('Preços sujeitos a alteração sem aviso prévio · Consulte disponibilidade', margin, footerY+4);
-  const contact = catalogContactLine().replace(/&nbsp;/g,' ');
-  if(contact) ctx.fillText(contact, margin, footerY+26);
+  drawContactIconsCanvas(ctx, margin, footerY+26);
 
   const link = document.createElement('a');
   link.download = `catalogo-piece-of-geek-3d-${todayStr()}.png`;
