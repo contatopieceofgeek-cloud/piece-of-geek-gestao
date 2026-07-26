@@ -78,6 +78,8 @@ function seedData(){
     pixKey:'',
     pixMerchantName:'Piece of Geek 3D',
     pixMerchantCity:'Sao Paulo',
+    whatsapp:'(11) 99296-5296',
+    instagram:'piece.of.geek',
     printHoursPerDay:16,
     machines,
     expenses:[
@@ -196,6 +198,8 @@ function migrateSettings(settings){
   if(settings.pixKey==null) settings.pixKey = '';
   if(settings.pixMerchantName==null) settings.pixMerchantName = 'Piece of Geek 3D';
   if(settings.pixMerchantCity==null) settings.pixMerchantCity = 'Sao Paulo';
+  if(settings.whatsapp==null) settings.whatsapp = '(11) 99296-5296';
+  if(settings.instagram==null) settings.instagram = 'piece.of.geek';
   if(settings.printHoursPerDay==null) settings.printHoursPerDay = 16;
   delete settings.machine;
   delete settings.machineCostPerHour;
@@ -1697,16 +1701,27 @@ function printSaleReceipt(saleId){
     </div>
   `);
 }
+function catalogContactLine(){
+  const s = state.settings;
+  const parts = [];
+  if(s.whatsapp) parts.push(`WhatsApp: ${s.whatsapp}`);
+  if(s.instagram) parts.push(`Instagram: @${s.instagram}`);
+  return parts.join(' &nbsp;·&nbsp; ');
+}
 function exportCatalogPDF(){
   if(state.products.length===0){ toast('Cadastre produtos antes de exportar o catálogo','err'); return; }
   const items = state.products.slice().sort((a,b)=>a.name.localeCompare(b.name));
 
-  const summaryRows = items.map((p,i)=>{
+  const cards = items.map(p=>{
     const price = calcProduct(p).practicedPrice;
-    return `<div style="display:flex;align-items:center;gap:14px;padding:10px 12px;page-break-inside:avoid;${i%2===0?'background:#F6F7F9;':''}border-radius:8px;">
-      ${p.photo ? `<img src="${p.photo}" alt="${p.name}" style="width:46px;height:46px;object-fit:cover;border-radius:6px;">` : `<div style="width:46px;height:46px;border-radius:6px;background:#eee;"></div>`}
-      <div style="flex:1;font-size:14px;color:#1A1D23;">${p.name}</div>
-      <div style="font-weight:bold;font-size:14px;color:#0B7A6B;">${brl(price)}</div>
+    return `<div style="page-break-inside:avoid;border:1px solid #E2E4E9;border-radius:16px;overflow:hidden;background:#fff;">
+      <div style="aspect-ratio:1/1;background:#F6F7F9;display:flex;align-items:center;justify-content:center;">
+        ${p.photo ? `<img src="${p.photo}" alt="${p.name}" style="width:100%;height:100%;object-fit:cover;">` : `<span style="font-family:var(--font-body);font-size:11px;font-weight:700;letter-spacing:.05em;color:#B9BEC9;">SEM FOTO</span>`}
+      </div>
+      <div style="padding:14px 16px;">
+        <div style="font-family:var(--font-display);font-weight:600;font-size:14.5px;color:#1A1D23;margin-bottom:10px;line-height:1.3;">${p.name}</div>
+        <span style="display:inline-block;background:#E1F5F0;color:#0B7A6B;font-family:var(--font-mono);font-weight:700;font-size:13px;padding:5px 12px;border-radius:20px;">${brl(price)}</span>
+      </div>
     </div>`;
   }).join('');
 
@@ -1715,8 +1730,8 @@ function exportCatalogPDF(){
     const filSummary = (p.filaments||[]).map(f=>`${f.materialName} ${num(f.weightG,0)}g`).join(' + ');
     return `<div class="catalog-page" style="display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;">
       ${p.photo ? `<img src="${p.photo}" alt="${p.name}" style="max-width:320px;max-height:320px;object-fit:cover;border-radius:14px;margin-bottom:26px;box-shadow:0 4px 16px rgba(0,0,0,0.15);">` : ''}
-      <h1 style="font-size:30px;margin:0 0 12px;color:#1A1D23;">${p.name}</h1>
-      <div style="font-size:34px;font-weight:bold;margin-bottom:22px;color:#0B7A6B;">${brl(c.practicedPrice)}</div>
+      <h1 style="font-family:var(--font-display);font-size:30px;margin:0 0 12px;color:#1A1D23;">${p.name}</h1>
+      <div style="font-family:var(--font-mono);font-size:34px;font-weight:bold;margin-bottom:22px;color:#0B7A6B;">${brl(c.practicedPrice)}</div>
       <div style="font-size:13.5px;color:#5D6270;line-height:2;max-width:420px;">
         ${filSummary ? `Filamento: ${filSummary}<br>` : ''}
         Peso total: ${num(totalWeight(p),0)}g &nbsp;·&nbsp; Tempo de impressão: ${num(p.timeH,1)}h
@@ -1727,19 +1742,63 @@ function exportCatalogPDF(){
 
   printHTML(`
     <div class="catalog-summary">
-      <h1 style="font-size:28px;margin:0 0 4px;color:#BD4119;">Piece of Geek 3D</h1>
-      <div style="color:#5D6270;font-size:13px;margin-bottom:18px;">Catálogo de produtos — atualizado em ${new Date().toLocaleDateString('pt-BR')}</div>
-      <div style="border-top:1px solid #E2E4E9;margin-bottom:8px;"></div>
-      ${summaryRows}
-      <div style="border-top:1px solid #E2E4E9;margin-top:8px;padding-top:10px;color:#5D6270;font-size:11.5px;">Preços sujeitos a alteração sem aviso prévio · Consulte disponibilidade</div>
+      <div style="display:flex;align-items:center;gap:14px;margin-bottom:18px;">
+        <img src="img/logo.png" alt="Piece of Geek 3D" style="width:52px;height:52px;object-fit:cover;border-radius:14px;box-shadow:0 4px 10px rgba(189,65,25,0.28);">
+        <div>
+          <h1 style="font-family:var(--font-display);font-size:26px;margin:0;color:#1A1D23;">Piece of Geek 3D</h1>
+          <div style="font-family:var(--font-body);font-weight:700;letter-spacing:.05em;text-transform:uppercase;font-size:11.5px;color:#5D6270;margin-top:2px;">Catálogo de produtos</div>
+        </div>
+      </div>
+      <div style="border-top:1px solid #E2E4E9;margin-bottom:18px;"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">${cards}</div>
+      <div style="border-top:1px solid #E2E4E9;margin-top:18px;padding-top:12px;color:#5D6270;font-size:11.5px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px;">
+        <span>Preços sujeitos a alteração sem aviso prévio · Consulte disponibilidade</span>
+        <span>${catalogContactLine()}</span>
+      </div>
     </div>
     ${productPages}
   `);
+}
+function canvasRoundRectPath(ctx,x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);
+  ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);
+  ctx.arcTo(x,y,x+w,y,r);
+  ctx.closePath();
+}
+// Quebra texto em até maxLines linhas dentro de maxWidth (canvas não quebra texto sozinho).
+function canvasWrapText(ctx, text, x, y, maxWidth, lineHeight, maxLines){
+  const words = text.split(' ');
+  const lines = [];
+  let line = '';
+  for(let i=0;i<words.length;i++){
+    const test = line ? line+' '+words[i] : words[i];
+    if(ctx.measureText(test).width > maxWidth && line){
+      lines.push(line);
+      line = words[i];
+      if(lines.length===maxLines) break;
+    } else {
+      line = test;
+    }
+  }
+  if(lines.length<maxLines && line) lines.push(line);
+  if(lines.length>maxLines) lines.length = maxLines;
+  const joined = lines.join(' ');
+  if(joined.length < text.length){
+    let last = lines[lines.length-1];
+    while(ctx.measureText(last+'…').width > maxWidth && last.length>1){ last = last.slice(0,-1).trimEnd(); }
+    lines[lines.length-1] = last+'…';
+  }
+  lines.forEach((l,i)=>ctx.fillText(l, x, y+i*lineHeight));
+  return lines.length;
 }
 async function exportCatalogImage(){
   if(state.products.length===0){ toast('Cadastre produtos antes de exportar o catálogo','err'); return; }
   const items = state.products.slice().sort((a,b)=>a.name.localeCompare(b.name));
   toast('Gerando catálogo...');
+  if(document.fonts && document.fonts.ready) await document.fonts.ready;
 
   const loadImg = (src) => new Promise((resolve)=>{
     if(!src){ resolve(null); return; }
@@ -1748,72 +1807,101 @@ async function exportCatalogImage(){
     img.onerror = ()=>resolve(null);
     img.src = src;
   });
-  const images = await Promise.all(items.map(p=>loadImg(p.photo)));
+  const [logoImg, ...images] = await Promise.all([loadImg('img/logo.png'), ...items.map(p=>loadImg(p.photo))]);
 
   const width = 900;
-  const rowH = 64;
-  const thumbSize = 48;
-  const headerH = 130;
-  const footerH = 50;
-  const height = headerH + items.length*rowH + footerH;
+  const margin = 36;
+  const gap = 20;
+  const cols = 2;
+  const cardW = (width - margin*2 - gap*(cols-1)) / cols;
+  const photoH = cardW;
+  const textH = 96;
+  const cardH = photoH + textH;
+  const rowGap = 20;
+  const headerH = 132;
+  const footerH = 70;
+  const rows = Math.ceil(items.length/cols);
+  const height = headerH + rows*cardH + Math.max(0,rows-1)*rowGap + footerH;
+
   const canvas = document.createElement('canvas');
   canvas.width = width; canvas.height = height;
   const ctx = canvas.getContext('2d');
-
   ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0,0,width,height);
 
-  ctx.fillStyle = '#BD4119';
-  ctx.font = 'bold 32px Arial, sans-serif';
-  ctx.fillText('Piece of Geek 3D', 36, 55);
-  ctx.fillStyle = '#6B7080';
-  ctx.font = '16px Arial, sans-serif';
-  ctx.fillText('Catálogo de produtos — atualizado em ' + new Date().toLocaleDateString('pt-BR'), 36, 82);
+  const logoSize = 52;
+  if(logoImg){
+    canvasRoundRectPath(ctx, margin, 28, logoSize, logoSize, 14);
+    ctx.save(); ctx.clip();
+    const scale = Math.max(logoSize/logoImg.naturalWidth, logoSize/logoImg.naturalHeight);
+    const iw = logoImg.naturalWidth*scale, ih = logoImg.naturalHeight*scale;
+    ctx.drawImage(logoImg, margin+(logoSize-iw)/2, 28+(logoSize-ih)/2, iw, ih);
+    ctx.restore();
+  }
+  const titleX = logoImg ? margin+logoSize+14 : margin;
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#1A1D23';
+  ctx.font = "700 26px 'Space Grotesk', sans-serif";
+  ctx.fillText('Piece of Geek 3D', titleX, 55);
+  ctx.fillStyle = '#5D6270';
+  ctx.font = "700 12px 'Inter', sans-serif";
+  ctx.fillText('CATÁLOGO DE PRODUTOS', titleX, 75);
 
   ctx.strokeStyle = '#E2E4E9';
-  ctx.beginPath(); ctx.moveTo(36,102); ctx.lineTo(width-36,102); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(margin, headerH-24); ctx.lineTo(width-margin, headerH-24); ctx.stroke();
 
-  let y = headerH;
   items.forEach((p,i)=>{
-    const rowTop = y - 40;
-    if(i%2===0){ ctx.fillStyle='#F6F7F9'; ctx.fillRect(20,rowTop,width-40,rowH); }
+    const col = i%cols, row = Math.floor(i/cols);
+    const x = margin + col*(cardW+gap);
+    const y = headerH + row*(cardH+rowGap);
+
+    canvasRoundRectPath(ctx, x, y, cardW, cardH, 16);
+    ctx.strokeStyle = '#E2E4E9'; ctx.lineWidth = 1; ctx.stroke();
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(x+16,y); ctx.arcTo(x+cardW,y,x+cardW,y+photoH,16); ctx.lineTo(x+cardW,y+photoH); ctx.lineTo(x,y+photoH); ctx.arcTo(x,y,x+cardW,y,16); ctx.closePath();
+    ctx.clip();
+    ctx.fillStyle = '#F6F7F9'; ctx.fillRect(x,y,cardW,photoH);
     const img = images[i];
-    const textX = img ? 36+thumbSize+16 : 36;
     if(img){
-      const rx=36, ry=rowTop+(rowH-thumbSize)/2, rw=thumbSize, rh=thumbSize, rad=8;
-      ctx.save();
-      ctx.beginPath();
-      ctx.moveTo(rx+rad, ry);
-      ctx.arcTo(rx+rw, ry, rx+rw, ry+rh, rad);
-      ctx.arcTo(rx+rw, ry+rh, rx, ry+rh, rad);
-      ctx.arcTo(rx, ry+rh, rx, ry, rad);
-      ctx.arcTo(rx, ry, rx+rw, ry, rad);
-      ctx.closePath();
-      ctx.clip();
-      ctx.drawImage(img, rx, ry, rw, rh);
-      ctx.restore();
+      const s = Math.max(cardW/img.naturalWidth, photoH/img.naturalHeight);
+      const iw = img.naturalWidth*s, ih = img.naturalHeight*s;
+      ctx.drawImage(img, x+(cardW-iw)/2, y+(photoH-ih)/2, iw, ih);
+    } else {
+      ctx.fillStyle = '#B9BEC9';
+      ctx.font = "700 11px 'Inter', sans-serif";
+      ctx.textAlign = 'center';
+      ctx.fillText('SEM FOTO', x+cardW/2, y+photoH/2+4);
+      ctx.textAlign = 'left';
     }
+    ctx.restore();
+
+    ctx.strokeStyle = '#EDEEF2';
+    ctx.beginPath(); ctx.moveTo(x,y+photoH); ctx.lineTo(x+cardW,y+photoH); ctx.stroke();
+
     const price = calcProduct(p).practicedPrice;
     ctx.fillStyle = '#1A1D23';
-    ctx.font = '18px Arial, sans-serif';
-    ctx.textAlign = 'left';
-    let name = p.name;
-    const maxNameWidth = (width-36-140) - textX;
-    while(ctx.measureText(name).width > maxNameWidth && name.length>3){ name = name.slice(0,-1); }
-    if(name!==p.name) name = name.slice(0,-1)+'…';
-    ctx.fillText(name, textX, y);
+    ctx.font = "600 15px 'Space Grotesk', sans-serif";
+    canvasWrapText(ctx, p.name, x+16, y+photoH+26, cardW-32, 19, 2);
+
+    ctx.font = "700 13px 'JetBrains Mono', monospace";
+    const priceText = brl(price);
+    const priceW = ctx.measureText(priceText).width + 20;
+    const pillY = y+cardH-34;
+    canvasRoundRectPath(ctx, x+16, pillY, priceW, 26, 13);
+    ctx.fillStyle = '#E1F5F0'; ctx.fill();
     ctx.fillStyle = '#0B7A6B';
-    ctx.font = 'bold 20px Arial, sans-serif';
-    ctx.textAlign = 'right';
-    ctx.fillText(brl(price), width-36, y);
-    y += rowH;
+    ctx.fillText(priceText, x+26, pillY+18);
   });
 
+  const footerY = headerH + rows*cardH + Math.max(0,rows-1)*rowGap + 28;
   ctx.strokeStyle = '#E2E4E9';
-  ctx.beginPath(); ctx.moveTo(36,y-40); ctx.lineTo(width-36,y-40); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(margin,footerY-14); ctx.lineTo(width-margin,footerY-14); ctx.stroke();
   ctx.fillStyle = '#686D7C';
-  ctx.font = '13px Arial, sans-serif';
-  ctx.textAlign = 'left';
-  ctx.fillText('Preços sujeitos a alteração sem aviso prévio · Consulte disponibilidade', 36, y);
+  ctx.font = "12px 'Inter', sans-serif";
+  ctx.fillText('Preços sujeitos a alteração sem aviso prévio · Consulte disponibilidade', margin, footerY+4);
+  const contact = catalogContactLine().replace(/&nbsp;/g,' ');
+  if(contact) ctx.fillText(contact, margin, footerY+26);
 
   const link = document.createElement('a');
   link.download = `catalogo-piece-of-geek-3d-${todayStr()}.png`;
@@ -4145,6 +4233,12 @@ function openSettingsModal(){
     <div class="field hint" style="margin-top:-8px;margin-bottom:12px;">Preencha pra poder gerar cobrança PIX (QR Code + copia e cola) direto na hora de registrar uma venda.</div>
     <div class="field hint" style="margin-top:-8px;margin-bottom:12px;">Usada como ponto de partida ao criar um produto novo — depois, cada produto pode ter a margem ajustada individualmente no próprio cadastro.</div>
 
+    <div class="section-title" style="margin-top:16px;">Contato (aparece no catálogo)</div>
+    <div class="row2">
+      <div class="field"><label>WhatsApp</label><input id="cfgWhatsapp" value="${s.whatsapp||''}" placeholder="(11) 99999-9999"></div>
+      <div class="field"><label>Instagram</label><input id="cfgInstagram" value="${s.instagram||''}" placeholder="seu.usuario (sem @)"></div>
+    </div>
+
     <div class="section-title" style="margin-top:16px;">Mão de obra</div>
     <div class="field"><label>Valor da sua hora de trabalho (R$/h)</label><input type="number" id="cfgLabor" value="${s.laborHourlyRate||0}" step="0.01"></div>
     <div class="section-title" style="margin-top:16px;">MEI, capacidade e metas</div>
@@ -4368,6 +4462,8 @@ function confirmSettings(){
   s.pixKey = document.getElementById('cfgPixKey').value.trim();
   s.pixMerchantName = document.getElementById('cfgPixName').value.trim();
   s.pixMerchantCity = document.getElementById('cfgPixCity').value.trim();
+  s.whatsapp = document.getElementById('cfgWhatsapp').value.trim();
+  s.instagram = document.getElementById('cfgInstagram').value.trim().replace(/^@/,'');
   s.laborHourlyRate = parseFloat(document.getElementById('cfgLabor').value)||0;
   s.meiRevenueLimit = parseFloat(document.getElementById('cfgMeiLimit').value)||81000;
   s.monthlyGoal = parseFloat(document.getElementById('cfgMonthlyGoal').value)||0;
