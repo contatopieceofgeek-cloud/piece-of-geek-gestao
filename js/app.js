@@ -654,7 +654,7 @@ function render(){
     <div class="sidebar-backdrop" id="sidebarBackdrop" onclick="closeSidebar()"></div>
     <div class="sidebar" id="sidebar">
       <div class="brand">
-        <img class="brand-mark" src="img/logo.jpg" alt="Piece of Geek 3D">
+        <img class="brand-mark" src="img/logo.png" alt="Piece of Geek 3D">
         <div class="brand-text">Piece of Geek 3D<small>Gestão do negócio</small></div>
       </div>
       <div class="nav">

@@ -1,7 +1,7 @@
 (function(){
   var pageUrl = window.location.origin + window.location.pathname;
   var scopeUrl = window.location.origin + window.location.pathname.substring(0, window.location.pathname.lastIndexOf('/')+1);
-  var iconUri = scopeUrl + 'img/logo.jpg';
+  var iconUri = scopeUrl + 'img/logo.png';
   document.getElementById('pwaAppleIcon').href = iconUri;
   document.getElementById('pwaFavicon').href = iconUri;
   var manifest = {
@@ -13,8 +13,7 @@
     background_color: '#F4F5F7',
     theme_color: '#F4F5F7',
     icons: [
-      { src: iconUri, sizes: '192x192', type: 'image/jpeg', purpose: 'any' },
-      { src: iconUri, sizes: '512x512', type: 'image/jpeg', purpose: 'any' }
+      { src: iconUri, sizes: '480x480', type: 'image/png', purpose: 'any' }
     ]
   };
   var manifestBlob = new Blob([JSON.stringify(manifest)], { type: 'application/manifest+json' });
