@@ -2971,7 +2971,7 @@ function openKitModal(){
       <div class="field"><label>Impressora</label><select id="kitMachine" onchange="updateKitPreview()">
         ${machineOpts.map(m=>`<option value="${m.id}">${m.name}</option>`).join('')}
       </select></div>
-      <div class="field"><label>Fita adesiva usada (m)</label><input type="number" id="kitTape" value="0" step="0.1" oninput="updateKitPreview()"></div>
+      <div class="field"><label>Fita adesiva usada (m)</label><input type="number" id="kitTape" value="0.5" step="0.1" oninput="updateKitPreview()"></div>
     </div>
     <div class="field"><label>Margem de lucro desejada (%)</label><input type="number" id="kitMargin" value="${((1-1/(state.settings.markupMultiplier||2.5))*100).toFixed(0)}" step="1" oninput="document.getElementById('kitPrice').dataset.touched=''; updateKitPreview()"></div>
     <div class="field"><label>Preço praticado (R$)</label><input type="number" id="kitPrice" step="0.01" placeholder="deixe em branco = preço sugerido" oninput="this.dataset.touched='1'; updateKitPreview()"></div>
@@ -3843,7 +3843,7 @@ function openProductModal(id){
     toast('Cadastre ao menos uma impressora em Caixa → Configurar → Impressoras antes de criar ou editar produtos', 'err');
     return;
   }
-  const p = editing ? state.products.find(x=>x.id===id) : { name:'', filaments:[{materialName:filamentOpts[0].name,weightG:100}], timeH:3, bubbleWrapM:0.5, boxType:boxOpts[0].name, failureMarginPct:0.10, practicedPrice:0, stock:0, machineId:machineOpts[0].id };
+  const p = editing ? state.products.find(x=>x.id===id) : { name:'', filaments:[{materialName:filamentOpts[0].name,weightG:100}], timeH:3, bubbleWrapM:0.5, tapeM:0.5, boxType:boxOpts[0].name, failureMarginPct:0.10, practicedPrice:0, stock:0, machineId:machineOpts[0].id };
   editingFilaments = JSON.parse(JSON.stringify(p.filaments && p.filaments.length ? p.filaments : [{materialName:filamentOpts[0].name,weightG:100}]));
   editingLaborActions = JSON.parse(JSON.stringify(p.laborActions||[]));
   editingToolsUsed = JSON.parse(JSON.stringify(p.toolsUsed||[]));
