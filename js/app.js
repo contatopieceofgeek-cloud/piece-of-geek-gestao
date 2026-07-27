@@ -129,6 +129,9 @@ function migrateMaterials(materials){
       if(!hasBubbleWrap && m.name==='Plástico Bolha'){ m.isBubbleWrap = true; hasBubbleWrap = true; }
       else m.isBubbleWrap = false;
     }
+    if(m.lengthCm==null) m.lengthCm = 0;
+    if(m.widthCm==null) m.widthCm = 0;
+    if(m.heightCm==null) m.heightCm = 0;
   });
   return materials;
 }
@@ -143,6 +146,9 @@ function migrateProducts(products){
       prod.laborActions = prod.laborMinutes ? [{action:'Mão de obra', minutes:prod.laborMinutes}] : [];
       delete prod.laborMinutes;
     }
+    if(prod.lengthCm==null) prod.lengthCm = 0;
+    if(prod.widthCm==null) prod.widthCm = 0;
+    if(prod.heightCm==null) prod.heightCm = 0;
   });
   return products;
 }
@@ -497,6 +503,19 @@ function boxCost(boxType){ const m = materialByName(boxType); return m ? m.costP
 function filamentCost(type){ const m = materialByName(type); return m ? m.costPerUnit : 0; }
 function bubbleWrapMaterial(){ return state.materials.find(m=>m.isBubbleWrap); }
 function bubbleWrapUnitCost(){ const m = bubbleWrapMaterial(); return m ? m.costPerUnit : 0; }
+function boxFitsDimensions(box, lengthCm, widthCm, heightCm){
+  if(!box || !box.lengthCm || !box.widthCm || !box.heightCm) return null;
+  const prodDims = [lengthCm, widthCm, heightCm].sort((a,b)=>b-a);
+  const boxDims = [box.lengthCm, box.widthCm, box.heightCm].sort((a,b)=>b-a);
+  return prodDims[0]<=boxDims[0] && prodDims[1]<=boxDims[1] && prodDims[2]<=boxDims[2];
+}
+function bestFittingBox(lengthCm, widthCm, heightCm){
+  const boxes = state.materials.filter(m=>m.category==='Embalagem' && m.isBox && m.lengthCm>0 && m.widthCm>0 && m.heightCm>0);
+  const fitting = boxes.filter(b=>boxFitsDimensions(b, lengthCm, widthCm, heightCm));
+  if(!fitting.length) return null;
+  fitting.sort((a,b)=>(a.lengthCm*a.widthCm*a.heightCm)-(b.lengthCm*b.widthCm*b.heightCm));
+  return fitting[0];
+}
 
 function totalWeight(prod){ return (prod.filaments||[]).reduce((a,f)=>a+(f.weightG||0),0); }
 function findMachine(machineId){
@@ -3805,14 +3824,22 @@ function openProductModal(id){
     <div id="filamentRows"></div>
     <button class="btn ghost sm" style="margin-bottom:14px;" onclick="addFilamentRow()">+ Adicionar filamento</button>
 
+    <div class="field" style="margin-bottom:6px;"><label>Dimensões do produto (opcional — pra checar se cabe na caixa)</label></div>
+    <div class="row3">
+      <div class="field"><label>Comprimento (cm)</label><input type="number" id="pLengthCm" value="${p.lengthCm||''}" step="0.1" placeholder="opcional" oninput="suggestBoxForDimensions(); updateProductPreview();"></div>
+      <div class="field"><label>Largura (cm)</label><input type="number" id="pWidthCm" value="${p.widthCm||''}" step="0.1" placeholder="opcional" oninput="suggestBoxForDimensions(); updateProductPreview();"></div>
+      <div class="field"><label>Altura (cm)</label><input type="number" id="pHeightCm" value="${p.heightCm||''}" step="0.1" placeholder="opcional" oninput="suggestBoxForDimensions(); updateProductPreview();"></div>
+    </div>
+
     <div class="row2">
       <div class="field"><label>Impressora usada</label><select id="pMachine" onchange="updateProductPreview()">
         ${machineOpts.map(m=>`<option value="${m.id}" ${(p.machineId||machineOpts[0].id)===m.id?'selected':''}>${m.name}</option>`).join('')}
       </select></div>
-      <div class="field"><label>Tipo de caixa</label><select id="pBox" onchange="updateProductPreview()">
+      <div class="field"><label>Tipo de caixa</label><select id="pBox" onchange="updateBoxFitStatus(); updateProductPreview()">
         ${boxes.map(b=>`<option value="${b.name}" ${p.boxType===b.name?'selected':''}>${b.name}</option>`).join('')}
       </select></div>
     </div>
+    <div class="field hint" id="pBoxFitStatus" style="margin-top:-8px;"></div>
     <div class="row2">
       <div class="field"><label>Plástico bolha (m)</label><input type="number" id="pBubble" value="${p.bubbleWrapM}" step="0.1" oninput="updateProductPreview()"></div>
       <div class="field"><label>Tempo impressão (h)</label><input type="number" id="pTime" value="${p.timeH}" step="0.01" oninput="updateProductPreview()"></div>
@@ -3843,6 +3870,7 @@ function openProductModal(id){
   renderFilamentRows();
   renderLaborActionRows();
   renderPhotoPreview();
+  updateBoxFitStatus();
   updateProductPreview();
 }
 let editingFilaments = [];
@@ -3976,6 +4004,9 @@ function readProductForm(){
     failureMarginPct: (parseFloat(document.getElementById('pFail').value)||0)/100,
     laborActions: editingLaborActions,
     desiredMarginPct: parseFloat(document.getElementById('pMargin').value)||0,
+    lengthCm: parseFloat(document.getElementById('pLengthCm').value)||0,
+    widthCm: parseFloat(document.getElementById('pWidthCm').value)||0,
+    heightCm: parseFloat(document.getElementById('pHeightCm').value)||0,
   };
   const mlCatIdEl = document.getElementById('pMlCategoryId');
   if(mlCatIdEl){
@@ -3987,6 +4018,37 @@ function readProductForm(){
     form.mlRealFeeUpdatedAtPrice = editingProductMlFeeUpdatedAtPrice;
   }
   return form;
+}
+function suggestBoxForDimensions(){
+  const lengthCm = parseFloat(document.getElementById('pLengthCm').value)||0;
+  const widthCm = parseFloat(document.getElementById('pWidthCm').value)||0;
+  const heightCm = parseFloat(document.getElementById('pHeightCm').value)||0;
+  if(lengthCm>0 && widthCm>0 && heightCm>0){
+    const best = bestFittingBox(lengthCm, widthCm, heightCm);
+    if(best) document.getElementById('pBox').value = best.name;
+  }
+  updateBoxFitStatus();
+}
+function updateBoxFitStatus(){
+  const statusEl = document.getElementById('pBoxFitStatus');
+  if(!statusEl) return;
+  const lengthCm = parseFloat(document.getElementById('pLengthCm').value)||0;
+  const widthCm = parseFloat(document.getElementById('pWidthCm').value)||0;
+  const heightCm = parseFloat(document.getElementById('pHeightCm').value)||0;
+  if(!(lengthCm>0 && widthCm>0 && heightCm>0)){ statusEl.textContent = ''; return; }
+  const boxName = document.getElementById('pBox').value;
+  const box = materialByName(boxName);
+  const fits = boxFitsDimensions(box, lengthCm, widthCm, heightCm);
+  if(fits===true){
+    statusEl.innerHTML = `<span style="color:var(--teal);">✓ Cabe na caixa selecionada</span>`;
+  } else if(fits===false){
+    const best = bestFittingBox(lengthCm, widthCm, heightCm);
+    statusEl.innerHTML = best
+      ? `<span style="color:var(--red);">⚠️ Não cabe nessa caixa — sugerido: ${best.name}</span>`
+      : `<span style="color:var(--red);">⚠️ Nenhuma caixa cadastrada é grande o suficiente — cadastre as medidas de uma caixa maior em Estoque</span>`;
+  } else {
+    statusEl.textContent = '';
+  }
 }
 function updateProductPreview(){
   const form = readProductForm();
@@ -4031,6 +4093,10 @@ function confirmProduct(id){
   if(!form.name){ toast('Informe o nome do produto','err'); return; }
   const dup = state.products.find(x=>x.id!==id && x.name.trim().toLowerCase()===form.name.trim().toLowerCase());
   if(dup){ toast(`Já existe um produto chamado "${dup.name}" — use outro nome`,'err'); return; }
+  if(form.lengthCm>0 && form.widthCm>0 && form.heightCm>0){
+    const fits = boxFitsDimensions(materialByName(form.boxType), form.lengthCm, form.widthCm, form.heightCm);
+    if(fits===false){ toast('Esse produto não cabe na caixa selecionada — escolha outra caixa ou ajuste as medidas','err'); return; }
+  }
   const priceRaw = document.getElementById('pPrice').value;
   const priceMlRaw = document.getElementById('pPriceMl').value;
   const priceShopeeRaw = document.getElementById('pPriceShopee').value;
@@ -4133,6 +4199,7 @@ function materialCard(m){
     <div style="margin:12px 0 6px;font-family:var(--font-mono);font-size:20px;font-weight:600;">${num(m.stock,m.unit==='un'?0:1)} <span style="font-size:12px;color:var(--text-faint);font-weight:400;">${m.unit}</span></div>
     <div class="progress"><div style="width:${p}%;background:${color};"></div></div>
     <div style="font-size:11px;color:var(--text-faint);margin-top:5px;">Mínimo: ${num(m.lowStock,0)} ${m.unit}</div>
+    ${m.isBox && m.lengthCm>0 && m.widthCm>0 && m.heightCm>0 ? `<div style="font-size:11px;color:var(--text-faint);margin-top:2px;">Medidas internas: ${num(m.lengthCm,1)}×${num(m.widthCm,1)}×${num(m.heightCm,1)} cm</div>` : ''}
     ${sugg ? `<div style="font-size:11px;color:var(--amber);margin-top:4px;">Sugestão: comprar ~${num(sugg.suggested,m.unit==='un'?0:1)} ${m.unit}</div>` : ''}
     <div style="margin-top:12px;display:flex;gap:8px;">
       <button class="btn sm" style="flex:1" onclick="openRestockModal('${m.id}')">Reabastecer</button>
@@ -4198,7 +4265,14 @@ function openMaterialModal(id){
       </select></div>
     </div>
     <div id="mRoleBlock" style="display:${m.category==='Embalagem'?'block':'none'};margin-bottom:12px;">
-      <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-dim);margin-bottom:6px;"><input type="checkbox" id="mIsBox" style="width:auto;" ${m.isBox?'checked':''}> Conta como "caixa" nas opções de embalagem do cadastro de produtos</label>
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-dim);margin-bottom:6px;"><input type="checkbox" id="mIsBox" style="width:auto;" ${m.isBox?'checked':''} onchange="document.getElementById('mBoxDimsBlock').style.display=this.checked?'block':'none'"> Conta como "caixa" nas opções de embalagem do cadastro de produtos</label>
+      <div id="mBoxDimsBlock" style="display:${m.isBox?'block':'none'};margin:0 0 10px;">
+        <div class="row3">
+          <div class="field"><label>Comprimento interno (cm)</label><input type="number" id="mLengthCm" value="${m.lengthCm||''}" step="0.1" placeholder="opcional"></div>
+          <div class="field"><label>Largura interna (cm)</label><input type="number" id="mWidthCm" value="${m.widthCm||''}" step="0.1" placeholder="opcional"></div>
+          <div class="field"><label>Altura interna (cm)</label><input type="number" id="mHeightCm" value="${m.heightCm||''}" step="0.1" placeholder="opcional"></div>
+        </div>
+      </div>
       <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-dim);"><input type="checkbox" id="mIsBubbleWrap" style="width:auto;" ${m.isBubbleWrap?'checked':''}> É o plástico bolha usado na embalagem (só pode haver um)</label>
     </div>
     <div class="row2">
@@ -4234,11 +4308,14 @@ function confirmMaterial(id){
   const category = document.getElementById('mCat').value;
   const isBox = category==='Embalagem' && !!document.getElementById('mIsBox').checked;
   const isBubbleWrap = category==='Embalagem' && !!document.getElementById('mIsBubbleWrap').checked;
+  const lengthCm = isBox ? (parseFloat(document.getElementById('mLengthCm').value)||0) : 0;
+  const widthCm = isBox ? (parseFloat(document.getElementById('mWidthCm').value)||0) : 0;
+  const heightCm = isBox ? (parseFloat(document.getElementById('mHeightCm').value)||0) : 0;
   const data = {
     name, category, unit: document.getElementById('mUnit').value,
     purchasePrice, purchaseQty, costPerUnit: purchasePrice/purchaseQty,
     stock, lowStock,
-    isBox, isBubbleWrap,
+    isBox, isBubbleWrap, lengthCm, widthCm, heightCm,
   };
   if(isBubbleWrap){
     state.materials.forEach(mat=>{ if(mat.id!==id) mat.isBubbleWrap = false; });
