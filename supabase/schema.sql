@@ -36,3 +36,22 @@ alter publication supabase_realtime add table app_data;
 -- por domínio, em vez de blobs JSON), isso é uma migração de dados real,
 -- não só de schema — pensar em como migrar o JSON existente de cada
 -- usuário antes de trocar a estrutura.
+
+-- ---------------------------------------------------------------------
+-- Integração com a API oficial do Mercado Livre (taxa real por categoria).
+-- Guarda o token OAuth de UMA conta de vendedor por usuário do app.
+-- Só as Edge Functions (ml-oauth-callback, ml-fee-lookup) leem/escrevem
+-- aqui, usando a service role key — o token nunca é lido direto pelo
+-- navegador, só através das functions.
+create table ml_oauth_tokens (
+  user_id uuid references auth.users primary key,
+  access_token text not null,
+  refresh_token text not null,
+  expires_at timestamptz not null,
+  updated_at timestamptz default now()
+);
+
+alter table ml_oauth_tokens enable row level security;
+
+create policy "own ml token" on ml_oauth_tokens for all
+  using (auth.uid() = user_id) with check (auth.uid() = user_id);

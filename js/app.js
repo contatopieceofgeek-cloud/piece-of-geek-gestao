@@ -80,6 +80,8 @@ function seedData(){
     pixMerchantCity:'Sao Paulo',
     whatsapp:'(11) 99296-5296',
     instagram:'piece.of.geek',
+    mlClientId:'',
+    mlConnected:false,
     printHoursPerDay:16,
     machines,
     expenses:[
@@ -215,6 +217,8 @@ function migrateSettings(settings){
   if(settings.pixMerchantCity==null) settings.pixMerchantCity = 'Sao Paulo';
   if(settings.whatsapp==null) settings.whatsapp = '(11) 99296-5296';
   if(settings.instagram==null) settings.instagram = 'piece.of.geek';
+  if(settings.mlClientId==null) settings.mlClientId = '';
+  if(settings.mlConnected==null) settings.mlConnected = false;
   if(settings.printHoursPerDay==null) settings.printHoursPerDay = 16;
   delete settings.machine;
   delete settings.machineCostPerHour;
@@ -454,6 +458,7 @@ async function loadState(){
     else toast('Salvando no navegador (IndexedDB) — evite navegação anônima para não perder dados.');
   }
   if(syncStatus.configured && syncStatus.email) startRealtimeSync();
+  checkMlAuthRedirect();
 }
 // Puxa os dados de novo (sem o toast de primeira carga) quando outro dispositivo
 // salva algo — chamado pelo listener do Supabase Realtime, ver startRealtimeSync().
@@ -522,7 +527,11 @@ function calcProduct(prod){
   const practicedPrice = prod.practicedPrice || suggestedPrice;
   const marginValue = practicedPrice - totalCost;
   const marginPct = practicedPrice > 0 ? (marginValue/practicedPrice)*100 : 0;
-  const suggestedPriceMl = suggestedPriceForPlatform(suggestedPrice, 'Mercado Livre');
+  // Se já buscamos a taxa real do ML pra esse produto (ver mlRealFeePct), usa ela
+  // em vez da % manual de Configurações — mesma fórmula, só troca de onde vem a taxa.
+  const suggestedPriceMl = prod.mlRealFeePct!=null
+    ? suggestedPrice / (1 - Math.min(0.95, prod.mlRealFeePct/100))
+    : suggestedPriceForPlatform(suggestedPrice, 'Mercado Livre');
   const suggestedPriceShopee = suggestedPriceForPlatform(suggestedPrice, 'Shopee');
   const practicedPriceMl = prod.practicedPriceMl || suggestedPriceMl;
   const practicedPriceShopee = prod.practicedPriceShopee || suggestedPriceShopee;
@@ -3694,6 +3703,7 @@ function openProductModal(id){
   const p = editing ? state.products.find(x=>x.id===id) : { name:'', filaments:[{materialName:filamentOpts[0].name,weightG:100}], timeH:3, bubbleWrapM:0.5, boxType:boxOpts[0].name, failureMarginPct:0.10, practicedPrice:0, stock:0, machineId:machineOpts[0].id };
   editingFilaments = JSON.parse(JSON.stringify(p.filaments && p.filaments.length ? p.filaments : [{materialName:filamentOpts[0].name,weightG:100}]));
   editingPhotoData = p.photo || null;
+  editingProductMlFee = p.mlRealFeePct!=null ? p.mlRealFeePct : null;
   const boxes = boxOpts;
   showModal(editing?'Editar produto':'Novo produto', `
     <div class="field"><label>Nome do produto</label><input id="pName" value="${p.name}" placeholder="Ex: Kit Escritório"></div>
@@ -3737,6 +3747,24 @@ function openProductModal(id){
       <div class="field"><label>Preço praticado — Shopee (R$)</label><input type="number" id="pPriceShopee" value="${p.practicedPriceShopee||''}" step="0.01" placeholder="deixe em branco = preço sugerido" oninput="this.dataset.touched='1'"></div>
     </div>
     ${extraListingPlatforms().map(plat=>`<div class="field"><label>Preço praticado — ${plat.name} (R$)</label><input type="number" id="pPriceExtra_${plat.id}" value="${(p.practicedPriceExtra||{})[plat.id]||''}" step="0.01" placeholder="deixe em branco = preço sugerido" oninput="this.dataset.touched='1'"></div>`).join('')}
+    ${editing && state.settings.mlConnected ? `
+    <div class="field hint" style="margin:12px 0 4px;font-weight:600;color:var(--text-dim);">Taxa real do Mercado Livre (opcional)</div>
+    <div class="row2">
+      <div class="field" style="position:relative;"><label>Categoria no ML</label>
+        <input id="pMlCategorySearch" placeholder="Digite o nome do produto pra buscar..." value="${p.mlCategoryName||''}" oninput="searchMlCategory(this.value)" autocomplete="off">
+        <div id="pMlCategoryResults"></div>
+        <input type="hidden" id="pMlCategoryId" value="${p.mlCategoryId||''}">
+      </div>
+      <div class="field"><label>Tipo de anúncio (pra essa taxa)</label>
+        <select id="pMlListingType">
+          <option value="gold_special" ${(!p.mlListingTypeForFee || p.mlListingTypeForFee==='gold_special')?'selected':''}>Clássico</option>
+          <option value="gold_pro" ${p.mlListingTypeForFee==='gold_pro'?'selected':''}>Premium</option>
+        </select>
+      </div>
+    </div>
+    <div class="field hint" id="pMlFeeStatus" style="margin-top:-8px;">${p.mlRealFeePct!=null ? `Taxa real: <strong>${num(p.mlRealFeePct,1)}%</strong> (calculada em ${fmtDate((p.mlRealFeeUpdatedAt||'').slice(0,10))} pra R$ ${num(p.mlRealFeeUpdatedAtPrice||0,2)})` : 'Ainda não buscada — escolha a categoria acima e clique em atualizar.'}</div>
+    <button type="button" class="btn ghost sm" style="margin-bottom:14px;" onclick="fetchMlRealFee('${id}')">Atualizar taxa real</button>
+    ` : ''}
     <div class="field"><label>Estoque inicial (un)</label><input type="number" id="pStock" value="${p.stock}" step="1"></div>
     <div class="helper-block" id="productPreview"></div>
     <div class="modal-actions">
@@ -3750,6 +3778,7 @@ function openProductModal(id){
 }
 let editingFilaments = [];
 let editingPhotoData = null;
+let editingProductMlFee = null;
 function resizeImageFile(file, maxSize, quality){
   return new Promise((resolve,reject)=>{
     if(!file.type.startsWith('image/')){ reject(new Error('not an image')); return; }
@@ -3850,6 +3879,7 @@ function readProductForm(){
 }
 function updateProductPreview(){
   const form = readProductForm();
+  form.mlRealFeePct = editingProductMlFee;
   const c = calcProduct(form);
   document.getElementById('productPreview').innerHTML = `
     <div class="calc-line"><span>Peso total</span><span>${num(totalWeight(form),0)}g</span></div>
@@ -3861,7 +3891,7 @@ function updateProductPreview(){
     <div class="calc-line"><span>Custo de falha</span><span>${brl(c.failureCost)}</span></div>
     <div class="calc-line total"><span>Custo total</span><span>${brl(c.totalCost)}</span></div>
     <div class="calc-line"><span>Preço sugerido — venda própria (margem de ${num(form.desiredMarginPct,0)}%)</span><span>${brl(c.suggestedPrice)}</span></div>
-    <div class="calc-line" style="color:var(--text-faint);"><span>↳ Mercado Livre (já com a taxa)</span><span>${brl(c.suggestedPriceMl)}</span></div>
+    <div class="calc-line" style="color:var(--text-faint);"><span>↳ Mercado Livre (já com a taxa${editingProductMlFee!=null?' real':' estimada'})</span><span>${brl(c.suggestedPriceMl)}</span></div>
     <div class="calc-line" style="color:var(--text-faint);"><span>↳ Shopee (já com a taxa)</span><span>${brl(c.suggestedPriceShopee)}</span></div>
     ${c.estimatedShopeeFreightCap!=null ? `<div class="calc-line" style="color:var(--text-faint);"><span>↳ Shopee — custo estimado de frete (teto do cupom)</span><span>${brl(c.estimatedShopeeFreightCap)}</span></div>` : ''}
     ${extraListingPlatforms().map(plat=>`<div class="calc-line" style="color:var(--text-faint);"><span>↳ ${plat.name} (já com a taxa)</span><span>${brl(c.suggestedPriceExtra[plat.id])}</span></div>`).join('')}
@@ -4279,6 +4309,9 @@ function openSettingsModal(){
     <div class="field hint" style="margin-top:-6px;margin-bottom:10px;">As plataformas mudam suas taxas de tempos em tempos — atualize aqui quando isso acontecer. Vendas já registradas não são recalculadas.</div>
     <div id="platformRows"></div>
     <button class="btn ghost sm" onclick="addPlatformRow()">+ Adicionar plataforma</button>
+
+    <div class="section-title" style="margin-top:20px;">Mercado Livre — taxa real (opcional)</div>
+    <div id="mlConnectSection">${renderMlConnectSection()}</div>
 
     <div class="section-title" style="margin-top:20px;">Despesas operacionais mensais</div>
     <div class="field hint" style="margin-top:-6px;margin-bottom:10px;">Cada item que você paga todo mês pra manter o negócio rodando: assinaturas, anúncios, ferramentas etc.</div>
@@ -4773,6 +4806,138 @@ function disconnectSync(){
   syncStatus = { configured:false, email:null };
   toast('Sincronização desconectada neste dispositivo');
   closeModal(); render();
+}
+
+/* ---------- Taxa real do Mercado Livre (Edge Functions ml-oauth-callback / ml-api) ---------- */
+const ML_OAUTH_REDIRECT_URI = 'https://plskerczkhjvqahpyucd.supabase.co/functions/v1/ml-oauth-callback';
+const ML_AUTHORIZE_URL = 'https://auth.mercadolivre.com.br/authorization';
+function renderMlConnectSection(forceEdit){
+  const s = state.settings;
+  if(!syncStatus.email){
+    return `<div class="field hint" style="margin-top:-6px;">Primeiro conecte e faça login na sincronização (☁️ no rodapé do menu) — a taxa real usa a mesma conta pra saber quem é você.</div>`;
+  }
+  if(!s.mlClientId || forceEdit){
+    return `
+      <div class="field hint" style="margin-top:-6px;margin-bottom:10px;">Conecte sua conta do Mercado Livre pra calcular a comissão real por categoria, em vez de uma % fixa estimada. Crie uma aplicação em developers.mercadolivre.com.br usando essa Redirect URI:</div>
+      <textarea readonly style="width:100%;height:32px;font-family:var(--font-mono);font-size:10px;margin-bottom:10px;resize:vertical;" onclick="this.select()">${ML_OAUTH_REDIRECT_URI}</textarea>
+      <div class="field"><label>Client ID</label><input id="cfgMlClientId" value="${s.mlClientId||''}" placeholder="Cole aqui o Client ID da aplicação"></div>
+      <button class="btn ghost sm" onclick="saveMlClientId()">Salvar Client ID</button>
+    `;
+  }
+  if(!s.mlConnected){
+    return `
+      <div class="field hint" style="margin-top:-6px;margin-bottom:10px;">Client ID salvo. Falta autorizar — isso te leva pro Mercado Livre pra confirmar o login (só essa vez).</div>
+      <button class="btn primary sm" onclick="startMlOauth()">Conectar com Mercado Livre</button>
+      <button class="btn ghost sm" onclick="editMlClientId()">Trocar Client ID</button>
+    `;
+  }
+  return `
+    <div class="field" style="color:var(--teal);font-weight:600;">✓ Conectado ao Mercado Livre</div>
+    <div class="field hint" style="margin-top:-8px;">Agora cada produto pode buscar a taxa real por categoria (veja o cadastro do produto).</div>
+    <button class="btn ghost sm" onclick="disconnectMl()">Desconectar</button>
+  `;
+}
+function saveMlClientId(){
+  const val = document.getElementById('cfgMlClientId').value.trim();
+  if(!val){ toast('Cole o Client ID primeiro','err'); return; }
+  state.settings.mlClientId = val;
+  saveSettings();
+  document.getElementById('mlConnectSection').innerHTML = renderMlConnectSection();
+}
+function editMlClientId(){
+  document.getElementById('mlConnectSection').innerHTML = renderMlConnectSection(true);
+}
+async function startMlOauth(){
+  const client = initSupabase();
+  if(!client || !syncStatus.email){ toast('Faça login na sincronização primeiro','err'); return; }
+  try{
+    const { data, error } = await client.functions.invoke('ml-api', { body:{ action:'sign-state' } });
+    if(error || !data || !data.state){ toast('Não consegui iniciar a conexão com o Mercado Livre — tente de novo','err'); return; }
+    const url = `${ML_AUTHORIZE_URL}?response_type=code&client_id=${encodeURIComponent(state.settings.mlClientId)}&redirect_uri=${encodeURIComponent(ML_OAUTH_REDIRECT_URI)}&state=${encodeURIComponent(data.state)}`;
+    window.location.href = url;
+  }catch(e){
+    toast('Não consegui iniciar a conexão com o Mercado Livre','err');
+  }
+}
+function disconnectMl(){
+  if(!confirm('Desconectar a taxa real do Mercado Livre neste app? (o token continua guardado no servidor, só paramos de usar)')) return;
+  state.settings.mlConnected = false;
+  saveSettings();
+  document.getElementById('mlConnectSection').innerHTML = renderMlConnectSection();
+  toast('Desconectado do Mercado Livre');
+}
+function checkMlAuthRedirect(){
+  const params = new URLSearchParams(window.location.search);
+  const mlAuth = params.get('ml_auth');
+  if(!mlAuth) return;
+  if(mlAuth==='ok'){
+    state.settings.mlConnected = true;
+    saveSettings();
+    toast('Conectado ao Mercado Livre!');
+  } else {
+    toast('Não consegui conectar ao Mercado Livre — tente de novo em Configurações','err');
+  }
+  params.delete('ml_auth');
+  const cleanUrl = window.location.pathname + (params.toString() ? '?'+params.toString() : '');
+  window.history.replaceState({}, '', cleanUrl);
+}
+let mlCategorySearchTimer = null;
+function searchMlCategory(q){
+  clearTimeout(mlCategorySearchTimer);
+  const resultsEl = document.getElementById('pMlCategoryResults');
+  if(!resultsEl) return;
+  if(!q || q.trim().length<3){ resultsEl.innerHTML=''; return; }
+  mlCategorySearchTimer = setTimeout(async ()=>{
+    const client = initSupabase();
+    if(!client) return;
+    try{
+      const { data, error } = await client.functions.invoke('ml-api', { body:{ action:'search-category', q } });
+      if(error || !data || !data.results) return;
+      const items = data.results.slice(0,6);
+      resultsEl.innerHTML = items.map(r=>`<div style="padding:6px 8px;border:1px solid var(--line);border-top:none;cursor:pointer;font-size:12px;background:var(--panel);" onmousedown="selectMlCategory('${r.category_id}','${(r.category_name||'').replace(/'/g,"\\'")}')">${r.category_name}</div>`).join('');
+    }catch(e){ /* busca falhou — usuário pode tentar de novo digitando */ }
+  }, 400);
+}
+function selectMlCategory(categoryId, categoryName){
+  document.getElementById('pMlCategoryId').value = categoryId;
+  document.getElementById('pMlCategorySearch').value = categoryName;
+  document.getElementById('pMlCategoryResults').innerHTML = '';
+}
+async function fetchMlRealFee(id){
+  const p = state.products.find(x=>x.id===id);
+  if(!p){ toast('Salve o produto primeiro','err'); return; }
+  const categoryId = document.getElementById('pMlCategoryId').value.trim();
+  const categoryName = document.getElementById('pMlCategorySearch').value.trim();
+  const listingTypeId = document.getElementById('pMlListingType').value;
+  if(!categoryId){ toast('Escolha uma categoria da lista de sugestões primeiro','err'); return; }
+  const client = initSupabase();
+  if(!client){ toast('Conecte a sincronização primeiro','err'); return; }
+  const priceRaw = document.getElementById('pPriceMl').value;
+  const price = priceRaw ? parseFloat(priceRaw) : calcProduct(p).suggestedPriceMl;
+  const statusEl = document.getElementById('pMlFeeStatus');
+  if(statusEl) statusEl.textContent = 'Buscando...';
+  try{
+    const { data, error } = await client.functions.invoke('ml-api', { body:{ action:'fee-lookup', price, categoryId, listingTypeId } });
+    if(error || !data || data.error || data.feePct==null){
+      toast((data && data.error) || 'Não consegui buscar a taxa real — confira a conexão em Configurações','err');
+      if(statusEl) statusEl.textContent = 'Falha ao buscar — tente de novo.';
+      return;
+    }
+    p.mlCategoryId = categoryId;
+    p.mlCategoryName = categoryName;
+    p.mlListingTypeForFee = listingTypeId;
+    p.mlRealFeePct = data.feePct;
+    p.mlRealFeeUpdatedAt = new Date().toISOString();
+    p.mlRealFeeUpdatedAtPrice = price;
+    await saveProducts();
+    editingProductMlFee = data.feePct;
+    toast('Taxa real atualizada');
+    if(statusEl) statusEl.innerHTML = `Taxa real: <strong>${num(data.feePct,1)}%</strong> (calculada em ${fmtDate(todayStr())} pra ${brl(price)})`;
+    updateProductPreview();
+  }catch(e){
+    toast('Não consegui buscar a taxa real','err');
+    if(statusEl) statusEl.textContent = 'Falha ao buscar — tente de novo.';
+  }
 }
 function openResetModal(){
   showModal('Recomeçar do zero', `
