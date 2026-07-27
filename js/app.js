@@ -3293,9 +3293,12 @@ function defaultListingDraft(p){
   const c = calcProduct(p);
   const peso = num(totalWeight(p)/1000,2);
   const sku = generateSku(p);
+  const hasDims = p.lengthCm>0 && p.widthCm>0 && p.heightCm>0;
+  const dimensoesMl = hasDims ? `${num(p.heightCm,1)} x ${num(p.widthCm,1)} x ${num(p.lengthCm,1)}` : '';
+  const dimensoesShopee = hasDims ? `${num(p.lengthCm,1)} x ${num(p.widthCm,1)} x ${num(p.heightCm,1)}` : '';
   const out = {
-    ml: { titulo:p.name.slice(0,60), preco:num(c.practicedPriceMl,2), estoque:p.stock, sku, condicao:'Novo', marca:'Piece of Geek 3D', peso, tipoAnuncio:'Clássico' },
-    shopee: { nome:p.name.slice(0,120), preco:num(c.practicedPriceShopee,2), estoque:p.stock, sku, marca:'Piece of Geek 3D', peso },
+    ml: { titulo:p.name.slice(0,60), categoria:p.mlCategoryName||'', preco:num(c.practicedPriceMl,2), estoque:p.stock, sku, condicao:'Novo', marca:'Piece of Geek 3D', peso, dimensoes:dimensoesMl, tipoAnuncio: p.mlListingTypeForFee==='gold_pro'?'Premium':'Clássico' },
+    shopee: { nome:p.name.slice(0,120), preco:num(c.practicedPriceShopee,2), estoque:p.stock, sku, marca:'Piece of Geek 3D', peso, dimensoes:dimensoesShopee },
     extra: {},
   };
   extraListingPlatforms().forEach(plat=>{
@@ -3305,6 +3308,7 @@ function defaultListingDraft(p){
     if(titleField) base[titleField.key] = p.name.slice(0, titleField.maxlength||120);
     if(fields.some(f=>f.key==='condicao')) base.condicao = 'Novo';
     if(fields.some(f=>f.key==='tipoAnuncio')) base.tipoAnuncio = 'Clássico';
+    if(fields.some(f=>f.key==='dimensoes')) base.dimensoes = plat.listingTemplate==='shopee' ? dimensoesShopee : dimensoesMl;
     out.extra[plat.id] = base;
   });
   return out;
@@ -3484,8 +3488,20 @@ function updateListingFeeHint(idKey){
   const price = parseFloat((el.value||'').replace(',','.'));
   const plat = (state.settings.platforms||[]).find(pl=>pl.name===platformName);
   if(!price || price<=0 || !plat){ hintEl.textContent = ''; return; }
-  const fee = plat.tiers ? computeTieredFee(plat.tiers, price).fee : price*(plat.pct/100)+(plat.fixed||0);
-  hintEl.textContent = `Taxa estimada (${platformName}): ${brl(fee)} → líquido ${brl(price-fee)}`;
+  const p = state.products.find(x=>x.id===editingListingProductId);
+  let fee, freight = 0, freightLabel = '';
+  if(idKey==='ml' && p && p.mlRealFeePct!=null){
+    fee = price * Math.min(0.95, p.mlRealFeePct/100);
+  } else {
+    fee = plat.tiers ? computeTieredFee(plat.tiers, price).fee : price*(plat.pct/100)+(plat.fixed||0);
+  }
+  if(p && idKey==='ml' && p.estimatedFreightMl>0){ freight = p.estimatedFreightMl; freightLabel = ` − frete ${brl(freight)}`; }
+  if(p && idKey==='shopee'){
+    freight = p.estimatedFreightShopee>0 ? p.estimatedFreightShopee : (shopeeFreightCap(price)||0);
+    if(freight>0) freightLabel = ` − frete ${brl(freight)}`;
+  }
+  const feeLabel = (idKey==='ml' && p && p.mlRealFeePct!=null) ? 'real' : 'estimada';
+  hintEl.textContent = `Taxa ${feeLabel} (${platformName}): ${brl(fee)}${freightLabel} → líquido ${brl(price-fee-freight)}`;
 }
 let editingNaFields = {};
 function toggleListingFieldNa(fieldId, naKey, checked){
@@ -3507,6 +3523,7 @@ function switchListingTab(platform){
 function openListingModal(id){
   const p = state.products.find(x=>x.id===id);
   if(!p) return;
+  editingListingProductId = id;
   const existing = listingFor(id);
   const auto = defaultListingDraft(p);
   const extras = extraListingPlatforms();
@@ -3585,6 +3602,7 @@ function readListingForm(){
   return out;
 }
 let editingListingPhotos = [];
+let editingListingProductId = null;
 async function handleListingPhotoUpload(input){
   const files = Array.from(input.files||[]);
   if(!files.length) return;
