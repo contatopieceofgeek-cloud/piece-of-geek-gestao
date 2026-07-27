@@ -164,6 +164,8 @@ function migrateProducts(products){
     if(prod.heightCm==null) prod.heightCm = 0;
     if(prod.tapeM==null) prod.tapeM = 0;
     if(!prod.toolsUsed) prod.toolsUsed = [];
+    if(prod.estimatedFreightMl==null) prod.estimatedFreightMl = 0;
+    if(prod.estimatedFreightShopee==null) prod.estimatedFreightShopee = 0;
   });
   return products;
 }
@@ -585,7 +587,15 @@ function calcProduct(prod){
     practicedPriceExtra[plat.id] = (prod.practicedPriceExtra||{})[plat.id] || suggestedPriceExtra[plat.id];
   });
   const estimatedShopeeFreightCap = shopeeFreightCap(practicedPriceShopee);
-  return { materialCost, energyCost, boxCost:bCost, bubbleCost, tapeCost, embalagemCost, depreciation, laborCost, totalLaborMinutes, toolsCost, failureCost, totalCost, suggestedPrice, suggestedPriceMl, suggestedPriceShopee, suggestedPriceExtra, practicedPrice, practicedPriceMl, practicedPriceShopee, practicedPriceExtra, estimatedShopeeFreightCap, marginValue, marginPct, desiredMarginPct: desiredMargin*100, machine };
+  const mlFeeAmount = prod.mlRealFeePct!=null
+    ? practicedPriceMl * Math.min(0.95, prod.mlRealFeePct/100)
+    : feeAtPrice('Mercado Livre', practicedPriceMl);
+  const shopeeFeeAmount = feeAtPrice('Shopee', practicedPriceShopee);
+  const effectiveFreightMl = prod.estimatedFreightMl||0;
+  const effectiveFreightShopee = (prod.estimatedFreightShopee>0) ? prod.estimatedFreightShopee : (estimatedShopeeFreightCap||0);
+  const netReceiptMl = practicedPriceMl - mlFeeAmount - effectiveFreightMl;
+  const netReceiptShopee = practicedPriceShopee - shopeeFeeAmount - effectiveFreightShopee;
+  return { materialCost, energyCost, boxCost:bCost, bubbleCost, tapeCost, embalagemCost, depreciation, laborCost, totalLaborMinutes, toolsCost, failureCost, totalCost, suggestedPrice, suggestedPriceMl, suggestedPriceShopee, suggestedPriceExtra, practicedPrice, practicedPriceMl, practicedPriceShopee, practicedPriceExtra, estimatedShopeeFreightCap, netReceiptMl, netReceiptShopee, marginValue, marginPct, desiredMarginPct: desiredMargin*100, machine };
 }
 // Teto do cupom de frete grátis que a Shopee subsidia (obrigatório desde mar/2026) —
 // é só uma estimativa de custo (o frete real pode custar menos que o teto), por
@@ -608,6 +618,11 @@ function suggestedPriceForPlatform(targetNet, platformName){
     price = targetNet + fee;
   }
   return price;
+}
+function feeAtPrice(platformName, price){
+  const plat = (state.settings.platforms||[]).find(pl=>pl.name===platformName);
+  if(!plat) return 0;
+  return plat.tiers ? computeTieredFee(plat.tiers, price).fee : price*(plat.pct/100)+(plat.fixed||0);
 }
 
 function salesInMonth(ym){ return state.sales.filter(s=>s.date && s.date.slice(0,7)===ym); }
@@ -3889,6 +3904,11 @@ function openProductModal(id){
     <button class="btn ghost sm" style="margin-bottom:14px;" onclick="addToolsUsedRow()">+ Adicionar ferramenta</button>
 
     <div class="row2">
+      <div class="field"><label>Frete aproximado — Mercado Livre (R$)</label><input type="number" id="pFreightMl" value="${p.estimatedFreightMl||''}" step="0.01" placeholder="opcional" oninput="updateProductPreview()"></div>
+      <div class="field"><label>Frete aproximado — Shopee (R$)</label><input type="number" id="pFreightShopee" value="${p.estimatedFreightShopee||''}" step="0.01" placeholder="opcional" oninput="this.dataset.touched='1'; updateProductPreview()"></div>
+    </div>
+
+    <div class="row2">
       <div class="field"><label>Margem de lucro desejada (%)</label><input type="number" id="pMargin" value="${(p.desiredMarginPct!=null ? p.desiredMarginPct : calcProduct(p).desiredMarginPct).toFixed(0)}" step="1" oninput="document.getElementById('pPrice').dataset.touched=''; updateProductPreview()"></div>
       <div class="field"><label>Preço praticado — Venda própria (R$)</label><input type="number" id="pPrice" value="${p.practicedPrice||''}" step="0.01" placeholder="deixe em branco = preço sugerido" oninput="this.dataset.touched='1'"></div>
     </div>
@@ -4078,6 +4098,8 @@ function readProductForm(){
     lengthCm: parseFloat(document.getElementById('pLengthCm').value)||0,
     widthCm: parseFloat(document.getElementById('pWidthCm').value)||0,
     heightCm: parseFloat(document.getElementById('pHeightCm').value)||0,
+    estimatedFreightMl: parseFloat(document.getElementById('pFreightMl').value)||0,
+    estimatedFreightShopee: parseFloat(document.getElementById('pFreightShopee').value)||0,
   };
   const mlCatIdEl = document.getElementById('pMlCategoryId');
   if(mlCatIdEl){
@@ -4137,8 +4159,10 @@ function updateProductPreview(){
     <div class="calc-line total"><span>Custo total</span><span>${brl(c.totalCost)}</span></div>
     <div class="calc-line"><span>Preço sugerido — venda própria (margem de ${num(form.desiredMarginPct,0)}%)</span><span>${brl(c.suggestedPrice)}</span></div>
     <div class="calc-line" style="color:var(--text-faint);"><span>↳ Mercado Livre (já com a taxa${editingProductMlFee!=null?' real':' estimada'})</span><span>${brl(c.suggestedPriceMl)}</span></div>
+    <div class="calc-line" style="color:var(--text-faint);font-size:11.5px;"><span>&nbsp;&nbsp;↳ valor líquido estimado (após taxa e frete)</span><span>${brl(c.netReceiptMl)}</span></div>
     <div class="calc-line" style="color:var(--text-faint);"><span>↳ Shopee (já com a taxa)</span><span>${brl(c.suggestedPriceShopee)}</span></div>
     ${c.estimatedShopeeFreightCap!=null ? `<div class="calc-line" style="color:var(--text-faint);"><span>↳ Shopee — custo estimado de frete (teto do cupom)</span><span>${brl(c.estimatedShopeeFreightCap)}</span></div>` : ''}
+    <div class="calc-line" style="color:var(--text-faint);font-size:11.5px;"><span>&nbsp;&nbsp;↳ valor líquido estimado (após taxa e frete)</span><span>${brl(c.netReceiptShopee)}</span></div>
     ${extraListingPlatforms().map(plat=>`<div class="calc-line" style="color:var(--text-faint);"><span>↳ ${plat.name} (já com a taxa)</span><span>${brl(c.suggestedPriceExtra[plat.id])}</span></div>`).join('')}
   `;
   const priceInput = document.getElementById('pPrice');
@@ -4159,6 +4183,10 @@ function updateProductPreview(){
       inputEl.placeholder = 'sugerido: '+c.suggestedPriceExtra[plat.id].toFixed(2);
     }
   });
+  const freightShopeeInput = document.getElementById('pFreightShopee');
+  if(freightShopeeInput && !freightShopeeInput.dataset.touched && document.activeElement!==freightShopeeInput && c.estimatedShopeeFreightCap!=null){
+    freightShopeeInput.placeholder = 'sugerido: '+c.estimatedShopeeFreightCap.toFixed(2);
+  }
 }
 function confirmProduct(id){
   const form = readProductForm();
