@@ -595,7 +595,9 @@ function calcProduct(prod){
   const effectiveFreightShopee = (prod.estimatedFreightShopee>0) ? prod.estimatedFreightShopee : (estimatedShopeeFreightCap||0);
   const netReceiptMl = practicedPriceMl - mlFeeAmount - effectiveFreightMl;
   const netReceiptShopee = practicedPriceShopee - shopeeFeeAmount - effectiveFreightShopee;
-  return { materialCost, energyCost, boxCost:bCost, bubbleCost, tapeCost, embalagemCost, depreciation, laborCost, totalLaborMinutes, toolsCost, failureCost, totalCost, suggestedPrice, suggestedPriceMl, suggestedPriceShopee, suggestedPriceExtra, practicedPrice, practicedPriceMl, practicedPriceShopee, practicedPriceExtra, estimatedShopeeFreightCap, netReceiptMl, netReceiptShopee, marginValue, marginPct, desiredMarginPct: desiredMargin*100, machine };
+  const mlFeePct = practicedPriceMl > 0 ? (mlFeeAmount/practicedPriceMl)*100 : 0;
+  const shopeeFeePct = practicedPriceShopee > 0 ? (shopeeFeeAmount/practicedPriceShopee)*100 : 0;
+  return { materialCost, energyCost, boxCost:bCost, bubbleCost, tapeCost, embalagemCost, depreciation, laborCost, totalLaborMinutes, toolsCost, failureCost, totalCost, suggestedPrice, suggestedPriceMl, suggestedPriceShopee, suggestedPriceExtra, practicedPrice, practicedPriceMl, practicedPriceShopee, practicedPriceExtra, estimatedShopeeFreightCap, mlFeeAmount, shopeeFeeAmount, mlFeePct, shopeeFeePct, effectiveFreightMl, effectiveFreightShopee, netReceiptMl, netReceiptShopee, marginValue, marginPct, desiredMarginPct: desiredMargin*100, machine };
 }
 // Teto do cupom de frete grátis que a Shopee subsidia (obrigatório desde mar/2026) —
 // é só uma estimativa de custo (o frete real pode custar menos que o teto), por
@@ -4161,6 +4163,18 @@ function updateBoxFitStatus(){
     statusEl.textContent = '';
   }
 }
+// Detalha preço de venda → (–) taxa → (–) frete → valor líquido, passo a passo,
+// pra ficar claro de onde vem cada desconto (em vez de só um "já com a taxa").
+function platformBreakdownHtml(platformName, salePrice, feeAmount, feePct, feeQualifier, freightAmount, freightLabel, netReceipt){
+  return `
+    <div style="margin-top:8px;padding:8px 10px;background:var(--bg-alt);border-radius:8px;">
+      <div class="calc-line" style="font-weight:600;"><span>${platformName} — preço de venda</span><span>${brl(salePrice)}</span></div>
+      <div class="calc-line" style="color:var(--text-faint);font-size:11.5px;"><span>(–) Taxa ${platformName} (${feeQualifier}, ${num(feePct,1)}%)</span><span>-${brl(feeAmount)}</span></div>
+      ${freightAmount>0 ? `<div class="calc-line" style="color:var(--text-faint);font-size:11.5px;"><span>(–) ${freightLabel}</span><span>-${brl(freightAmount)}</span></div>` : ''}
+      <div class="calc-line" style="border-top:1px dashed var(--line-soft);margin-top:4px;padding-top:4px;font-weight:600;color:var(--green);"><span>= Você recebe</span><span>${brl(netReceipt)}</span></div>
+    </div>
+  `;
+}
 function updateProductPreview(){
   const form = readProductForm();
   if(form.mlRealFeePct===undefined) form.mlRealFeePct = editingProductMlFee;
@@ -4175,12 +4189,9 @@ function updateProductPreview(){
     ${c.toolsCost>0 ? `<div class="calc-line"><span>Ferramentas</span><span>${brl(c.toolsCost)}</span></div>` : ''}
     <div class="calc-line"><span>Custo de falha</span><span>${brl(c.failureCost)}</span></div>
     <div class="calc-line total"><span>Custo total</span><span>${brl(c.totalCost)}</span></div>
-    <div class="calc-line"><span>Preço sugerido — venda própria (margem de ${num(form.desiredMarginPct,0)}%)</span><span>${brl(c.suggestedPrice)}</span></div>
-    <div class="calc-line" style="color:var(--text-faint);"><span>↳ Mercado Livre (já com a taxa${editingProductMlFee!=null?' real':' estimada'})</span><span>${brl(c.suggestedPriceMl)}</span></div>
-    <div class="calc-line" style="color:var(--text-faint);font-size:11.5px;"><span>&nbsp;&nbsp;↳ valor líquido estimado (após taxa e frete)</span><span>${brl(c.netReceiptMl)}</span></div>
-    <div class="calc-line" style="color:var(--text-faint);"><span>↳ Shopee (já com a taxa)</span><span>${brl(c.suggestedPriceShopee)}</span></div>
-    ${c.estimatedShopeeFreightCap!=null ? `<div class="calc-line" style="color:var(--text-faint);"><span>↳ Shopee — custo estimado de frete (teto do cupom)</span><span>${brl(c.estimatedShopeeFreightCap)}</span></div>` : ''}
-    <div class="calc-line" style="color:var(--text-faint);font-size:11.5px;"><span>&nbsp;&nbsp;↳ valor líquido estimado (após taxa e frete)</span><span>${brl(c.netReceiptShopee)}</span></div>
+    <div class="calc-line total"><span>Preço sugerido — venda própria (margem de ${num(form.desiredMarginPct,0)}%)</span><span>${brl(c.suggestedPrice)}</span></div>
+    ${platformBreakdownHtml('Mercado Livre', c.suggestedPriceMl, c.mlFeeAmount, c.mlFeePct, editingProductMlFee!=null?'real':'estimada', c.effectiveFreightMl, 'Frete estimado', c.netReceiptMl)}
+    ${platformBreakdownHtml('Shopee', c.suggestedPriceShopee, c.shopeeFeeAmount, c.shopeeFeePct, 'estimada', c.effectiveFreightShopee, (form.estimatedFreightShopee>0?'Frete estimado':'Frete estimado (teto do cupom)'), c.netReceiptShopee)}
     ${extraListingPlatforms().map(plat=>`<div class="calc-line" style="color:var(--text-faint);"><span>↳ ${plat.name} (já com a taxa)</span><span>${brl(c.suggestedPriceExtra[plat.id])}</span></div>`).join('')}
   `;
   const priceInput = document.getElementById('pPrice');
