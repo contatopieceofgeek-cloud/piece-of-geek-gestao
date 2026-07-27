@@ -139,6 +139,10 @@ function migrateProducts(products){
       prod.filaments = [{ materialName: prod.filamentType || (state.materials.find(m=>m.category==='Filamento')||{}).name || 'PLA', weightG: prod.weightG || 0 }];
     }
     if(!prod.machineId && defaultMachineId) prod.machineId = defaultMachineId;
+    if(!prod.laborActions){
+      prod.laborActions = prod.laborMinutes ? [{action:'Mão de obra', minutes:prod.laborMinutes}] : [];
+      delete prod.laborMinutes;
+    }
   });
   return products;
 }
@@ -518,7 +522,8 @@ function calcProduct(prod){
   const bubbleCost = prod.bubbleWrapM * bubbleWrapUnitCost();
   const embalagemCost = bCost + bubbleCost;
   const depreciation = prod.timeH * machineDeprCostPerHour(machine);
-  const laborCost = ((prod.laborMinutes||0)/60) * (s.laborHourlyRate||0);
+  const totalLaborMinutes = (prod.laborActions||[]).reduce((a,x)=>a+(x.minutes||0),0);
+  const laborCost = (totalLaborMinutes/60) * (s.laborHourlyRate||0);
   const failureCost = (materialCost + energyCost + depreciation) * prod.failureMarginPct;
   const totalCost = materialCost + energyCost + embalagemCost + depreciation + failureCost + laborCost;
   const defaultMargin = 1 - (1/(s.markupMultiplier||2.5));
@@ -541,7 +546,7 @@ function calcProduct(prod){
     practicedPriceExtra[plat.id] = (prod.practicedPriceExtra||{})[plat.id] || suggestedPriceExtra[plat.id];
   });
   const estimatedShopeeFreightCap = shopeeFreightCap(practicedPriceShopee);
-  return { materialCost, energyCost, boxCost:bCost, bubbleCost, embalagemCost, depreciation, laborCost, failureCost, totalCost, suggestedPrice, suggestedPriceMl, suggestedPriceShopee, suggestedPriceExtra, practicedPrice, practicedPriceMl, practicedPriceShopee, practicedPriceExtra, estimatedShopeeFreightCap, marginValue, marginPct, desiredMarginPct: desiredMargin*100, machine };
+  return { materialCost, energyCost, boxCost:bCost, bubbleCost, embalagemCost, depreciation, laborCost, totalLaborMinutes, failureCost, totalCost, suggestedPrice, suggestedPriceMl, suggestedPriceShopee, suggestedPriceExtra, practicedPrice, practicedPriceMl, practicedPriceShopee, practicedPriceExtra, estimatedShopeeFreightCap, marginValue, marginPct, desiredMarginPct: desiredMargin*100, machine };
 }
 // Teto do cupom de frete grátis que a Shopee subsidia (obrigatório desde mar/2026) —
 // é só uma estimativa de custo (o frete real pode custar menos que o teto), por
@@ -813,9 +818,9 @@ function tabSubtitle(){
 function renderTopbarActions(){
   const el = document.getElementById('topbarActions');
   if(currentTab==='pedidos') el.innerHTML = `<button class="btn ghost" onclick="exportOrdersExcel()">Exportar</button> <button class="btn primary" onclick="openOrderModal()">+ Nova encomenda</button>`;
-  else if(currentTab==='vendas') el.innerHTML = `<button class="btn ghost" onclick="switchTab('taxas')">Taxas das plataformas</button> <button class="btn ghost" onclick="openKitModal()">Criar kit</button> <button class="btn ghost" onclick="exportSalesExcel()">Exportar</button> <button class="btn primary" onclick="openSaleModal()">+ Nova venda</button>`;
+  else if(currentTab==='vendas') el.innerHTML = `<button class="btn ghost" onclick="switchTab('taxas')">Taxas das plataformas</button> <button class="btn ghost" onclick="exportSalesExcel()">Exportar</button> <button class="btn primary" onclick="openSaleModal()">+ Nova venda</button>`;
   else if(currentTab==='clientes') el.innerHTML = `<button class="btn ghost" onclick="exportCustomersExcel()">Exportar</button> <button class="btn primary" onclick="openCustomerModal()">+ Novo cliente</button>`;
-  else if(currentTab==='produtos') el.innerHTML = `<button class="btn ghost" onclick="openQuickQuoteModal()">Orçamento rápido</button> <button class="btn ghost" onclick="exportCatalogImage()">Catálogo (imagem)</button> <button class="btn ghost" onclick="exportCatalogPDF()">Catálogo (PDF, 1 pág./produto)</button> <button class="btn primary" onclick="openProductModal()">+ Novo produto</button>`;
+  else if(currentTab==='produtos') el.innerHTML = `<button class="btn ghost" onclick="openQuickQuoteModal()">Orçamento rápido</button> <button class="btn ghost" onclick="openKitModal()">Criar kit</button> <button class="btn ghost" onclick="exportCatalogImage()">Catálogo (imagem)</button> <button class="btn ghost" onclick="exportCatalogPDF()">Catálogo (PDF, 1 pág./produto)</button> <button class="btn primary" onclick="openProductModal()">+ Novo produto</button>`;
   else if(currentTab==='anuncios') el.innerHTML = '';
   else if(currentTab==='estoque') el.innerHTML = stockTab==='materiais' ? `<button class="btn primary" onclick="openMaterialModal()">+ Nova matéria-prima</button>` : `<button class="btn primary" onclick="switchTab('impressao')">Ir pra Fila de Impressão</button>`;
   else if(currentTab==='impressao') el.innerHTML = `<button class="btn primary" onclick="openPrintJobModal()">+ Nova impressão</button>`;
@@ -1064,6 +1069,7 @@ function renderProfitabilityTable(){
   </table></div>`;
 }
 let quoteFilaments = [];
+let quoteLaborActions = [];
 function openQuickQuoteModal(){
   const filamentOptions = state.materials.filter(m=>m.category==='Filamento');
   const boxOptions = state.materials.filter(m=>m.category==='Embalagem' && m.isBox);
@@ -1077,6 +1083,7 @@ function openQuickQuoteModal(){
     return;
   }
   quoteFilaments = [{materialName:filamentOptions[0].name, weightG:50}];
+  quoteLaborActions = [];
   showModal('Orçamento rápido', `
     <div class="field hint" style="margin-bottom:12px;">Calcule um preço na hora, sem precisar cadastrar produto — ótimo pra responder pedido personalizado. Se fizer sentido guardar, dá pra salvar como produto de verdade no final.</div>
     <div class="field"><label>Descrição (opcional, só pra você lembrar)</label><input id="qtDesc" placeholder="Ex: chaveiro personalizado do Zé"></div>
@@ -1092,10 +1099,11 @@ function openQuickQuoteModal(){
         ${boxOptions.map(b=>`<option value="${b.name}">${b.name}</option>`).join('')}
       </select></div>
     </div>
-    <div class="row2">
-      <div class="field"><label>Mão de obra (min)</label><input type="number" id="qtLabor" value="0" oninput="updateQuickQuotePreview()"></div>
-      <div class="field"><label>Margem de lucro desejada (%)</label><input type="number" id="qtMargin" value="${((1-1/(state.settings.markupMultiplier||2.5))*100).toFixed(0)}" oninput="updateQuickQuotePreview()"></div>
-    </div>
+    <div class="field"><label>Margem de lucro desejada (%)</label><input type="number" id="qtMargin" value="${((1-1/(state.settings.markupMultiplier||2.5))*100).toFixed(0)}" oninput="updateQuickQuotePreview()"></div>
+    <div class="field" style="margin-bottom:6px;"><label>Mão de obra (ações e minutos de cada uma)</label></div>
+    <div id="qtLaborActionRows"></div>
+    <button class="btn ghost sm" style="margin-bottom:14px;" onclick="addQuoteLaborActionRow()">+ Adicionar ação</button>
+    ${laborActionOptionsHtml()}
     <div class="helper-block" id="qtPreview"></div>
     <div class="modal-actions" style="justify-content:space-between;">
       <button class="btn ghost" onclick="closeModal()">Fechar</button>
@@ -1103,6 +1111,7 @@ function openQuickQuoteModal(){
     </div>
   `);
   renderQuoteFilamentRows();
+  renderQuoteLaborActionRows();
   updateQuickQuotePreview();
 }
 function renderQuoteFilamentRows(){
@@ -1131,6 +1140,27 @@ function removeQuoteFilamentRow(i){
   renderQuoteFilamentRows();
   updateQuickQuotePreview();
 }
+function renderQuoteLaborActionRows(){
+  const el = document.getElementById('qtLaborActionRows');
+  if(!el) return;
+  el.innerHTML = quoteLaborActions.map((a,i)=>`
+    <div style="display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr) 28px;gap:8px;align-items:center;margin-bottom:8px;">
+      <input list="laborActionOptions" value="${a.action}" placeholder="Ação (ex: Lixar)" style="min-width:0;" oninput="quoteLaborActions[${i}].action=this.value; updateQuickQuotePreview();">
+      <input type="number" step="1" value="${a.minutes}" placeholder="minutos" style="min-width:0;" oninput="quoteLaborActions[${i}].minutes=parseFloat(this.value)||0; updateQuickQuotePreview();">
+      <button class="btn ghost sm" title="Remover" style="padding:6px 8px;" onclick="removeQuoteLaborActionRow(${i})">×</button>
+    </div>
+  `).join('');
+}
+function addQuoteLaborActionRow(){
+  quoteLaborActions.push({action:'', minutes:0});
+  renderQuoteLaborActionRows();
+  updateQuickQuotePreview();
+}
+function removeQuoteLaborActionRow(i){
+  quoteLaborActions.splice(i,1);
+  renderQuoteLaborActionRows();
+  updateQuickQuotePreview();
+}
 function buildQuoteDraft(){
   return {
     name: document.getElementById('qtDesc').value.trim() || 'Orçamento sem nome',
@@ -1139,7 +1169,7 @@ function buildQuoteDraft(){
     bubbleWrapM: 0,
     boxType: document.getElementById('qtBox').value,
     failureMarginPct: 0.10,
-    laborMinutes: parseFloat(document.getElementById('qtLabor').value)||0,
+    laborActions: quoteLaborActions,
     machineId: document.getElementById('qtMachine').value,
     desiredMarginPct: parseFloat(document.getElementById('qtMargin').value)||0,
     practicedPrice: 0,
@@ -1171,7 +1201,7 @@ function saveQuoteAsProduct(){
   const c = calcProduct(draft);
   state.products.push({
     id:uid(), name:draft.name, filaments:draft.filaments, timeH:draft.timeH, bubbleWrapM:draft.bubbleWrapM,
-    boxType:draft.boxType, failureMarginPct:draft.failureMarginPct, laborMinutes:draft.laborMinutes,
+    boxType:draft.boxType, failureMarginPct:draft.failureMarginPct, laborActions:draft.laborActions,
     machineId:draft.machineId, desiredMarginPct:draft.desiredMarginPct, practicedPrice:c.suggestedPrice, stock:0,
   });
   saveProducts();
@@ -2326,7 +2356,7 @@ function updateCalculoExample(){
       <div class="calc-line"><span>Energia (${prod.timeH}h × ${brl(c.machine?machineEnergyCostPerHour(c.machine):0)}/h em ${c.machine?c.machine.name:'—'})</span><span>${brl(c.energyCost)}</span></div>
       <div class="calc-line"><span>Embalagem (caixa + plástico bolha)</span><span>${brl(c.embalagemCost)}</span></div>
       <div class="calc-line"><span>Depreciação (${prod.timeH}h × ${brl(c.machine?machineDeprCostPerHour(c.machine):0)}/h em ${c.machine?c.machine.name:'—'})</span><span>${brl(c.depreciation)}</span></div>
-      <div class="calc-line"><span>Mão de obra (${prod.laborMinutes||0}min × ${brl(state.settings.laborHourlyRate||0)}/h)</span><span>${brl(c.laborCost)}</span></div>
+      <div class="calc-line"><span>Mão de obra (${(prod.laborActions||[]).length ? (prod.laborActions||[]).map(a=>`${a.action||'(sem nome)'} ${a.minutes}min`).join(' + ') : 'nenhuma ação cadastrada'} × ${brl(state.settings.laborHourlyRate||0)}/h)</span><span>${brl(c.laborCost)}</span></div>
       <div class="calc-line"><span>Custo de falha (${num(prod.failureMarginPct*100,0)}% sobre material+energia+depreciação)</span><span>${brl(c.failureCost)}</span></div>
       <div class="calc-line total"><span>Custo total</span><span>${brl(c.totalCost)}</span></div>
       <div class="calc-line"><span>Preço sugerido — venda própria (margem de ${num(c.desiredMarginPct,0)}%)</span><span>${brl(c.suggestedPrice)}</span></div>
@@ -2924,16 +2954,18 @@ function buildKitDraft(){
   const desiredMarginPct = parseFloat(document.getElementById('kitMargin').value)||0;
   const items = Object.entries(editingKitItems).map(([pid,qty])=>({ prod: state.products.find(p=>p.id===pid), qty })).filter(x=>x.prod);
   const filamentMap = {};
-  let timeH=0, laborMinutes=0, failureSum=0;
+  const laborActionMap = {};
+  let timeH=0, failureSum=0;
   items.forEach(({prod,qty})=>{
     (prod.filaments||[]).forEach(f=>{ filamentMap[f.materialName] = (filamentMap[f.materialName]||0) + (f.weightG||0)*qty; });
+    (prod.laborActions||[]).forEach(a=>{ laborActionMap[a.action] = (laborActionMap[a.action]||0) + (a.minutes||0)*qty; });
     timeH += (prod.timeH||0)*qty;
-    laborMinutes += (prod.laborMinutes||0)*qty;
     failureSum += (prod.failureMarginPct||0.1);
   });
   const filaments = Object.entries(filamentMap).map(([materialName,weightG])=>({materialName,weightG}));
+  const laborActions = Object.entries(laborActionMap).map(([action,minutes])=>({action,minutes}));
   const failureMarginPct = items.length ? failureSum/items.length : 0.1;
-  return { items, filaments, timeH, laborMinutes, failureMarginPct, boxType, bubbleWrapM, machineId, desiredMarginPct };
+  return { items, filaments, timeH, laborActions, failureMarginPct, boxType, bubbleWrapM, machineId, desiredMarginPct };
 }
 function updateKitPreview(){
   const box = document.getElementById('kitPreview');
@@ -2973,7 +3005,7 @@ function confirmKit(){
   const practicedPrice = priceRaw ? parseFloat(priceRaw) : c.suggestedPrice;
   state.products.push({
     id:uid(), name, filaments:draft.filaments, timeH:draft.timeH, bubbleWrapM:draft.bubbleWrapM,
-    boxType:draft.boxType, failureMarginPct:draft.failureMarginPct, laborMinutes:draft.laborMinutes,
+    boxType:draft.boxType, failureMarginPct:draft.failureMarginPct, laborActions:draft.laborActions,
     machineId:draft.machineId, desiredMarginPct:draft.desiredMarginPct, practicedPrice, stock:0,
     kitComponents: draft.items.map(({prod,qty})=>({productId:prod.id, productName:prod.name, qty})),
   });
@@ -3732,8 +3764,11 @@ function openProductModal(id){
   }
   const p = editing ? state.products.find(x=>x.id===id) : { name:'', filaments:[{materialName:filamentOpts[0].name,weightG:100}], timeH:3, bubbleWrapM:0.5, boxType:boxOpts[0].name, failureMarginPct:0.10, practicedPrice:0, stock:0, machineId:machineOpts[0].id };
   editingFilaments = JSON.parse(JSON.stringify(p.filaments && p.filaments.length ? p.filaments : [{materialName:filamentOpts[0].name,weightG:100}]));
+  editingLaborActions = JSON.parse(JSON.stringify(p.laborActions||[]));
   editingPhotoData = p.photo || null;
   editingProductMlFee = p.mlRealFeePct!=null ? p.mlRealFeePct : null;
+  editingProductMlFeeUpdatedAt = p.mlRealFeeUpdatedAt || null;
+  editingProductMlFeeUpdatedAtPrice = p.mlRealFeeUpdatedAtPrice || null;
   const boxes = boxOpts;
   showModal(editing?'Editar produto':'Novo produto', `
     <div class="field"><label>Nome do produto</label><input id="pName" value="${p.name}" placeholder="Ex: Kit Escritório"></div>
@@ -3745,6 +3780,24 @@ function openProductModal(id){
       </select>
       <input id="pCategoryNew" placeholder="Nome da nova categoria" style="margin-top:6px;display:${p.category && !productCategorySuggestions().includes(p.category)?'block':'none'};" value="${p.category && !productCategorySuggestions().includes(p.category)?p.category:''}">
     </div>
+    ${state.settings.mlConnected ? `
+    <div class="field hint" style="margin:4px 0 4px;font-weight:600;color:var(--text-dim);">Categoria no Mercado Livre — taxa real (opcional)</div>
+    <div class="row2">
+      <div class="field" style="position:relative;"><label>Categoria no ML</label>
+        <input id="pMlCategorySearch" placeholder="Digite o nome do produto pra buscar..." value="${p.mlCategoryName||''}" oninput="searchMlCategory(this.value)" autocomplete="off">
+        <div id="pMlCategoryResults"></div>
+        <input type="hidden" id="pMlCategoryId" value="${p.mlCategoryId||''}">
+      </div>
+      <div class="field"><label>Tipo de anúncio (pra essa taxa)</label>
+        <select id="pMlListingType">
+          <option value="gold_special" ${(!p.mlListingTypeForFee || p.mlListingTypeForFee==='gold_special')?'selected':''}>Clássico</option>
+          <option value="gold_pro" ${p.mlListingTypeForFee==='gold_pro'?'selected':''}>Premium</option>
+        </select>
+      </div>
+    </div>
+    <div class="field hint" id="pMlFeeStatus" style="margin-top:-8px;">${editingProductMlFee!=null ? `Taxa real: <strong>${num(editingProductMlFee,1)}%</strong> (calculada em ${fmtDate((editingProductMlFeeUpdatedAt||'').slice(0,10))} pra R$ ${num(editingProductMlFeeUpdatedAtPrice||0,2)})` : 'Ainda não buscada — escolha a categoria acima e clique em atualizar.'}</div>
+    <button type="button" class="btn ghost sm" style="margin-bottom:14px;" onclick="fetchMlRealFee()">Atualizar taxa real</button>
+    ` : ''}
     <div class="field"><label>Foto (opcional)</label><input type="file" accept="image/*" id="pPhotoInput" onchange="handlePhotoUpload(this)"></div>
     <div id="pPhotoPreview"></div>
 
@@ -3764,10 +3817,13 @@ function openProductModal(id){
       <div class="field"><label>Plástico bolha (m)</label><input type="number" id="pBubble" value="${p.bubbleWrapM}" step="0.1" oninput="updateProductPreview()"></div>
       <div class="field"><label>Tempo impressão (h)</label><input type="number" id="pTime" value="${p.timeH}" step="0.01" oninput="updateProductPreview()"></div>
     </div>
-    <div class="row2">
-      <div class="field"><label>Margem de falha (%)</label><input type="number" id="pFail" value="${(p.failureMarginPct*100)}" step="1" oninput="updateProductPreview()"></div>
-      <div class="field"><label>Mão de obra (min)</label><input type="number" id="pLabor" value="${p.laborMinutes||0}" step="1" oninput="updateProductPreview()"></div>
-    </div>
+    <div class="field"><label>Margem de falha (%)</label><input type="number" id="pFail" value="${(p.failureMarginPct*100)}" step="1" oninput="updateProductPreview()"></div>
+
+    <div class="field" style="margin-bottom:6px;"><label>Mão de obra (ações e minutos de cada uma)</label></div>
+    <div id="laborActionRows"></div>
+    <button class="btn ghost sm" style="margin-bottom:14px;" onclick="addLaborActionRow()">+ Adicionar ação</button>
+    ${laborActionOptionsHtml()}
+
     <div class="row2">
       <div class="field"><label>Margem de lucro desejada (%)</label><input type="number" id="pMargin" value="${(p.desiredMarginPct!=null ? p.desiredMarginPct : calcProduct(p).desiredMarginPct).toFixed(0)}" step="1" oninput="document.getElementById('pPrice').dataset.touched=''; updateProductPreview()"></div>
       <div class="field"><label>Preço praticado — Venda própria (R$)</label><input type="number" id="pPrice" value="${p.practicedPrice||''}" step="0.01" placeholder="deixe em branco = preço sugerido" oninput="this.dataset.touched='1'"></div>
@@ -3777,24 +3833,6 @@ function openProductModal(id){
       <div class="field"><label>Preço praticado — Shopee (R$)</label><input type="number" id="pPriceShopee" value="${p.practicedPriceShopee||''}" step="0.01" placeholder="deixe em branco = preço sugerido" oninput="this.dataset.touched='1'"></div>
     </div>
     ${extraListingPlatforms().map(plat=>`<div class="field"><label>Preço praticado — ${plat.name} (R$)</label><input type="number" id="pPriceExtra_${plat.id}" value="${(p.practicedPriceExtra||{})[plat.id]||''}" step="0.01" placeholder="deixe em branco = preço sugerido" oninput="this.dataset.touched='1'"></div>`).join('')}
-    ${editing && state.settings.mlConnected ? `
-    <div class="field hint" style="margin:12px 0 4px;font-weight:600;color:var(--text-dim);">Taxa real do Mercado Livre (opcional)</div>
-    <div class="row2">
-      <div class="field" style="position:relative;"><label>Categoria no ML</label>
-        <input id="pMlCategorySearch" placeholder="Digite o nome do produto pra buscar..." value="${p.mlCategoryName||''}" oninput="searchMlCategory(this.value)" autocomplete="off">
-        <div id="pMlCategoryResults"></div>
-        <input type="hidden" id="pMlCategoryId" value="${p.mlCategoryId||''}">
-      </div>
-      <div class="field"><label>Tipo de anúncio (pra essa taxa)</label>
-        <select id="pMlListingType">
-          <option value="gold_special" ${(!p.mlListingTypeForFee || p.mlListingTypeForFee==='gold_special')?'selected':''}>Clássico</option>
-          <option value="gold_pro" ${p.mlListingTypeForFee==='gold_pro'?'selected':''}>Premium</option>
-        </select>
-      </div>
-    </div>
-    <div class="field hint" id="pMlFeeStatus" style="margin-top:-8px;">${p.mlRealFeePct!=null ? `Taxa real: <strong>${num(p.mlRealFeePct,1)}%</strong> (calculada em ${fmtDate((p.mlRealFeeUpdatedAt||'').slice(0,10))} pra R$ ${num(p.mlRealFeeUpdatedAtPrice||0,2)})` : 'Ainda não buscada — escolha a categoria acima e clique em atualizar.'}</div>
-    <button type="button" class="btn ghost sm" style="margin-bottom:14px;" onclick="fetchMlRealFee('${id}')">Atualizar taxa real</button>
-    ` : ''}
     <div class="field"><label>Estoque inicial (un)</label><input type="number" id="pStock" value="${p.stock}" step="1"></div>
     <div class="helper-block" id="productPreview"></div>
     <div class="modal-actions">
@@ -3803,12 +3841,16 @@ function openProductModal(id){
     </div>
   `);
   renderFilamentRows();
+  renderLaborActionRows();
   renderPhotoPreview();
   updateProductPreview();
 }
 let editingFilaments = [];
+let editingLaborActions = [];
 let editingPhotoData = null;
 let editingProductMlFee = null;
+let editingProductMlFeeUpdatedAt = null;
+let editingProductMlFeeUpdatedAtPrice = null;
 function resizeImageFile(file, maxSize, quality){
   return new Promise((resolve,reject)=>{
     if(!file.type.startsWith('image/')){ reject(new Error('not an image')); return; }
@@ -3885,8 +3927,37 @@ function removeFilamentRow(i){
   renderFilamentRows();
   updateProductPreview();
 }
+function renderLaborActionRows(){
+  const el = document.getElementById('laborActionRows');
+  if(!el) return;
+  el.innerHTML = editingLaborActions.map((a,i)=>`
+    <div style="display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr) 28px;gap:8px;align-items:center;margin-bottom:8px;">
+      <input list="laborActionOptions" value="${a.action}" placeholder="Ação (ex: Lixar)" style="min-width:0;" oninput="editingLaborActions[${i}].action=this.value; updateProductPreview();">
+      <input type="number" step="1" value="${a.minutes}" placeholder="minutos" style="min-width:0;" oninput="editingLaborActions[${i}].minutes=parseFloat(this.value)||0; updateProductPreview();">
+      <button class="btn ghost sm" title="Remover" style="padding:6px 8px;" onclick="removeLaborActionRow(${i})">×</button>
+    </div>
+  `).join('');
+}
+function addLaborActionRow(){
+  editingLaborActions.push({action:'', minutes:0});
+  renderLaborActionRows();
+  updateProductPreview();
+}
+function removeLaborActionRow(i){
+  editingLaborActions.splice(i,1);
+  renderLaborActionRows();
+  updateProductPreview();
+}
 function productCategorySuggestions(){
   return Array.from(new Set(state.products.map(p=>p.category).filter(Boolean))).sort((a,b)=>a.localeCompare(b,'pt-BR'));
+}
+const LABOR_ACTION_PRESETS = ['Lixar','Pintar','Colar','Furar','Montar','Empacotar','Revisar/Controle de qualidade'];
+function laborActionSuggestions(){
+  const used = state.products.flatMap(p=>(p.laborActions||[]).map(a=>a.action)).filter(Boolean);
+  return Array.from(new Set([...LABOR_ACTION_PRESETS, ...used])).sort((a,b)=>a.localeCompare(b,'pt-BR'));
+}
+function laborActionOptionsHtml(){
+  return `<datalist id="laborActionOptions">${laborActionSuggestions().map(a=>`<option value="${a}"></option>`).join('')}</datalist>`;
 }
 function toggleNewCategoryInput(val){
   const el = document.getElementById('pCategoryNew');
@@ -3894,7 +3965,7 @@ function toggleNewCategoryInput(val){
 }
 function readProductForm(){
   const catSel = document.getElementById('pCategory').value;
-  return {
+  const form = {
     name: document.getElementById('pName').value.trim(),
     category: catSel==='__new__' ? document.getElementById('pCategoryNew').value.trim() : catSel,
     filaments: editingFilaments,
@@ -3903,13 +3974,23 @@ function readProductForm(){
     timeH: parseFloat(document.getElementById('pTime').value)||0,
     bubbleWrapM: parseFloat(document.getElementById('pBubble').value)||0,
     failureMarginPct: (parseFloat(document.getElementById('pFail').value)||0)/100,
-    laborMinutes: parseFloat(document.getElementById('pLabor').value)||0,
+    laborActions: editingLaborActions,
     desiredMarginPct: parseFloat(document.getElementById('pMargin').value)||0,
   };
+  const mlCatIdEl = document.getElementById('pMlCategoryId');
+  if(mlCatIdEl){
+    form.mlCategoryId = mlCatIdEl.value.trim();
+    form.mlCategoryName = document.getElementById('pMlCategorySearch').value.trim();
+    form.mlListingTypeForFee = document.getElementById('pMlListingType').value;
+    form.mlRealFeePct = editingProductMlFee;
+    form.mlRealFeeUpdatedAt = editingProductMlFeeUpdatedAt;
+    form.mlRealFeeUpdatedAtPrice = editingProductMlFeeUpdatedAtPrice;
+  }
+  return form;
 }
 function updateProductPreview(){
   const form = readProductForm();
-  form.mlRealFeePct = editingProductMlFee;
+  if(form.mlRealFeePct===undefined) form.mlRealFeePct = editingProductMlFee;
   const c = calcProduct(form);
   document.getElementById('productPreview').innerHTML = `
     <div class="calc-line"><span>Peso total</span><span>${num(totalWeight(form),0)}g</span></div>
@@ -4928,7 +5009,7 @@ function checkMlAuthRedirect(){
     saveSettings();
     toast('Conectado ao Mercado Livre!');
   } else {
-    toast('Não consegui conectar ao Mercado Livre — tente de novo em Configurações','err');
+    toast('Não consegui conectar ao Mercado Livre — tente de novo em Taxas','err');
   }
   params.delete('ml_auth');
   const cleanUrl = window.location.pathname + (params.toString() ? '?'+params.toString() : '');
@@ -4956,17 +5037,16 @@ function selectMlCategory(categoryId, categoryName){
   document.getElementById('pMlCategorySearch').value = categoryName;
   document.getElementById('pMlCategoryResults').innerHTML = '';
 }
-async function fetchMlRealFee(id){
-  const p = state.products.find(x=>x.id===id);
-  if(!p){ toast('Salve o produto primeiro','err'); return; }
+async function fetchMlRealFee(){
   const categoryId = document.getElementById('pMlCategoryId').value.trim();
-  const categoryName = document.getElementById('pMlCategorySearch').value.trim();
   const listingTypeId = document.getElementById('pMlListingType').value;
   if(!categoryId){ toast('Escolha uma categoria da lista de sugestões primeiro','err'); return; }
   const client = initSupabase();
   if(!client){ toast('Conecte a sincronização primeiro','err'); return; }
   const priceRaw = document.getElementById('pPriceMl').value;
-  const price = priceRaw ? parseFloat(priceRaw) : calcProduct(p).suggestedPriceMl;
+  const form = readProductForm();
+  if(form.mlRealFeePct===undefined) form.mlRealFeePct = editingProductMlFee;
+  const price = priceRaw ? parseFloat(priceRaw) : calcProduct(form).suggestedPriceMl;
   const statusEl = document.getElementById('pMlFeeStatus');
   if(statusEl) statusEl.textContent = 'Buscando...';
   try{
@@ -4976,16 +5056,11 @@ async function fetchMlRealFee(id){
       if(statusEl) statusEl.textContent = 'Falha ao buscar — tente de novo.';
       return;
     }
-    p.mlCategoryId = categoryId;
-    p.mlCategoryName = categoryName;
-    p.mlListingTypeForFee = listingTypeId;
-    p.mlRealFeePct = data.feePct;
-    p.mlRealFeeUpdatedAt = new Date().toISOString();
-    p.mlRealFeeUpdatedAtPrice = price;
-    await saveProducts();
     editingProductMlFee = data.feePct;
-    toast('Taxa real atualizada');
-    if(statusEl) statusEl.innerHTML = `Taxa real: <strong>${num(data.feePct,1)}%</strong> (calculada em ${fmtDate(todayStr())} pra ${brl(price)})`;
+    editingProductMlFeeUpdatedAt = new Date().toISOString();
+    editingProductMlFeeUpdatedAtPrice = price;
+    toast('Taxa real buscada — clique em Salvar pra guardar');
+    if(statusEl) statusEl.innerHTML = `Taxa real: <strong>${num(data.feePct,1)}%</strong> (calculada em ${fmtDate(todayStr())} pra ${brl(price)}) — clique em Salvar pra guardar`;
     updateProductPreview();
   }catch(e){
     toast('Não consegui buscar a taxa real','err');
