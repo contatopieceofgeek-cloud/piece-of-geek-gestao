@@ -707,6 +707,8 @@ function render(){
         ${navItem('calculo','Cálculo')}
         ${navItem('caixa','Caixa',dasIsUrgent()?'!':0)}
         ${navItem('anual','Anual')}
+        ${navItem('taxas','Taxas')}
+        ${navItem('configuracoes','Configurações')}
       </div>
       <div class="sidebar-foot">
         <div class="clock">${new Date().toLocaleDateString('pt-BR',{day:'2-digit',month:'short',year:'numeric'})}</div>
@@ -751,6 +753,8 @@ const NAV_ICON_PATHS = {
   calculo: '<rect x="4" y="2.5" width="12" height="15" rx="2"></rect><rect x="6" y="4.5" width="8" height="3" rx="0.5"></rect><line x1="6.5" y1="11" x2="9" y2="11"></line><line x1="11" y1="11" x2="13.5" y2="11"></line><line x1="6.5" y1="14" x2="9" y2="14"></line><line x1="11" y1="14" x2="13.5" y2="14"></line>',
   caixa: '<rect x="2.5" y="5.5" width="15" height="10.5" rx="2"></rect><path d="M13.5 5.5V4A1.5 1.5 0 0 0 12 2.5H6A1.5 1.5 0 0 0 4.5 4v1.5"></path><circle cx="14" cy="11" r="1.1" fill="currentColor" stroke="none"></circle>',
   anual: '<rect x="3" y="4" width="14" height="13" rx="2"></rect><line x1="3" y1="8" x2="17" y2="8"></line><line x1="6.5" y1="2.5" x2="6.5" y2="5.5"></line><line x1="13.5" y1="2.5" x2="13.5" y2="5.5"></line><circle cx="7" cy="11.7" r="0.9" fill="currentColor" stroke="none"></circle><circle cx="10" cy="11.7" r="0.9" fill="currentColor" stroke="none"></circle><circle cx="13" cy="11.7" r="0.9" fill="currentColor" stroke="none"></circle>',
+  taxas: '<circle cx="6.5" cy="6.5" r="2.3"></circle><circle cx="13.5" cy="13.5" r="2.3"></circle><line x1="14.5" y1="4.5" x2="5.5" y2="15.5"></line>',
+  configuracoes: '<circle cx="10" cy="10" r="2.6"></circle><line x1="10" y1="2.7" x2="10" y2="5.1"></line><line x1="10" y1="14.9" x2="10" y2="17.3"></line><line x1="17.3" y1="10" x2="14.9" y2="10"></line><line x1="5.1" y1="10" x2="2.7" y2="10"></line><line x1="15.16" y1="4.84" x2="13.46" y2="6.54"></line><line x1="6.54" y1="13.46" x2="4.84" y2="15.16"></line><line x1="15.16" y1="15.16" x2="13.46" y2="13.46"></line><line x1="6.54" y1="6.54" x2="4.84" y2="4.84"></line>',
 };
 function navIcon(key){
   return `<svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${NAV_ICON_PATHS[key]||''}</svg>`;
@@ -772,9 +776,22 @@ function closeSidebar(){
   document.getElementById('sidebar').classList.remove('open');
   document.getElementById('sidebarBackdrop').classList.remove('show');
 }
-function switchTab(t){ currentTab=t; closeSidebar(); render(); }
+function switchTab(t){
+  if(currentTab!==t && (t==='taxas' || t==='configuracoes')){
+    const s = state.settings;
+    if(t==='taxas'){
+      editingPlatforms = JSON.parse(JSON.stringify(s.platforms));
+    } else {
+      editingExpenses = JSON.parse(JSON.stringify(s.expenses||[]));
+      editingTaxes = JSON.parse(JSON.stringify(s.taxes||[]));
+      editingMachines = JSON.parse(JSON.stringify(s.machines||[]));
+      editingReserveGoals = JSON.parse(JSON.stringify(s.reserveGoals||[]));
+    }
+  }
+  currentTab=t; closeSidebar(); render();
+}
 function tabTitle(){
-  return {dashboard:'Dashboard',pedidos:'Pedidos',impressao:'Fila de Impressão',vendas:'Vendas',clientes:'Clientes',produtos:'Produtos',anuncios:'Anúncios',estoque:'Estoque',calculo:'Cálculo',caixa:'Caixa',anual:'Anual'}[currentTab];
+  return {dashboard:'Dashboard',pedidos:'Pedidos',impressao:'Fila de Impressão',vendas:'Vendas',clientes:'Clientes',produtos:'Produtos',anuncios:'Anúncios',estoque:'Estoque',calculo:'Cálculo',caixa:'Caixa',anual:'Anual',taxas:'Taxas',configuracoes:'Configurações'}[currentTab];
 }
 function tabSubtitle(){
   return {
@@ -788,20 +805,24 @@ function tabSubtitle(){
     estoque:'Matéria-prima e produtos prontos',
     calculo:'Como o app calcula depreciação, energia e mão de obra',
     caixa:'Resultado operacional, parcelas e reservas',
-    anual:'Resultado do ano, investimentos iniciais e saldo final'
+    anual:'Resultado do ano, investimentos iniciais e saldo final',
+    taxas:'Taxas de plataforma, taxa real do Mercado Livre e margem de precificação',
+    configuracoes:'Despesas, impostos, PIX, contato, mão de obra, MEI/metas, impressoras e reservas'
   }[currentTab];
 }
 function renderTopbarActions(){
   const el = document.getElementById('topbarActions');
   if(currentTab==='pedidos') el.innerHTML = `<button class="btn ghost" onclick="exportOrdersExcel()">Exportar</button> <button class="btn primary" onclick="openOrderModal()">+ Nova encomenda</button>`;
-  else if(currentTab==='vendas') el.innerHTML = `<button class="btn ghost" onclick="openSettingsModal()">Taxas das plataformas</button> <button class="btn ghost" onclick="openKitModal()">Criar kit</button> <button class="btn ghost" onclick="exportSalesExcel()">Exportar</button> <button class="btn primary" onclick="openSaleModal()">+ Nova venda</button>`;
+  else if(currentTab==='vendas') el.innerHTML = `<button class="btn ghost" onclick="switchTab('taxas')">Taxas das plataformas</button> <button class="btn ghost" onclick="openKitModal()">Criar kit</button> <button class="btn ghost" onclick="exportSalesExcel()">Exportar</button> <button class="btn primary" onclick="openSaleModal()">+ Nova venda</button>`;
   else if(currentTab==='clientes') el.innerHTML = `<button class="btn ghost" onclick="exportCustomersExcel()">Exportar</button> <button class="btn primary" onclick="openCustomerModal()">+ Novo cliente</button>`;
   else if(currentTab==='produtos') el.innerHTML = `<button class="btn ghost" onclick="openQuickQuoteModal()">Orçamento rápido</button> <button class="btn ghost" onclick="exportCatalogImage()">Catálogo (imagem)</button> <button class="btn ghost" onclick="exportCatalogPDF()">Catálogo (PDF, 1 pág./produto)</button> <button class="btn primary" onclick="openProductModal()">+ Novo produto</button>`;
   else if(currentTab==='anuncios') el.innerHTML = '';
   else if(currentTab==='estoque') el.innerHTML = stockTab==='materiais' ? `<button class="btn primary" onclick="openMaterialModal()">+ Nova matéria-prima</button>` : `<button class="btn primary" onclick="switchTab('impressao')">Ir pra Fila de Impressão</button>`;
   else if(currentTab==='impressao') el.innerHTML = `<button class="btn primary" onclick="openPrintJobModal()">+ Nova impressão</button>`;
-  else if(currentTab==='calculo') el.innerHTML = `<button class="btn primary" onclick="openSettingsModal()">Gerenciar impressoras</button>`;
+  else if(currentTab==='calculo') el.innerHTML = `<button class="btn primary" onclick="switchTab('configuracoes')">Gerenciar impressoras</button>`;
   else if(currentTab==='anual') el.innerHTML = `<button class="btn ghost" onclick="exportAnnualExcel()">Exportar Excel</button> <button class="btn ghost" onclick="window.print()">Exportar PDF</button> <button class="btn primary" onclick="openInvestmentModal()">+ Adicionar investimento</button>`;
+  else if(currentTab==='taxas') el.innerHTML = `<button class="btn primary" onclick="confirmTaxas()">Salvar</button>`;
+  else if(currentTab==='configuracoes') el.innerHTML = `<button class="btn primary" onclick="confirmConfiguracoes()">Salvar</button>`;
   else el.innerHTML = '';
 }
 function renderContent(){
@@ -817,9 +838,18 @@ function renderContent(){
   else if(currentTab==='calculo') c.innerHTML = renderCalculo();
   else if(currentTab==='caixa') c.innerHTML = renderCaixa();
   else if(currentTab==='anual') c.innerHTML = renderAnual();
+  else if(currentTab==='taxas') c.innerHTML = renderTaxas();
+  else if(currentTab==='configuracoes') c.innerHTML = renderConfiguracoes();
   if(currentTab==='dashboard') setTimeout(drawDashboardCharts,0);
   if(currentTab==='anual') setTimeout(drawAnnualChart,0);
   if(currentTab==='calculo') updateCalculoExample();
+  if(currentTab==='taxas') renderPlatformRows();
+  if(currentTab==='configuracoes'){
+    renderNameValueRows('expenseRows', editingExpenses, 'updateExpenseRow', 'removeExpenseRow');
+    renderNameValueRows('taxRows', editingTaxes, 'updateTaxRow', 'removeTaxRow');
+    renderMachineRows();
+    renderReserveRows();
+  }
 }
 
 /* ===================== DASHBOARD ===================== */
@@ -4197,7 +4227,10 @@ function renderCaixa(){
   return `
     <div class="filter-bar">
       <div class="field"><label>Mês de referência</label><input type="month" value="${currentMonth}" onchange="currentMonth=this.value; renderContent();"></div>
-      <button class="btn" onclick="openSettingsModal()" style="margin-left:auto;">Configurar taxas, despesas, parcelas e reservas</button>
+      <div style="margin-left:auto;display:flex;gap:8px;">
+        <button class="btn" onclick="switchTab('taxas')">Taxas</button>
+        <button class="btn" onclick="switchTab('configuracoes')">Despesas, parcelas e reservas</button>
+      </div>
     </div>
 
     <div class="section-title">Bloco A — Resultado operacional</div>
@@ -4239,7 +4272,7 @@ function renderCaixa(){
       </table></div>` : emptyState('Nenhuma impressora cadastrada ainda')}
       <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;">
         <div class="field hint" style="margin:0;">As parcelas restantes são calculadas automaticamente a partir do mês da 1ª parcela de cada impressora.</div>
-        <button class="btn ghost sm" onclick="openSettingsModal()">Gerenciar impressoras</button>
+        <button class="btn ghost sm" onclick="switchTab('configuracoes')">Gerenciar impressoras</button>
       </div>
     </div>
 
@@ -4286,89 +4319,104 @@ function caixaRow(label, value, bold){
   return `<tr><td style="${bold?'font-weight:600;':''}">${label}</td><td class="right num" style="${bold?'font-weight:600;':''}color:${value<0?'var(--red)':bold?'var(--green)':'var(--text)'}">${brl(value)}</td></tr>`;
 }
 function breakdownTable(items){
-  if(!items || items.length===0) return `${emptyState('Nenhum item cadastrado')}<button class="btn ghost sm" style="width:100%;margin-top:6px;" onclick="openSettingsModal()">+ Adicionar item</button>`;
+  if(!items || items.length===0) return `${emptyState('Nenhum item cadastrado')}<button class="btn ghost sm" style="width:100%;margin-top:6px;" onclick="switchTab('configuracoes')">+ Adicionar item</button>`;
   return `<div class="tbl-wrap"><table><tbody>
     ${items.map(i=>`<tr><td>${i.name}</td><td class="right num">${brl(i.value)}</td></tr>`).join('')}
   </tbody></table></div>
-  <button class="btn ghost sm" style="width:100%;margin-top:10px;" onclick="openSettingsModal()">Editar itens</button>`;
+  <button class="btn ghost sm" style="width:100%;margin-top:10px;" onclick="switchTab('configuracoes')">Editar itens</button>`;
 }
 let editingPlatforms = [];
 let editingExpenses = [];
 let editingTaxes = [];
 let editingMachines = [];
 let editingReserveGoals = [];
-function openSettingsModal(){
+function renderTaxas(){
   const s = state.settings;
-  editingPlatforms = JSON.parse(JSON.stringify(s.platforms));
-  editingExpenses = JSON.parse(JSON.stringify(s.expenses||[]));
-  editingTaxes = JSON.parse(JSON.stringify(s.taxes||[]));
-  editingMachines = JSON.parse(JSON.stringify(s.machines||[]));
-  editingReserveGoals = JSON.parse(JSON.stringify(s.reserveGoals||[]));
-  showModal('Configurações de caixa', `
+  return `
     <div class="section-title" style="margin-top:0;">Taxas por plataforma de venda</div>
-    <div class="field hint" style="margin-top:-6px;margin-bottom:10px;">As plataformas mudam suas taxas de tempos em tempos — atualize aqui quando isso acontecer. Vendas já registradas não são recalculadas.</div>
-    <div id="platformRows"></div>
-    <button class="btn ghost sm" onclick="addPlatformRow()">+ Adicionar plataforma</button>
-
-    <div class="section-title" style="margin-top:20px;">Mercado Livre — taxa real (opcional)</div>
-    <div id="mlConnectSection">${renderMlConnectSection()}</div>
-
-    <div class="section-title" style="margin-top:20px;">Despesas operacionais mensais</div>
-    <div class="field hint" style="margin-top:-6px;margin-bottom:10px;">Cada item que você paga todo mês pra manter o negócio rodando: assinaturas, anúncios, ferramentas etc.</div>
-    <div id="expenseRows"></div>
-    <button class="btn ghost sm" onclick="addExpenseRow()">+ Adicionar despesa</button>
-    <div class="field hint" style="margin-top:10px;text-align:right;">Total: <strong id="expenseTotal" style="color:var(--text)">${brl(editingExpenses.reduce((a,e)=>a+(e.value||0),0))}</strong></div>
-
-    <div class="section-title" style="margin-top:20px;">Impostos mensais</div>
-    <div class="field hint" style="margin-top:-6px;margin-bottom:10px;">DAS-MEI e qualquer outro imposto que incida sobre o negócio.</div>
-    <div id="taxRows"></div>
-    <button class="btn ghost sm" onclick="addTaxRow()">+ Adicionar imposto</button>
-
-    <div class="section-title" style="margin-top:16px;">Precificação</div>
-    <div class="field"><label>Margem de lucro padrão sugerida (%)</label><input type="number" id="cfgMargin" value="${((1-1/(s.markupMultiplier||2.5))*100).toFixed(0)}" step="1"></div>
-
-    <div class="section-title" style="margin-top:16px;">PIX</div>
-    <div class="field"><label>Chave PIX</label><input id="cfgPixKey" value="${s.pixKey||''}" placeholder="CPF/CNPJ, e-mail, telefone ou chave aleatória"></div>
-    <div class="row2">
-      <div class="field"><label>Nome do recebedor</label><input id="cfgPixName" value="${s.pixMerchantName||''}" maxlength="25"></div>
-      <div class="field"><label>Cidade</label><input id="cfgPixCity" value="${s.pixMerchantCity||''}" maxlength="15"></div>
-    </div>
-    <div class="field hint" style="margin-top:-8px;margin-bottom:12px;">Preencha pra poder gerar cobrança PIX (QR Code + copia e cola) direto na hora de registrar uma venda.</div>
-    <div class="field hint" style="margin-top:-8px;margin-bottom:12px;">Usada como ponto de partida ao criar um produto novo — depois, cada produto pode ter a margem ajustada individualmente no próprio cadastro.</div>
-
-    <div class="section-title" style="margin-top:16px;">Contato (aparece no catálogo)</div>
-    <div class="row2">
-      <div class="field"><label>WhatsApp</label><input id="cfgWhatsapp" value="${s.whatsapp||''}" placeholder="(11) 99999-9999"></div>
-      <div class="field"><label>Instagram</label><input id="cfgInstagram" value="${s.instagram||''}" placeholder="seu.usuario (sem @)"></div>
+    <div class="card">
+      <div class="field hint" style="margin-top:0;margin-bottom:10px;">As plataformas mudam suas taxas de tempos em tempos — atualize aqui quando isso acontecer. Vendas já registradas não são recalculadas.</div>
+      <div id="platformRows"></div>
+      <button class="btn ghost sm" onclick="addPlatformRow()">+ Adicionar plataforma</button>
     </div>
 
-    <div class="section-title" style="margin-top:16px;">Mão de obra</div>
-    <div class="field"><label>Valor da sua hora de trabalho (R$/h)</label><input type="number" id="cfgLabor" value="${s.laborHourlyRate||0}" step="0.01"></div>
-    <div class="section-title" style="margin-top:16px;">MEI, capacidade e metas</div>
-    <div class="row2">
-      <div class="field"><label>Limite anual de faturamento do MEI (R$)</label><input type="number" id="cfgMeiLimit" value="${s.meiRevenueLimit||81000}" step="100"></div>
-      <div class="field"><label>Horas de impressão disponíveis por dia (por impressora)</label><input type="number" id="cfgPrintHours" value="${s.printHoursPerDay||16}" step="0.5"></div>
+    <div class="section-title">Mercado Livre — taxa real (opcional)</div>
+    <div class="card">
+      <div id="mlConnectSection">${renderMlConnectSection()}</div>
     </div>
-    <div class="field"><label>Meta de faturamento mensal (R$)</label><input type="number" id="cfgMonthlyGoal" value="${s.monthlyGoal||0}" step="50" placeholder="0 = sem meta definida"></div>
-    <div class="field hint" style="margin-top:-8px;">Usado para calcular o custo de mão de obra de cada produto (pintura, montagem, acabamento), com base nos minutos informados no cadastro do produto.</div>
-    <div class="section-title" style="margin-top:16px;">Impressoras</div>
-    <div class="field hint" style="margin-top:-6px;margin-bottom:10px;">Cada impressora tem sua própria depreciação, energia e parcela. O produto escolhe qual impressora usa lá no cadastro.</div>
-    <div id="machineRows"></div>
-    <button class="btn ghost sm" onclick="addMachineRow()">+ Adicionar impressora</button>
-    <div class="section-title" style="margin-top:16px;">Metas de reserva mensal</div>
-    <div class="field hint" style="margin-top:-6px;margin-bottom:10px;">Defina a meta mensal de cada reserva e, se quiser, o % do lucro de cada venda que deve ir automaticamente pra lá. O que faltar pra bater a meta pode ser completado depois com "Fechar o mês" em Caixa.</div>
-    <div id="reserveRows"></div>
-    <button class="btn ghost sm" onclick="addReserveRow()">+ Adicionar reserva</button>
-    <div class="modal-actions">
-      <button class="btn ghost" onclick="closeModal()">Cancelar</button>
-      <button class="btn primary" onclick="confirmSettings()">Salvar</button>
+
+    <div class="section-title">Precificação</div>
+    <div class="card">
+      <div class="field"><label>Margem de lucro padrão sugerida (%)</label><input type="number" id="cfgMargin" value="${((1-1/(s.markupMultiplier||2.5))*100).toFixed(0)}" step="1"></div>
+      <div class="field hint" style="margin-top:-8px;">Usada como ponto de partida ao criar um produto novo — depois, cada produto pode ter a margem ajustada individualmente no próprio cadastro.</div>
     </div>
-  `);
-  renderPlatformRows();
-  renderNameValueRows('expenseRows', editingExpenses, 'updateExpenseRow', 'removeExpenseRow');
-  renderNameValueRows('taxRows', editingTaxes, 'updateTaxRow', 'removeTaxRow');
-  renderMachineRows();
-  renderReserveRows();
+  `;
+}
+function renderConfiguracoes(){
+  const s = state.settings;
+  return `
+    <div class="section-title" style="margin-top:0;">Despesas operacionais mensais</div>
+    <div class="card">
+      <div class="field hint" style="margin-top:0;margin-bottom:10px;">Cada item que você paga todo mês pra manter o negócio rodando: assinaturas, anúncios, ferramentas etc.</div>
+      <div id="expenseRows"></div>
+      <button class="btn ghost sm" onclick="addExpenseRow()">+ Adicionar despesa</button>
+      <div class="field hint" style="margin-top:10px;text-align:right;">Total: <strong id="expenseTotal" style="color:var(--text)">${brl(editingExpenses.reduce((a,e)=>a+(e.value||0),0))}</strong></div>
+    </div>
+
+    <div class="section-title">Impostos mensais</div>
+    <div class="card">
+      <div class="field hint" style="margin-top:0;margin-bottom:10px;">DAS-MEI e qualquer outro imposto que incida sobre o negócio.</div>
+      <div id="taxRows"></div>
+      <button class="btn ghost sm" onclick="addTaxRow()">+ Adicionar imposto</button>
+    </div>
+
+    <div class="section-title">PIX</div>
+    <div class="card">
+      <div class="field"><label>Chave PIX</label><input id="cfgPixKey" value="${s.pixKey||''}" placeholder="CPF/CNPJ, e-mail, telefone ou chave aleatória"></div>
+      <div class="row2">
+        <div class="field"><label>Nome do recebedor</label><input id="cfgPixName" value="${s.pixMerchantName||''}" maxlength="25"></div>
+        <div class="field"><label>Cidade</label><input id="cfgPixCity" value="${s.pixMerchantCity||''}" maxlength="15"></div>
+      </div>
+      <div class="field hint" style="margin-top:-8px;">Preencha pra poder gerar cobrança PIX (QR Code + copia e cola) direto na hora de registrar uma venda.</div>
+    </div>
+
+    <div class="section-title">Contato (aparece no catálogo)</div>
+    <div class="card">
+      <div class="row2">
+        <div class="field"><label>WhatsApp</label><input id="cfgWhatsapp" value="${s.whatsapp||''}" placeholder="(11) 99999-9999"></div>
+        <div class="field"><label>Instagram</label><input id="cfgInstagram" value="${s.instagram||''}" placeholder="seu.usuario (sem @)"></div>
+      </div>
+    </div>
+
+    <div class="section-title">Mão de obra</div>
+    <div class="card">
+      <div class="field"><label>Valor da sua hora de trabalho (R$/h)</label><input type="number" id="cfgLabor" value="${s.laborHourlyRate||0}" step="0.01"></div>
+      <div class="field hint" style="margin-top:-8px;">Usado para calcular o custo de mão de obra de cada produto (pintura, montagem, acabamento), com base nos minutos informados no cadastro do produto.</div>
+    </div>
+
+    <div class="section-title">MEI, capacidade e metas</div>
+    <div class="card">
+      <div class="row2">
+        <div class="field"><label>Limite anual de faturamento do MEI (R$)</label><input type="number" id="cfgMeiLimit" value="${s.meiRevenueLimit||81000}" step="100"></div>
+        <div class="field"><label>Horas de impressão disponíveis por dia (por impressora)</label><input type="number" id="cfgPrintHours" value="${s.printHoursPerDay||16}" step="0.5"></div>
+      </div>
+      <div class="field"><label>Meta de faturamento mensal (R$)</label><input type="number" id="cfgMonthlyGoal" value="${s.monthlyGoal||0}" step="50" placeholder="0 = sem meta definida"></div>
+    </div>
+
+    <div class="section-title">Impressoras</div>
+    <div class="card">
+      <div class="field hint" style="margin-top:0;margin-bottom:10px;">Cada impressora tem sua própria depreciação, energia e parcela. O produto escolhe qual impressora usa lá no cadastro.</div>
+      <div id="machineRows"></div>
+      <button class="btn ghost sm" onclick="addMachineRow()">+ Adicionar impressora</button>
+    </div>
+
+    <div class="section-title">Metas de reserva mensal</div>
+    <div class="card">
+      <div class="field hint" style="margin-top:0;margin-bottom:10px;">Defina a meta mensal de cada reserva e, se quiser, o % do lucro de cada venda que deve ir automaticamente pra lá. O que faltar pra bater a meta pode ser completado depois com "Fechar o mês" em Caixa.</div>
+      <div id="reserveRows"></div>
+      <button class="btn ghost sm" onclick="addReserveRow()">+ Adicionar reserva</button>
+    </div>
+  `;
 }
 function renderReserveRows(){
   const el = document.getElementById('reserveRows');
@@ -4553,15 +4601,19 @@ function removePlatformRow(i){
   editingPlatforms.splice(i,1);
   renderPlatformRows();
 }
-function confirmSettings(){
+function confirmTaxas(){
   const s = state.settings;
   const cleanPlatforms = editingPlatforms.filter(p=>p.name && p.name.trim());
   if(cleanPlatforms.length===0){ toast('Cadastre ao menos uma plataforma','err'); return; }
   s.platforms = cleanPlatforms;
-  s.expenses = editingExpenses.filter(e=>e.name && e.name.trim());
-  s.taxes = editingTaxes.filter(t=>t.name && t.name.trim());
   const cfgMarginPct = Math.min(95, Math.max(0, parseFloat(document.getElementById('cfgMargin').value)||0));
   s.markupMultiplier = cfgMarginPct<100 ? 1/(1-cfgMarginPct/100) : 20;
+  saveSettings(); toast('Taxas salvas'); renderContent();
+}
+function confirmConfiguracoes(){
+  const s = state.settings;
+  s.expenses = editingExpenses.filter(e=>e.name && e.name.trim());
+  s.taxes = editingTaxes.filter(t=>t.name && t.name.trim());
   s.pixKey = document.getElementById('cfgPixKey').value.trim();
   s.pixMerchantName = document.getElementById('cfgPixName').value.trim();
   s.pixMerchantCity = document.getElementById('cfgPixCity').value.trim();
@@ -4573,7 +4625,7 @@ function confirmSettings(){
   s.printHoursPerDay = parseFloat(document.getElementById('cfgPrintHours').value)||16;
   s.machines = editingMachines.filter(m=>m.name && m.name.trim());
   s.reserveGoals = editingReserveGoals.filter(g=>g.name && g.name.trim());
-  saveSettings(); toast('Configurações salvas'); closeModal(); renderContent();
+  saveSettings(); toast('Configurações salvas'); renderContent();
 }
 function openCloseMonthModal(){
   const { plan, leftover } = previewCloseMonth(currentMonth);
@@ -4661,7 +4713,8 @@ function openOnboardingModal(){
       <div class="card" style="padding:14px 16px;">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;"><span class="badge info">4</span><div style="font-weight:600;font-size:13.5px;">Configure taxas, despesas e a parcela da impressora</div></div>
         <div style="font-size:12.5px;color:var(--text-dim);margin:0 0 10px 30px;">Taxas do Mercado Livre/Shopee, despesas mensais fixas e, se estiver financiando a impressora, o mês da 1ª parcela — as parcelas restantes passam a contar sozinhas a partir daí.</div>
-        <button class="btn sm" style="margin-left:30px;" onclick="closeModal(); switchTab('caixa'); openSettingsModal();">Ir para Configurações</button>
+        <button class="btn sm" style="margin-left:30px;" onclick="closeModal(); switchTab('taxas');">Ir para Taxas</button>
+        <button class="btn sm" style="margin-left:8px;" onclick="closeModal(); switchTab('configuracoes');">Ir para Configurações</button>
       </div>
       <div class="card" style="padding:14px 16px;">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;"><span class="badge ok">5</span><div style="font-weight:600;font-size:13.5px;">Registre sua primeira venda</div></div>
