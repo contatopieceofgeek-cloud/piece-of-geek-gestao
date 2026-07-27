@@ -726,6 +726,7 @@ function productRecipe(prod){
     ...(prod.filaments||[]).map(f=>({ materialName: f.materialName, qty: f.weightG })),
     { materialName: prod.boxType, qty: 1 },
     { materialName: (bubbleWrapMaterial()||{}).name || 'Plástico Bolha', qty: prod.bubbleWrapM },
+    { materialName: (tapeMaterial()||{}).name || 'Fita Adesiva', qty: prod.tapeM||0 },
   ];
 }
 
@@ -2088,11 +2089,13 @@ async function exportCatalogImage(){
 /* ===================== FILA DE IMPRESSÃO ===================== */
 function printJobRecipe(prod){
   const bw = (bubbleWrapMaterial()||{}).name || 'Plástico Bolha';
-  return productRecipe(prod).filter(r=>r.materialName!==prod.boxType && r.materialName!==bw);
+  const tp = (tapeMaterial()||{}).name || 'Fita Adesiva';
+  return productRecipe(prod).filter(r=>r.materialName!==prod.boxType && r.materialName!==bw && r.materialName!==tp);
 }
 function packagingRecipe(prod){
   const bw = (bubbleWrapMaterial()||{}).name || 'Plástico Bolha';
-  return productRecipe(prod).filter(r=>r.materialName===prod.boxType || r.materialName===bw);
+  const tp = (tapeMaterial()||{}).name || 'Fita Adesiva';
+  return productRecipe(prod).filter(r=>r.materialName===prod.boxType || r.materialName===bw || r.materialName===tp);
 }
 function renderImpressao(){
   const thisMonth = todayStr().slice(0,7);
@@ -2393,9 +2396,10 @@ function updateCalculoExample(){
     <div class="helper-block" style="margin-top:12px;">
       <div class="calc-line"><span>Material (${(prod.filaments||[]).map(f=>`${f.materialName} ${num(f.weightG,0)}g`).join(' + ')})</span><span>${brl(c.materialCost)}</span></div>
       <div class="calc-line"><span>Energia (${prod.timeH}h × ${brl(c.machine?machineEnergyCostPerHour(c.machine):0)}/h em ${c.machine?c.machine.name:'—'})</span><span>${brl(c.energyCost)}</span></div>
-      <div class="calc-line"><span>Embalagem (caixa + plástico bolha)</span><span>${brl(c.embalagemCost)}</span></div>
+      <div class="calc-line"><span>Embalagem (caixa + plástico bolha + fita)</span><span>${brl(c.embalagemCost)}</span></div>
       <div class="calc-line"><span>Depreciação (${prod.timeH}h × ${brl(c.machine?machineDeprCostPerHour(c.machine):0)}/h em ${c.machine?c.machine.name:'—'})</span><span>${brl(c.depreciation)}</span></div>
       <div class="calc-line"><span>Mão de obra (${(prod.laborActions||[]).length ? (prod.laborActions||[]).map(a=>`${a.action||'(sem nome)'} ${a.minutes}min`).join(' + ') : 'nenhuma ação cadastrada'} × ${brl(state.settings.laborHourlyRate||0)}/h)</span><span>${brl(c.laborCost)}</span></div>
+      ${(prod.toolsUsed||[]).length ? `<div class="calc-line"><span>Ferramentas (${(prod.toolsUsed||[]).map(t=>{ const tool=state.materials.find(x=>x.id===t.toolId); return `${tool?tool.name:'?'} ${t.uses}x`; }).join(' + ')})</span><span>${brl(c.toolsCost)}</span></div>` : ''}
       <div class="calc-line"><span>Custo de falha (${num(prod.failureMarginPct*100,0)}% sobre material+energia+depreciação)</span><span>${brl(c.failureCost)}</span></div>
       <div class="calc-line total"><span>Custo total</span><span>${brl(c.totalCost)}</span></div>
       <div class="calc-line"><span>Preço sugerido — venda própria (margem de ${num(c.desiredMarginPct,0)}%)</span><span>${brl(c.suggestedPrice)}</span></div>
@@ -4312,9 +4316,18 @@ function deleteMaterial(id){
   if(m.isBubbleWrap){
     usedBy = usedBy.concat(state.products.filter(p=>!usedBy.includes(p) && (p.bubbleWrapM||0)>0));
   }
+  if(m.isTape){
+    usedBy = usedBy.concat(state.products.filter(p=>!usedBy.includes(p) && (p.tapeM||0)>0));
+  }
+  if(m.category==='Ferramentas'){
+    usedBy = usedBy.concat(state.products.filter(p=>!usedBy.includes(p) && (p.toolsUsed||[]).some(t=>t.toolId===m.id)));
+  }
   let msg = `Excluir "${m.name}" do estoque?`;
   if(m.isBubbleWrap){
     msg += ` Atenção: esse é o material marcado como plástico bolha — depois de excluir, nenhum produto vai ter custo de plástico bolha calculado até você marcar outro material com esse papel.`;
+  }
+  if(m.isTape){
+    msg += ` Atenção: essa é a fita adesiva cadastrada — depois de excluir, nenhum produto vai ter custo de fita calculado até você marcar outro material com esse papel.`;
   }
   if(usedBy.length){
     msg += ` ${usedBy.length} produto(s) usam esse material no cálculo de custo (${usedBy.map(p=>p.name).slice(0,3).join(', ')}${usedBy.length>3?'...':''}) — o custo deles vai ficar incorreto até você ajustar.`;
