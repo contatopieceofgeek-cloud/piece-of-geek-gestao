@@ -5318,11 +5318,42 @@ function openOnboardingModal(){
         <button class="btn sm" style="margin-left:8px;" onclick="closeModal(); switchTab('configuracoes');">Ir para Configurações</button>
       </div>
       <div class="card" style="padding:14px 16px;">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;"><span class="badge ok">5</span><div style="font-weight:600;font-size:13.5px;">Registre sua primeira venda</div></div>
-        <div style="font-size:12.5px;color:var(--text-dim);margin:0 0 10px 30px;">A partir daqui o Dashboard, o Caixa e a aba Anual começam a se preencher sozinhos.</div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;"><span class="badge info">5</span><div style="font-weight:600;font-size:13.5px;">Cadastre seus clientes (opcional)</div></div>
+        <div style="font-size:12.5px;color:var(--text-dim);margin:0 0 10px 30px;">Não é obrigatório — dá pra cadastrar um cliente novo na hora de registrar a venda. Mas ter cadastrado antes deixa o histórico de compras mais fácil de acompanhar.</div>
+        <button class="btn sm" style="margin-left:30px;" onclick="closeModal(); switchTab('clientes');">Ir para Clientes</button>
+      </div>
+      <div class="card" style="padding:14px 16px;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;"><span class="badge ok">6</span><div style="font-weight:600;font-size:13.5px;">Registre sua primeira venda</div></div>
+        <div style="font-size:12.5px;color:var(--text-dim);margin:0 0 10px 30px;">A partir daqui o Dashboard, o Caixa, a aba Anual e a fila de Pedidos começam a se preencher sozinhos.</div>
         <button class="btn sm" style="margin-left:30px;" onclick="closeModal(); switchTab('vendas');">Ir para Vendas</button>
       </div>
     </div>
+
+    <div class="section-title" style="margin-top:18px;">Anúncios</div>
+    <div class="card" style="padding:14px 16px;">
+      <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:10px;">Depois de cadastrar um produto (passo 3), gera o rascunho de anúncio já preenchido pra Mercado Livre e Shopee — título, categoria, dimensões, taxa.</div>
+      <button class="btn sm" onclick="closeModal(); switchTab('anuncios');">Ir para Anúncios</button>
+    </div>
+
+    <div class="section-title" style="margin-top:18px;">As outras abas</div>
+    <div class="card" style="padding:14px 16px;">
+      <div class="field hint" style="margin-top:0;margin-bottom:10px;">Essas não têm cadastro inicial — se preenchem sozinhas a partir da produção e das vendas. Só dar uma olhada quando quiser.</div>
+      ${[
+        {tab:'dashboard', label:'Dashboard', desc:'Visão geral do mês — vendas, produção e metas.'},
+        {tab:'pedidos', label:'Pedidos', desc:'Fila de produção em Kanban, alimentada pelas vendas.'},
+        {tab:'impressao', label:'Fila de Impressão', desc:'Onde você marca o que está imprimindo agora e registra falhas.'},
+        {tab:'caixa', label:'Caixa', desc:'Fluxo de caixa do mês e fechamento de reservas.'},
+        {tab:'calculo', label:'Cálculo', desc:'As fórmulas de custo, uma por uma — útil pra conferir o preço de um produto específico.'},
+      ].map(t=>`
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--line-soft);">
+        <div>
+          <div style="font-weight:600;font-size:12.5px;">${t.label}</div>
+          <div style="font-size:11.5px;color:var(--text-faint);">${t.desc}</div>
+        </div>
+        <button class="btn ghost sm" onclick="closeModal(); switchTab('${t.tab}');">Ver</button>
+      </div>`).join('')}
+    </div>
+
     <div class="modal-actions">
       <button class="btn ghost" onclick="closeModal()">Fechar, eu já sei o caminho</button>
     </div>
