@@ -24,6 +24,8 @@ function addMonths(ym, delta){
 const localDateStr = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 const todayStr = () => localDateStr(new Date());
 currentMonth = todayStr().slice(0,7);
+const bizName = () => (state.settings.businessName && state.settings.businessName.trim()) || 'Piece of Geek 3D';
+const bizLogoSrc = () => state.settings.businessLogo || 'img/logo.png';
 
 /* ===================== SEED DATA ===================== */
 function seedData(){
@@ -69,6 +71,8 @@ function seedData(){
     p('ROYAL Tray and Container','PLA',123.02,4.87,'Caixa Pequena',45),
   ];
   const settings = {
+    businessName:'Piece of Geek 3D',
+    businessLogo:null,
     markupMultiplier:2.5,
     energyTariffPerKwh:0.75,
     meiRevenueLimit:81000,
@@ -213,6 +217,8 @@ function migrateSettings(settings){
     });
   }
   if(settings.minMarginPct==null) settings.minMarginPct = 25;
+  if(settings.businessName==null) settings.businessName = 'Piece of Geek 3D';
+  if(settings.businessLogo===undefined) settings.businessLogo = null;
   if(!Array.isArray(settings.expenses)){
     settings.expenses = settings.opExpenses ? [{id:uid(),name:'Despesas operacionais (migrado)',value:settings.opExpenses}] : [];
   }
@@ -774,13 +780,16 @@ function productRecipe(prod){
 
 /* ===================== RENDER SHELL ===================== */
 function render(){
+  document.title = bizName()+' — Gestão';
+  const appleTitleMeta = document.querySelector('meta[name="apple-mobile-web-app-title"]');
+  if(appleTitleMeta) appleTitleMeta.setAttribute('content', bizName());
   const app = document.getElementById('app');
   app.innerHTML = `
     <div class="sidebar-backdrop" id="sidebarBackdrop" onclick="closeSidebar()"></div>
     <div class="sidebar" id="sidebar">
       <div class="brand">
-        <img class="brand-mark" src="img/logo.png" alt="Piece of Geek 3D">
-        <div class="brand-text">Piece of Geek 3D<small>Gestão do negócio</small></div>
+        <img class="brand-mark" src="${bizLogoSrc()}" alt="${bizName()}">
+        <div class="brand-text">${bizName()}<small>Gestão do negócio</small></div>
       </div>
       <div class="nav">
         ${navItem('dashboard','Dashboard')}
@@ -873,6 +882,8 @@ function switchTab(t){
       editingTaxes = JSON.parse(JSON.stringify(s.taxes||[]));
       editingMachines = JSON.parse(JSON.stringify(s.machines||[]));
       editingReserveGoals = JSON.parse(JSON.stringify(s.reserveGoals||[]));
+      editingBusinessName = s.businessName || '';
+      editingBusinessLogo = s.businessLogo || null;
     }
   }
   currentTab=t; closeSidebar(); render();
@@ -1867,7 +1878,7 @@ function printSaleReceipt(saleId){
   printHTML(`
     <div class="catalog-summary" style="max-width:480px;margin:0 auto;">
       <div style="text-align:center;margin-bottom:24px;">
-        <h1 style="font-size:22px;margin:0 0 4px;color:#BD4119;">Piece of Geek 3D</h1>
+        <h1 style="font-size:22px;margin:0 0 4px;color:#BD4119;">${bizName()}</h1>
         <div style="color:#5D6270;font-size:12.5px;">Recibo de venda</div>
       </div>
       <div style="border-top:1px solid #E2E4E9;border-bottom:1px solid #E2E4E9;padding:14px 0;margin-bottom:18px;font-size:13px;color:#1A1D23;">
@@ -1935,9 +1946,9 @@ function exportCatalogPDF(){
   printHTML(`
     <div class="catalog-summary">
       <div style="display:flex;align-items:center;gap:14px;margin-bottom:18px;">
-        <img src="img/logo.png" alt="Piece of Geek 3D" style="width:52px;height:52px;object-fit:cover;border-radius:14px;box-shadow:0 4px 10px rgba(189,65,25,0.28);">
+        <img src="${bizLogoSrc()}" alt="${bizName()}" style="width:52px;height:52px;object-fit:cover;border-radius:14px;box-shadow:0 4px 10px rgba(189,65,25,0.28);">
         <div>
-          <h1 style="font-family:var(--font-display);font-size:26px;margin:0;color:#1A1D23;">Piece of Geek 3D</h1>
+          <h1 style="font-family:var(--font-display);font-size:26px;margin:0;color:#1A1D23;">${bizName()}</h1>
           <div style="font-family:var(--font-body);font-weight:700;letter-spacing:.05em;text-transform:uppercase;font-size:11.5px;color:#5D6270;margin-top:2px;">Catálogo de produtos</div>
         </div>
       </div>
@@ -2033,7 +2044,7 @@ async function exportCatalogImage(){
     img.onerror = ()=>resolve(null);
     img.src = src;
   });
-  const [logoImg, ...images] = await Promise.all([loadImg('img/logo.png'), ...items.map(p=>loadImg(p.photo))]);
+  const [logoImg, ...images] = await Promise.all([loadImg(bizLogoSrc()), ...items.map(p=>loadImg(p.photo))]);
 
   const width = 900;
   const margin = 36;
@@ -2067,7 +2078,7 @@ async function exportCatalogImage(){
   ctx.textAlign = 'left';
   ctx.fillStyle = '#1A1D23';
   ctx.font = "700 26px 'Space Grotesk', sans-serif";
-  ctx.fillText('Piece of Geek 3D', titleX, 55);
+  ctx.fillText(bizName(), titleX, 55);
   ctx.fillStyle = '#5D6270';
   ctx.font = "700 12px 'Inter', sans-serif";
   ctx.fillText('CATÁLOGO DE PRODUTOS', titleX, 75);
@@ -3338,14 +3349,14 @@ function defaultListingDraft(p){
   const dimensoesMl = hasDims ? `${num(p.heightCm,1)} x ${num(p.widthCm,1)} x ${num(p.lengthCm,1)}` : '';
   const dimensoesShopee = hasDims ? `${num(p.lengthCm,1)} x ${num(p.widthCm,1)} x ${num(p.heightCm,1)}` : '';
   const out = {
-    ml: { titulo:p.name.slice(0,60), categoria:p.mlCategoryName||'', preco:num(c.practicedPriceMl,2), estoque:p.stock, sku, condicao:'Novo', marca:'Piece of Geek 3D', peso, dimensoes:dimensoesMl, tipoAnuncio: p.mlListingTypeForFee==='gold_pro'?'Premium':'Clássico' },
-    shopee: { nome:p.name.slice(0,120), preco:num(c.practicedPriceShopee,2), estoque:p.stock, sku, marca:'Piece of Geek 3D', peso, dimensoes:dimensoesShopee },
+    ml: { titulo:p.name.slice(0,60), categoria:p.mlCategoryName||'', preco:num(c.practicedPriceMl,2), estoque:p.stock, sku, condicao:'Novo', marca:bizName(), peso, dimensoes:dimensoesMl, tipoAnuncio: p.mlListingTypeForFee==='gold_pro'?'Premium':'Clássico' },
+    shopee: { nome:p.name.slice(0,120), preco:num(c.practicedPriceShopee,2), estoque:p.stock, sku, marca:bizName(), peso, dimensoes:dimensoesShopee },
     extra: {},
   };
   extraListingPlatforms().forEach(plat=>{
     const fields = platformListingFields(plat.id);
     const titleField = fields.find(f=>f.key==='titulo'||f.key==='nome');
-    const base = { preco:num((c.suggestedPriceExtra[plat.id]!=null?c.practicedPriceExtra[plat.id]:0),2), estoque:p.stock, sku, marca:'Piece of Geek 3D', peso };
+    const base = { preco:num((c.suggestedPriceExtra[plat.id]!=null?c.practicedPriceExtra[plat.id]:0),2), estoque:p.stock, sku, marca:bizName(), peso };
     if(titleField) base[titleField.key] = p.name.slice(0, titleField.maxlength||120);
     if(fields.some(f=>f.key==='condicao')) base.condicao = 'Novo';
     if(fields.some(f=>f.key==='tipoAnuncio')) base.tipoAnuncio = 'Clássico';
@@ -4034,6 +4045,16 @@ function resizeImageFile(file, maxSize, quality){
     reader.onerror = ()=>reject(new Error('read error'));
     reader.readAsDataURL(file);
   });
+}
+async function handleBusinessLogoUpload(input){
+  const file = input.files[0];
+  if(!file) return;
+  try{
+    editingBusinessLogo = await resizeImageFile(file, 480, 0.9);
+    document.getElementById('cfgBusinessLogoPreview').innerHTML = `<img src="${editingBusinessLogo}" alt="Prévia da logo" style="width:64px;height:64px;object-fit:cover;border-radius:10px;border:1px solid var(--line);margin-top:8px;display:block;">`;
+  }catch(e){
+    toast('Não consegui processar essa imagem — tente outro arquivo','err');
+  }
 }
 async function handlePhotoUpload(input){
   const file = input.files[0];
@@ -4860,6 +4881,8 @@ let editingExpenses = [];
 let editingTaxes = [];
 let editingMachines = [];
 let editingReserveGoals = [];
+let editingBusinessName = '';
+let editingBusinessLogo = null;
 function renderTaxas(){
   const s = state.settings;
   return `
@@ -4887,7 +4910,15 @@ function renderTaxas(){
 function renderConfiguracoes(){
   const s = state.settings;
   return `
-    <div class="section-title" style="margin-top:0;">Despesas operacionais mensais</div>
+    <div class="section-title" style="margin-top:0;">Marca do negócio</div>
+    <div class="card">
+      <div class="field"><label>Nome do negócio</label><input id="cfgBusinessName" value="${editingBusinessName}" placeholder="Ex: Piece of Geek 3D" oninput="editingBusinessName=this.value"></div>
+      <div class="field"><label>Logo</label><input type="file" accept="image/*" id="cfgBusinessLogoInput" onchange="handleBusinessLogoUpload(this)"></div>
+      <div id="cfgBusinessLogoPreview">${editingBusinessLogo ? `<img src="${editingBusinessLogo}" alt="Logo atual" style="width:64px;height:64px;object-fit:cover;border-radius:10px;border:1px solid var(--line);margin-top:8px;display:block;">` : ''}</div>
+      <div class="field hint" style="margin-top:8px;">Aparece na barra lateral, no catálogo exportado, no recibo de venda e no app instalado no celular. Deixe em branco pra usar o padrão.</div>
+    </div>
+
+    <div class="section-title">Despesas operacionais mensais</div>
     <div class="card">
       <div class="field hint" style="margin-top:0;margin-bottom:10px;">Cada item que você paga todo mês pra manter o negócio rodando: assinaturas, anúncios, ferramentas etc.</div>
       <div id="expenseRows"></div>
@@ -5147,6 +5178,8 @@ function confirmTaxas(){
 }
 function confirmConfiguracoes(){
   const s = state.settings;
+  s.businessName = document.getElementById('cfgBusinessName').value.trim();
+  s.businessLogo = editingBusinessLogo;
   s.expenses = editingExpenses.filter(e=>e.name && e.name.trim());
   s.taxes = editingTaxes.filter(t=>t.name && t.name.trim());
   s.pixKey = document.getElementById('cfgPixKey').value.trim();
@@ -5160,7 +5193,7 @@ function confirmConfiguracoes(){
   s.printHoursPerDay = parseFloat(document.getElementById('cfgPrintHours').value)||8;
   s.machines = editingMachines.filter(m=>m.name && m.name.trim());
   s.reserveGoals = editingReserveGoals.filter(g=>g.name && g.name.trim());
-  saveSettings(); toast('Configurações salvas'); renderContent();
+  saveSettings(); toast('Configurações salvas'); render();
 }
 function openCloseMonthModal(){
   const { plan, leftover } = previewCloseMonth(currentMonth);
@@ -5226,7 +5259,40 @@ function closeModal(){
 document.getElementById('overlay').addEventListener('click', (e)=>{ if(e.target.id==='overlay') closeModal(); });
 document.addEventListener('keydown', (e)=>{ if(e.key==='Escape' && document.getElementById('overlay').classList.contains('show')) closeModal(); });
 
+function handleOnboardingLogoUpload(input){
+  const file = input.files[0];
+  if(!file) return;
+  resizeImageFile(file, 480, 0.9).then(dataUri=>{
+    editingBusinessLogo = dataUri;
+    const el = document.getElementById('obLogoPreview');
+    if(el) el.innerHTML = `<img src="${dataUri}" alt="Prévia da logo" style="width:72px;height:72px;object-fit:cover;border-radius:10px;border:1px solid var(--line);margin-top:8px;display:block;">`;
+  }).catch(()=>{ toast('Não consegui processar essa imagem — tente outro arquivo','err'); });
+}
+function skipOnboardingBrand(){
+  state.settings.businessName = state.settings.businessName || 'Piece of Geek 3D';
+  saveSettings(); render(); openOnboardingModal();
+}
+function confirmOnboardingBrand(){
+  const name = document.getElementById('obBusinessName').value.trim();
+  state.settings.businessName = name || 'Piece of Geek 3D';
+  state.settings.businessLogo = editingBusinessLogo;
+  saveSettings(); render(); openOnboardingModal();
+}
 function openOnboardingModal(){
+  if(!state.settings.businessName){
+    editingBusinessLogo = state.settings.businessLogo || null;
+    showModal('Vamos começar', `
+      <div class="field hint" style="margin-bottom:16px;">Antes de tudo: como se chama o seu negócio? O nome e a logo aparecem na barra lateral, no catálogo que você manda pro cliente, no recibo de venda e no app instalado no celular — dá pra trocar depois em Configurações.</div>
+      <div class="field"><label>Nome do negócio</label><input id="obBusinessName" placeholder="Ex: Piece of Geek 3D"></div>
+      <div class="field"><label>Logo (opcional)</label><input type="file" accept="image/*" id="obLogoInput" onchange="handleOnboardingLogoUpload(this)"></div>
+      <div id="obLogoPreview">${editingBusinessLogo ? `<img src="${editingBusinessLogo}" alt="Prévia da logo" style="width:72px;height:72px;object-fit:cover;border-radius:10px;border:1px solid var(--line);margin-top:8px;display:block;">` : ''}</div>
+      <div class="modal-actions">
+        <button class="btn ghost" onclick="skipOnboardingBrand()">Pular por agora</button>
+        <button class="btn primary" onclick="confirmOnboardingBrand()">Salvar e continuar</button>
+      </div>
+    `);
+    return;
+  }
   showModal('Vamos configurar seu negócio', `
     <div class="field hint" style="margin-bottom:16px;">Essa é a ordem que faz os números baterem desde a primeira venda. Pode seguir na sequência ou fechar e voltar quando quiser — o link fica no rodapé do menu.</div>
     <div style="display:flex;flex-direction:column;gap:10px;">
@@ -5533,6 +5599,8 @@ function openResetModal(){
 }
 function blankSettings(){
   const s = seedData().settings;
+  s.businessName = '';
+  s.businessLogo = null;
   s.machines = [];
   s.expenses = [];
   s.investments = [];
