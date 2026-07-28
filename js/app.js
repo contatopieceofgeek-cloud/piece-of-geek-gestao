@@ -1,5 +1,5 @@
 /* ===================== STATE ===================== */
-let state = { materials: [], products: [], sales: [], orders: [], customers: [], printFailures: [], listings: [], settings: {} };
+let state = { materials: [], products: [], sales: [], orders: [], customers: [], printFailures: [], listings: [], customOrders: [], settings: {} };
 let currentTab = 'dashboard';
 let currentMonth;
 let currentYear = new Date().getFullYear();
@@ -181,6 +181,60 @@ function migratePrintFailures(list){
   list.forEach(f=>{
     if(!f.outcome) f.outcome = 'failure';
     if(f.qty==null) f.qty = 1;
+  });
+  return list;
+}
+function migrateCustomOrders(list){
+  list.forEach(o=>{
+    if(!o.filaments || !o.filaments.length) o.filaments = [];
+    if(!Array.isArray(o.laborActions)) o.laborActions = [];
+    if(!Array.isArray(o.toolsUsed)) o.toolsUsed = [];
+    if(o.bubbleWrapM==null) o.bubbleWrapM = 0;
+    if(o.tapeM==null) o.tapeM = 0;
+    if(o.boxType==null) o.boxType = '';
+    if(o.failureMarginPct==null) o.failureMarginPct = 0.10;
+    if(o.practicedPrice==null) o.practicedPrice = 0;
+    if(!o.modelOrigin) o.modelOrigin = 'proprio';
+    if(o.modelLicense==null) o.modelLicense = '';
+    if(o.modelSourceUrl==null) o.modelSourceUrl = '';
+    if(o.modelFileName==null) o.modelFileName = '';
+    if(o.orderNumber==null) o.orderNumber = '';
+    if(o.orderDate==null) o.orderDate = todayStr();
+    if(o.customerId==null) o.customerId = '';
+    if(o.qty==null) o.qty = 1;
+    if(o.sizeLabel==null) o.sizeLabel = '';
+    if(o.pieceText==null) o.pieceText = '';
+    if(o.baseColor==null) o.baseColor = '';
+    if(o.detailColor==null) o.detailColor = '';
+    if(o.finish==null) o.finish = '';
+    if(o.deliveryDate==null) o.deliveryDate = '';
+    if(o.depositPaid==null) o.depositPaid = 0;
+    if(o.approved==null) o.approved = false;
+    if(o.approvalDate==null) o.approvalDate = '';
+    if(o.approvedBy==null) o.approvedBy = '';
+    if(o.printDate==null) o.printDate = '';
+    if(o.nozzleTempC==null) o.nozzleTempC = 0;
+    if(o.bedTempC==null) o.bedTempC = 0;
+    if(o.layerHeightMm==null) o.layerHeightMm = 0;
+    if(o.nozzleDiameterMm==null) o.nozzleDiameterMm = 0.4;
+    if(o.walls==null) o.walls = 0;
+    if(o.infillPct==null) o.infillPct = 0;
+    if(o.infillPattern==null) o.infillPattern = '';
+    if(o.printSpeedMmS==null) o.printSpeedMmS = 0;
+    if(o.orientation==null) o.orientation = '';
+    if(!o.supports) o.supports = 'nao';
+    if(o.brimRaft==null) o.brimRaft = '';
+    if(o.colorChangeLayer==null) o.colorChangeLayer = '';
+    if(o.colorChangeHeightMm==null) o.colorChangeHeightMm = '';
+    if(o.realWeightG==null) o.realWeightG = 0;
+    if(o.realTimeH==null) o.realTimeH = 0;
+    if(o.realCost==null) o.realCost = 0;
+    if(o.realObservation==null) o.realObservation = '';
+    if(o.result==null) o.result = '';
+    if(o.failurePctReason==null) o.failurePctReason = '';
+    if(o.postProcessingDone==null) o.postProcessingDone = '';
+    ['checkTextConferred','checkNoLayerFailure','checkBurrRemoved','checkHoleFree','checkPieceClean','checkPackaged'].forEach(k=>{ if(o[k]==null) o[k] = false; });
+    if(!o.createdAt) o.createdAt = new Date().toISOString();
   });
   return list;
 }
@@ -459,10 +513,10 @@ async function storageSet(key, value){
 
 async function applyLoadedState(){
   try{
-    const [m,p,s,o,cu,c,pf,li] = await Promise.all([
-      storageGet('materials'), storageGet('products'), storageGet('sales'), storageGet('orders'), storageGet('customers'), storageGet('settings'), storageGet('printFailures'), storageGet('listings'),
+    const [m,p,s,o,cu,c,pf,li,co] = await Promise.all([
+      storageGet('materials'), storageGet('products'), storageGet('sales'), storageGet('orders'), storageGet('customers'), storageGet('settings'), storageGet('printFailures'), storageGet('listings'), storageGet('customOrders'),
     ]);
-    if(!m && !p && !s && !o && !cu && !c && !pf && !li){
+    if(!m && !p && !s && !o && !cu && !c && !pf && !li && !co){
       state = seedData();
       await saveAll();
     } else {
@@ -474,6 +528,7 @@ async function applyLoadedState(){
       state.customers = cu ? JSON.parse(cu) : [];
       state.printFailures = pf ? migratePrintFailures(JSON.parse(pf)) : [];
       state.listings = li ? JSON.parse(li) : [];
+      state.customOrders = co ? migrateCustomOrders(JSON.parse(co)) : [];
       const parsedSettings = c ? migrateSettings(JSON.parse(c)) : null;
       state.settings = parsedSettings ? Object.assign({}, seed.settings, parsedSettings) : seed.settings;
       if(!state.settings.platforms || !state.settings.platforms.length) state.settings.platforms = seed.settings.platforms;
@@ -512,8 +567,9 @@ async function saveOrders(){ const ok = await storageSet('orders', JSON.stringif
 async function savePrintFailures(){ const ok = await storageSet('printFailures', JSON.stringify(state.printFailures)); if(!ok) toast('Erro ao salvar falhas de impressão','err'); }
 async function saveListings(){ const ok = await storageSet('listings', JSON.stringify(state.listings)); if(!ok) toast('Erro ao salvar anúncios','err'); }
 async function saveCustomers(){ const ok = await storageSet('customers', JSON.stringify(state.customers)); if(!ok) toast('Erro ao salvar clientes','err'); }
+async function saveCustomOrders(){ const ok = await storageSet('customOrders', JSON.stringify(state.customOrders)); if(!ok) toast('Erro ao salvar personalizados','err'); }
 async function saveSettings(){ const ok = await storageSet('settings', JSON.stringify(state.settings)); if(!ok) toast('Erro ao salvar configurações','err'); }
-async function saveAll(){ await Promise.all([saveMaterials(),saveProducts(),saveSales(),saveOrders(),saveCustomers(),savePrintFailures(),saveListings(),saveSettings()]); }
+async function saveAll(){ await Promise.all([saveMaterials(),saveProducts(),saveSales(),saveOrders(),saveCustomers(),savePrintFailures(),saveListings(),saveCustomOrders(),saveSettings()]); }
 
 /* ===================== TOAST ===================== */
 function toast(msg,type=''){
@@ -798,6 +854,7 @@ function render(){
         ${navItem('vendas','Vendas')}
         ${navItem('clientes','Clientes')}
         ${navItem('produtos','Produtos')}
+        ${navItem('personalizados','Personalizados')}
         ${navItem('anuncios','Anúncios')}
         ${navItem('estoque','Estoque',lowStockMaterials().length)}
         ${navItem('calculo','Cálculo')}
@@ -844,6 +901,7 @@ const NAV_ICON_PATHS = {
   vendas: '<polyline points="3,13 8,8 11.5,11.5 17,5"></polyline><polyline points="12.5,5 17,5 17,9.5"></polyline>',
   clientes: '<circle cx="7" cy="6.5" r="2.7"></circle><path d="M2 17c0-3 2.2-5 5-5s5 2 5 5"></path><circle cx="14.3" cy="7.5" r="2.1"></circle><path d="M13 12.4c2.2.3 3.8 2.1 3.8 4.6"></path>',
   produtos: '<path d="M10 2.5l7 4v7l-7 4-7-4v-7z"></path><polyline points="3,6.5 10,10.5 17,6.5"></polyline><line x1="10" y1="10.5" x2="10" y2="17.5"></line>',
+  personalizados: '<rect x="3" y="8.5" width="14" height="8.5" rx="1.2"></rect><rect x="2" y="5.8" width="16" height="3" rx="1"></rect><line x1="10" y1="5.8" x2="10" y2="17"></line><path d="M10 5.8c-1.3-2.8-4.6-2.8-4.6-1c0 1 1.3 1 4.6 1z"></path><path d="M10 5.8c1.3-2.8 4.6-2.8 4.6-1c0 1-1.3 1-4.6 1z"></path>',
   anuncios: '<path d="M10.5 2.5h5A1.5 1.5 0 0 1 17 4v5a1.5 1.5 0 0 1-.44 1.06l-7 7a1.5 1.5 0 0 1-2.12 0l-5-5a1.5 1.5 0 0 1 0-2.12l7-7a1.5 1.5 0 0 1 1.06-.44z"></path><circle cx="13.2" cy="6.8" r="1.1" fill="currentColor" stroke="none"></circle>',
   estoque: '<rect x="2.5" y="3" width="15" height="4" rx="1"></rect><path d="M3.5 7v7a1.5 1.5 0 0 0 1.5 1.5h10a1.5 1.5 0 0 0 1.5-1.5V7"></path><line x1="8" y1="10.5" x2="12" y2="10.5"></line>',
   calculo: '<rect x="4" y="2.5" width="12" height="15" rx="2"></rect><rect x="6" y="4.5" width="8" height="3" rx="0.5"></rect><line x1="6.5" y1="11" x2="9" y2="11"></line><line x1="11" y1="11" x2="13.5" y2="11"></line><line x1="6.5" y1="14" x2="9" y2="14"></line><line x1="11" y1="14" x2="13.5" y2="14"></line>',
@@ -889,7 +947,7 @@ function switchTab(t){
   currentTab=t; closeSidebar(); render();
 }
 function tabTitle(){
-  return {dashboard:'Dashboard',pedidos:'Pedidos',impressao:'Fila de Impressão',vendas:'Vendas',clientes:'Clientes',produtos:'Produtos',anuncios:'Anúncios',estoque:'Estoque',calculo:'Cálculo',caixa:'Caixa',anual:'Anual',taxas:'Taxas',configuracoes:'Configurações'}[currentTab];
+  return {dashboard:'Dashboard',pedidos:'Pedidos',impressao:'Fila de Impressão',vendas:'Vendas',clientes:'Clientes',produtos:'Produtos',personalizados:'Personalizados',anuncios:'Anúncios',estoque:'Estoque',calculo:'Cálculo',caixa:'Caixa',anual:'Anual',taxas:'Taxas',configuracoes:'Configurações'}[currentTab];
 }
 function tabSubtitle(){
   return {
@@ -899,6 +957,7 @@ function tabSubtitle(){
     vendas:'Registro diário de vendas e recebimentos',
     clientes:'Quem compra de você, e quanto',
     produtos:'Calculadora de precificação e catálogo',
+    personalizados:'Projetos e encomendas sob medida — sem marketplace, ficha por item',
     anuncios:'Rascunhos de anúncio pra Mercado Livre e Shopee, por produto',
     estoque:'Matéria-prima e produtos prontos',
     calculo:'Como o app calcula depreciação, energia e mão de obra',
@@ -914,6 +973,7 @@ function renderTopbarActions(){
   else if(currentTab==='vendas') el.innerHTML = `<button class="btn ghost" onclick="switchTab('taxas')">Taxas das plataformas</button> <button class="btn ghost" onclick="exportSalesExcel()">Exportar</button> <button class="btn primary" onclick="openSaleModal()">+ Nova venda</button>`;
   else if(currentTab==='clientes') el.innerHTML = `<button class="btn ghost" onclick="exportCustomersExcel()">Exportar</button> <button class="btn primary" onclick="openCustomerModal()">+ Novo cliente</button>`;
   else if(currentTab==='produtos') el.innerHTML = `<button class="btn ghost" onclick="openQuickQuoteModal()">Orçamento rápido</button> <button class="btn ghost" onclick="openKitModal()">Criar kit</button> <button class="btn ghost" onclick="exportCatalogImage()">Catálogo (imagem)</button> <button class="btn ghost" onclick="exportCatalogPDF()">Catálogo (PDF, 1 pág./produto)</button> <button class="btn primary" onclick="openProductModal()">+ Novo produto</button>`;
+  else if(currentTab==='personalizados') el.innerHTML = `<button class="btn primary" onclick="openCustomOrderModal()">+ Nova encomenda personalizada</button>`;
   else if(currentTab==='anuncios') el.innerHTML = '';
   else if(currentTab==='estoque') el.innerHTML = stockTab==='materiais' ? `<button class="btn primary" onclick="openMaterialModal()">+ Nova matéria-prima</button>` : `<button class="btn primary" onclick="switchTab('impressao')">Ir pra Fila de Impressão</button>`;
   else if(currentTab==='impressao') el.innerHTML = `<button class="btn primary" onclick="openPrintJobModal()">+ Nova impressão</button>`;
@@ -931,6 +991,7 @@ function renderContent(){
   else if(currentTab==='vendas') c.innerHTML = renderVendas();
   else if(currentTab==='clientes') c.innerHTML = renderClientes();
   else if(currentTab==='produtos') c.innerHTML = renderProdutos();
+  else if(currentTab==='personalizados') c.innerHTML = renderPersonalizados();
   else if(currentTab==='anuncios') c.innerHTML = renderAnuncios();
   else if(currentTab==='estoque') c.innerHTML = renderEstoque();
   else if(currentTab==='calculo') c.innerHTML = renderCalculo();
@@ -3883,6 +3944,7 @@ function deleteProduct(id){
   saveProducts(); toast('Produto excluído'); renderContent();
 }
 function openProductModal(id){
+  currentPreviewFn = updateProductPreview;
   const editing = !!id;
   const filamentOpts = state.materials.filter(m=>m.category==='Filamento');
   const boxOpts = state.materials.filter(m=>m.category==='Embalagem' && m.isBox);
@@ -4089,16 +4151,22 @@ function renderPhotoPreview(){
        </div>`
     : `<div style="font-size:11.5px;color:var(--text-faint);margin-top:6px;">Nenhuma foto — opcional</div>`;
 }
+// As linhas de filamento/mão de obra/ferramentas são compartilhadas entre o
+// modal de Produtos e o de Personalizados — currentPreviewFn aponta pra qual
+// preview atualizar, em vez de chamar updateProductPreview() direto (que só
+// existe no modal de Produtos e quebraria no de Personalizados).
+let currentPreviewFn = null;
+function refreshCurrentPreview(){ if(currentPreviewFn) currentPreviewFn(); }
 function renderFilamentRows(){
   const el = document.getElementById('filamentRows');
   if(!el) return;
   const filamentOptions = state.materials.filter(m=>m.category==='Filamento');
   el.innerHTML = editingFilaments.map((f,i)=>`
     <div style="display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr) 28px;gap:8px;align-items:center;margin-bottom:8px;">
-      <select style="min-width:0;" onchange="editingFilaments[${i}].materialName=this.value; updateProductPreview();">
+      <select style="min-width:0;" onchange="editingFilaments[${i}].materialName=this.value; refreshCurrentPreview();">
         ${filamentOptions.map(fo=>`<option value="${fo.name}" ${f.materialName===fo.name?'selected':''}>${fo.name}</option>`).join('')}
       </select>
-      <input type="number" step="0.01" value="${f.weightG}" placeholder="peso (g)" style="min-width:0;" oninput="editingFilaments[${i}].weightG=parseFloat(this.value)||0; updateProductPreview();">
+      <input type="number" step="0.01" value="${f.weightG}" placeholder="peso (g)" style="min-width:0;" oninput="editingFilaments[${i}].weightG=parseFloat(this.value)||0; refreshCurrentPreview();">
       <button class="btn ghost sm" title="Remover" style="padding:6px 8px;" onclick="removeFilamentRow(${i})">×</button>
     </div>
   `).join('');
@@ -4107,21 +4175,21 @@ function addFilamentRow(){
   const firstFilament = (state.materials.find(m=>m.category==='Filamento')||{}).name||'PLA';
   editingFilaments.push({materialName:firstFilament, weightG:0});
   renderFilamentRows();
-  updateProductPreview();
+  refreshCurrentPreview();
 }
 function removeFilamentRow(i){
   if(editingFilaments.length<=1){ toast('O produto precisa de ao menos um filamento','err'); return; }
   editingFilaments.splice(i,1);
   renderFilamentRows();
-  updateProductPreview();
+  refreshCurrentPreview();
 }
 function renderLaborActionRows(){
   const el = document.getElementById('laborActionRows');
   if(!el) return;
   el.innerHTML = editingLaborActions.map((a,i)=>`
     <div style="display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr) 28px;gap:8px;align-items:center;margin-bottom:8px;">
-      <input list="laborActionOptions" value="${a.action}" placeholder="Ação (ex: Lixar)" style="min-width:0;" oninput="editingLaborActions[${i}].action=this.value; updateProductPreview();">
-      <input type="number" step="1" value="${a.minutes}" placeholder="minutos" style="min-width:0;" oninput="editingLaborActions[${i}].minutes=parseFloat(this.value)||0; updateProductPreview();">
+      <input list="laborActionOptions" value="${a.action}" placeholder="Ação (ex: Lixar)" style="min-width:0;" oninput="editingLaborActions[${i}].action=this.value; refreshCurrentPreview();">
+      <input type="number" step="1" value="${a.minutes}" placeholder="minutos" style="min-width:0;" oninput="editingLaborActions[${i}].minutes=parseFloat(this.value)||0; refreshCurrentPreview();">
       <button class="btn ghost sm" title="Remover" style="padding:6px 8px;" onclick="removeLaborActionRow(${i})">×</button>
     </div>
   `).join('');
@@ -4129,12 +4197,12 @@ function renderLaborActionRows(){
 function addLaborActionRow(){
   editingLaborActions.push({action:'', minutes:0});
   renderLaborActionRows();
-  updateProductPreview();
+  refreshCurrentPreview();
 }
 function removeLaborActionRow(i){
   editingLaborActions.splice(i,1);
   renderLaborActionRows();
-  updateProductPreview();
+  refreshCurrentPreview();
 }
 function renderToolsUsedRows(){
   const el = document.getElementById('toolsUsedRows');
@@ -4146,10 +4214,10 @@ function renderToolsUsedRows(){
   }
   el.innerHTML = editingToolsUsed.map((t,i)=>`
     <div style="display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr) 28px;gap:8px;align-items:center;margin-bottom:8px;">
-      <select style="min-width:0;" onchange="editingToolsUsed[${i}].toolId=this.value; updateProductPreview();">
+      <select style="min-width:0;" onchange="editingToolsUsed[${i}].toolId=this.value; refreshCurrentPreview();">
         ${toolOptions.map(to=>`<option value="${to.id}" ${t.toolId===to.id?'selected':''}>${to.name}</option>`).join('')}
       </select>
-      <input type="number" step="1" value="${t.uses}" placeholder="usos" style="min-width:0;" oninput="editingToolsUsed[${i}].uses=parseFloat(this.value)||0; updateProductPreview();">
+      <input type="number" step="1" value="${t.uses}" placeholder="usos" style="min-width:0;" oninput="editingToolsUsed[${i}].uses=parseFloat(this.value)||0; refreshCurrentPreview();">
       <button class="btn ghost sm" title="Remover" style="padding:6px 8px;" onclick="removeToolsUsedRow(${i})">×</button>
     </div>
   `).join('');
@@ -4159,12 +4227,12 @@ function addToolsUsedRow(){
   if(toolOptions.length===0){ toast('Cadastre uma ferramenta em Estoque primeiro','err'); return; }
   editingToolsUsed.push({toolId:toolOptions[0].id, uses:1});
   renderToolsUsedRows();
-  updateProductPreview();
+  refreshCurrentPreview();
 }
 function removeToolsUsedRow(i){
   editingToolsUsed.splice(i,1);
   renderToolsUsedRows();
-  updateProductPreview();
+  refreshCurrentPreview();
 }
 function productCategorySuggestions(){
   return Array.from(new Set(state.products.map(p=>p.category).filter(Boolean))).sort((a,b)=>a.localeCompare(b,'pt-BR'));
@@ -4339,6 +4407,470 @@ function confirmProduct(id){
   saveProducts();
   toast(id?'Produto atualizado':'Produto criado');
   closeModal(); renderContent();
+}
+
+/* ===================== PERSONALIZADOS ===================== */
+// Área separada de Produtos pra projetos/encomendas sob medida: mesmo motor de
+// custo (calcProduct), sem a parte de marketplace (ML/Shopee), com campos de
+// pedido/cliente e a ficha técnica de impressão — export vira uma peça de cada
+// vez, não o catálogo inteiro. Ficha inspirada no modelo em papel já usado.
+let personalizadosFilter = { search:'' };
+function customerNameFor(o){
+  if(o.customerId){ const cu = state.customers.find(c=>c.id===o.customerId); if(cu) return cu.name; }
+  return o.customerName || 'Avulso';
+}
+function nextCustomOrderNumber(){
+  const nums = state.customOrders.map(o=>parseInt((o.orderNumber||'').replace(/\D/g,''),10)).filter(n=>!isNaN(n));
+  const next = (nums.length ? Math.max(...nums) : 0) + 1;
+  return String(next).padStart(4,'0');
+}
+function renderPersonalizados(){
+  if(state.customOrders.length===0) return `<div class="card">${emptyState('Nenhuma encomenda personalizada cadastrada ainda. Clique em "+ Nova encomenda personalizada".')}</div>`;
+  let list = state.customOrders.slice().sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||''));
+  if(personalizadosFilter.search){
+    const q = personalizadosFilter.search.toLowerCase();
+    list = list.filter(o=>(o.name||'').toLowerCase().includes(q) || (o.orderNumber||'').toLowerCase().includes(q) || customerNameFor(o).toLowerCase().includes(q));
+  }
+  const resultBadge = (r) => r==='ok' ? '<span class="badge ok">OK</span>' : r==='falha_parcial' ? '<span class="badge warn">Falha parcial</span>' : r==='falha_total' ? '<span class="badge bad">Falha total</span>' : '<span class="badge mut">—</span>';
+  const rowHtml = (o) => {
+    const c = calcProduct(o);
+    return `<tr>
+      <td data-label="Foto">${o.photo ? `<img src="${o.photo}" alt="${o.name}" style="width:36px;height:36px;object-fit:cover;border-radius:6px;">` : `<div style="width:36px;height:36px;border-radius:6px;background:var(--panel-2);"></div>`}</td>
+      <td data-label="Peça">${o.name||'(sem nome)'}${o.orderNumber ? `<div style="font-size:11px;color:var(--text-faint);margin-top:2px;">Pedido ${o.orderNumber}</div>` : ''}</td>
+      <td data-label="Cliente">${customerNameFor(o)}</td>
+      <td class="right num" data-label="Qtd">${o.qty||1}</td>
+      <td class="right num" data-label="Custo total">${brl(c.totalCost)}</td>
+      <td class="right num" data-label="Valor total">${brl(c.practicedPrice)}</td>
+      <td class="right num" data-label="Margem" style="color:${c.marginValue<0?'var(--red)':'var(--green)'}">${pct(c.marginPct)}</td>
+      <td data-label="Resultado">${resultBadge(o.result)}</td>
+      <td class="right"><button class="btn ghost sm" onclick="openCustomOrderModal('${o.id}')">Editar</button> <button class="btn ghost sm" onclick="exportCustomOrderPDF('${o.id}')">Ficha</button> <button class="btn ghost sm" onclick="deleteCustomOrder('${o.id}')">Excluir</button></td>
+    </tr>`;
+  };
+  return `
+    <div class="filter-bar">
+      <div class="field"><label>Buscar</label><input value="${personalizadosFilter.search}" placeholder="Nome, pedido ou cliente..." oninput="personalizadosFilter.search=this.value; renderContent();"></div>
+      <div class="field hint" style="padding-top:9px;">${list.length} de ${state.customOrders.length} encomenda(s)</div>
+    </div>
+    <div class="tbl-wrap tbl-responsive"><table>
+      <thead><tr><th></th><th>Peça</th><th>Cliente</th><th class="right">Qtd</th><th class="right">Custo total</th><th class="right">Valor total</th><th class="right">Margem</th><th>Resultado</th><th></th></tr></thead>
+      <tbody>${list.map(rowHtml).join('')}</tbody>
+    </table></div>
+  `;
+}
+function deleteCustomOrder(id){
+  const o = state.customOrders.find(x=>x.id===id);
+  if(!o) return;
+  if(!confirm(`Excluir a encomenda "${o.name}"${o.orderNumber?' (Pedido '+o.orderNumber+')':''}? Essa ação não pode ser desfeita.`)) return;
+  state.customOrders = state.customOrders.filter(x=>x.id!==id);
+  saveCustomOrders(); toast('Encomenda excluída'); renderContent();
+}
+function toggleCoCustomerField(val){
+  const el = document.getElementById('coCustomerNameWrap');
+  if(el) el.style.display = val ? 'none' : 'block';
+}
+function openCustomOrderModal(id){
+  currentPreviewFn = updateCustomOrderPreview;
+  const editing = !!id;
+  const filamentOpts = state.materials.filter(m=>m.category==='Filamento');
+  const boxOpts = state.materials.filter(m=>m.category==='Embalagem' && m.isBox);
+  const machineOpts = state.settings.machines||[];
+  if(filamentOpts.length===0 || boxOpts.length===0){
+    toast('Cadastre ao menos um filamento e uma caixa em Estoque antes de criar uma encomenda personalizada', 'err');
+    return;
+  }
+  if(machineOpts.length===0){
+    toast('Cadastre ao menos uma impressora em Configurações antes de criar uma encomenda personalizada', 'err');
+    return;
+  }
+  const o = editing ? state.customOrders.find(x=>x.id===id) : {
+    name:'', filaments:[{materialName:filamentOpts[0].name,weightG:100}], timeH:3, bubbleWrapM:0.5, tapeM:0.5, boxType:boxOpts[0].name,
+    failureMarginPct:0.10, practicedPrice:0, machineId:machineOpts[0].id, modelOrigin:'proprio', supports:'nao',
+    qty:1, orderNumber: nextCustomOrderNumber(), orderDate: todayStr(), nozzleDiameterMm:0.4,
+  };
+  editingFilaments = JSON.parse(JSON.stringify(o.filaments && o.filaments.length ? o.filaments : [{materialName:filamentOpts[0].name,weightG:100}]));
+  editingLaborActions = JSON.parse(JSON.stringify(o.laborActions||[]));
+  editingToolsUsed = JSON.parse(JSON.stringify(o.toolsUsed||[]));
+  editingPhotoData = o.photo || null;
+  showModal(editing?'Editar encomenda personalizada':'Nova encomenda personalizada', `
+    <div class="section-title" style="margin-top:0;">A peça</div>
+    <div class="field"><label>Nome da peça</label><input id="pName" value="${o.name||''}" placeholder="Ex: Topo de bolo personalizado"></div>
+    <div class="field"><label>Categoria (opcional)</label>
+      <select id="pCategory" onchange="toggleNewCategoryInput(this.value)">
+        <option value="">Sem categoria</option>
+        ${productCategorySuggestions().map(c=>`<option value="${c}" ${o.category===c?'selected':''}>${c}</option>`).join('')}
+        <option value="__new__" ${o.category && !productCategorySuggestions().includes(o.category)?'selected':''}>+ Nova categoria...</option>
+      </select>
+      <input id="pCategoryNew" placeholder="Nome da nova categoria" style="margin-top:6px;display:${o.category && !productCategorySuggestions().includes(o.category)?'block':'none'};" value="${o.category && !productCategorySuggestions().includes(o.category)?o.category:''}">
+    </div>
+    <div class="field"><label>Foto (opcional)</label><input type="file" accept="image/*" id="pPhotoInput" onchange="handlePhotoUpload(this)"></div>
+    <div id="pPhotoPreview"></div>
+
+    <div class="field" style="margin-bottom:6px;"><label>Filamentos usados nessa impressão</label></div>
+    <div id="filamentRows"></div>
+    <button class="btn ghost sm" style="margin-bottom:14px;" onclick="addFilamentRow()">+ Adicionar filamento</button>
+
+    <div class="row2">
+      <div class="field"><label>Impressora usada</label><select id="pMachine" onchange="refreshCurrentPreview()">
+        ${machineOpts.map(m=>`<option value="${m.id}" ${(o.machineId||machineOpts[0].id)===m.id?'selected':''}>${m.name}</option>`).join('')}
+      </select></div>
+      <div class="field"><label>Tipo de caixa</label><select id="pBox" onchange="refreshCurrentPreview()">
+        ${boxOpts.map(b=>`<option value="${b.name}" ${o.boxType===b.name?'selected':''}>${b.name}</option>`).join('')}
+      </select></div>
+    </div>
+    <div class="row2">
+      <div class="field"><label>Plástico bolha (m)</label><input type="number" id="pBubble" value="${o.bubbleWrapM||0}" step="0.1" oninput="refreshCurrentPreview()"></div>
+      <div class="field"><label>Tempo impressão</label>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <input type="number" id="pTimeH" value="${Math.floor(o.timeH||0)}" min="0" step="1" placeholder="h" style="width:0;flex:1;" oninput="refreshCurrentPreview()">
+          <span style="font-size:12px;color:var(--text-faint);">h</span>
+          <input type="number" id="pTimeMin" value="${Math.round(((o.timeH||0)%1)*60)}" min="0" max="59" step="1" placeholder="min" style="width:0;flex:1;" oninput="refreshCurrentPreview()">
+          <span style="font-size:12px;color:var(--text-faint);">min</span>
+        </div>
+      </div>
+    </div>
+    <div class="row2">
+      <div class="field"><label>Fita adesiva usada (m)</label><input type="number" id="pTape" value="${o.tapeM||0}" step="0.1" oninput="refreshCurrentPreview()"></div>
+      <div class="field"><label>Margem de falha (%)</label><input type="number" id="pFail" value="${(o.failureMarginPct*100)||10}" step="1" oninput="refreshCurrentPreview()"></div>
+    </div>
+
+    <div class="field" style="margin-bottom:6px;"><label>Mão de obra (ações e minutos de cada uma)</label></div>
+    <div id="laborActionRows"></div>
+    <button class="btn ghost sm" style="margin-bottom:14px;" onclick="addLaborActionRow()">+ Adicionar ação</button>
+    ${laborActionOptionsHtml()}
+
+    <div class="field" style="margin-bottom:6px;"><label>Ferramentas usadas (e quantos usos cada uma consome)</label></div>
+    <div id="toolsUsedRows"></div>
+    <button class="btn ghost sm" style="margin-bottom:14px;" onclick="addToolsUsedRow()">+ Adicionar ferramenta</button>
+
+    <div class="section-title">Pedido e cliente</div>
+    <div class="row3">
+      <div class="field"><label>Pedido nº</label><input id="coOrderNumber" value="${o.orderNumber||''}"></div>
+      <div class="field"><label>Data do pedido</label><input type="date" id="coOrderDate" value="${o.orderDate||todayStr()}"></div>
+      <div class="field"><label>Quantidade</label><input type="number" id="coQty" value="${o.qty||1}" min="1" step="1"></div>
+    </div>
+    <div class="field"><label>Cliente</label>
+      <select id="coCustomerId" onchange="toggleCoCustomerField(this.value)">
+        <option value="">Avulso / digitar nome</option>
+        ${state.customers.map(cu=>`<option value="${cu.id}" ${o.customerId===cu.id?'selected':''}>${cu.name}</option>`).join('')}
+      </select>
+    </div>
+    <div class="field" id="coCustomerNameWrap" style="display:${o.customerId?'none':'block'};"><label>Nome do cliente (se avulso)</label><input id="coCustomerName" value="${o.customerName||''}"></div>
+    <div class="field"><label>Tamanho (mm)</label><input id="coSizeLabel" value="${o.sizeLabel||''}" placeholder="Ex: 80 x 60"></div>
+    <div class="field"><label>Texto que vai na peça</label><textarea id="coPieceText" rows="2">${o.pieceText||''}</textarea></div>
+    <div class="row3">
+      <div class="field"><label>Cor da base</label><input id="coBaseColor" value="${o.baseColor||''}"></div>
+      <div class="field"><label>Cor do texto/detalhe</label><input id="coDetailColor" value="${o.detailColor||''}"></div>
+      <div class="field"><label>Acabamento</label><input id="coFinish" value="${o.finish||''}" placeholder="Ex: fosco, brilhoso"></div>
+    </div>
+    <div class="row2">
+      <div class="field"><label>Entrega prevista</label><input type="date" id="coDeliveryDate" value="${o.deliveryDate||''}"></div>
+      <div class="field"><label>Sinal pago (R$)</label><input type="number" id="coDepositPaid" value="${o.depositPaid||''}" step="0.01" placeholder="0,00"></div>
+    </div>
+    <div class="row2">
+      <div class="field"><label>Margem de lucro desejada (%)</label><input type="number" id="pMargin" value="${(o.desiredMarginPct!=null ? o.desiredMarginPct : calcProduct(o).desiredMarginPct).toFixed(0)}" step="1" oninput="document.getElementById('pPrice').dataset.touched=''; refreshCurrentPreview()"></div>
+      <div class="field"><label>Valor total combinado (R$)</label><input type="number" id="pPrice" value="${o.practicedPrice||''}" step="0.01" placeholder="deixe em branco = preço sugerido" oninput="this.dataset.touched='1'; refreshCurrentPreview()"></div>
+    </div>
+    <div class="helper-block" id="customOrderPreview"></div>
+    <div class="field" style="margin-top:10px;"><label style="display:flex;align-items:center;gap:8px;font-weight:400;"><input type="checkbox" id="coApproved" ${o.approved?'checked':''} style="width:auto;"> Conferi o texto, as cores e o tamanho — cliente autorizou a impressão</label></div>
+    <div class="row2">
+      <div class="field"><label>Data da aprovação</label><input type="date" id="coApprovalDate" value="${o.approvalDate||''}"></div>
+      <div class="field"><label>Confirmado por</label><input id="coApprovedBy" value="${o.approvedBy||''}"></div>
+    </div>
+
+    <div class="section-title">Ficha técnica — 1. Arquivo e licença</div>
+    <div class="row2">
+      <div class="field"><label>Nome do arquivo</label><input id="coModelFileName" value="${o.modelFileName||''}" placeholder="Ex: topo_bolo_v2.3mf"></div>
+      <div class="field"><label>Data de impressão</label><input type="date" id="coPrintDate" value="${o.printDate||''}"></div>
+    </div>
+    <div class="field"><label>Origem do modelo 3D</label>
+      <select id="pModelOrigin" onchange="toggleModelLicenseFields(this.value)">
+        <option value="proprio" ${o.modelOrigin!=='terceiro'?'selected':''}>Próprio (desenhei eu mesmo)</option>
+        <option value="terceiro" ${o.modelOrigin==='terceiro'?'selected':''}>Terceiro (baixado ou comprado)</option>
+      </select>
+    </div>
+    <div id="pModelLicenseBlock" style="display:${o.modelOrigin==='terceiro'?'block':'none'};">
+      <div class="row2">
+        <div class="field"><label>Licença</label><input id="pModelLicense" value="${o.modelLicense||''}" placeholder="Ex: CC0, CC BY, Comprada"></div>
+        <div class="field"><label>Fonte do modelo (URL)</label><input id="pModelSourceUrl" value="${o.modelSourceUrl||''}" placeholder="Link do MakerWorld/Thingiverse/Cults3D..."></div>
+      </div>
+    </div>
+
+    <div class="section-title">2 e 3. Material e perfil de fatiamento</div>
+    <div class="row2">
+      <div class="field"><label>Bico (°C)</label><input type="number" id="coNozzleTempC" value="${o.nozzleTempC||''}" step="1"></div>
+      <div class="field"><label>Temp. mesa (°C)</label><input type="number" id="coBedTempC" value="${o.bedTempC||''}" step="1"></div>
+    </div>
+    <div class="row3">
+      <div class="field"><label>Altura de camada (mm)</label><input type="number" id="coLayerHeightMm" value="${o.layerHeightMm||''}" step="0.01"></div>
+      <div class="field"><label>Diâmetro do bico (mm)</label><input type="number" id="coNozzleDiameterMm" value="${o.nozzleDiameterMm||0.4}" step="0.1"></div>
+      <div class="field"><label>Paredes</label><input type="number" id="coWalls" value="${o.walls||''}" step="1"></div>
+    </div>
+    <div class="row3">
+      <div class="field"><label>Preenchimento (%)</label><input type="number" id="coInfillPct" value="${o.infillPct||''}" step="1"></div>
+      <div class="field"><label>Padrão</label><input id="coInfillPattern" value="${o.infillPattern||''}" placeholder="Ex: grid, gyroid"></div>
+      <div class="field"><label>Velocidade (mm/s)</label><input type="number" id="coPrintSpeedMmS" value="${o.printSpeedMmS||''}" step="1"></div>
+    </div>
+    <div class="row2">
+      <div class="field"><label>Orientação na mesa</label><input id="coOrientation" value="${o.orientation||''}"></div>
+      <div class="field"><label>Suportes</label><select id="coSupports">
+        <option value="nao" ${o.supports!=='sim'?'selected':''}>Não</option>
+        <option value="sim" ${o.supports==='sim'?'selected':''}>Sim</option>
+      </select></div>
+    </div>
+    <div class="field"><label>Brim / raft</label><input id="coBrimRaft" value="${o.brimRaft||''}"></div>
+    <div class="row2">
+      <div class="field"><label>Pausa p/ troca de cor — camada nº</label><input id="coColorChangeLayer" value="${o.colorChangeLayer||''}"></div>
+      <div class="field"><label>Altura (mm)</label><input id="coColorChangeHeightMm" value="${o.colorChangeHeightMm||''}"></div>
+    </div>
+
+    <div class="section-title">4. Estimado × real</div>
+    <div class="row3">
+      <div class="field"><label>Peso real (g)</label><input type="number" id="coRealWeightG" value="${o.realWeightG||''}" step="0.1"></div>
+      <div class="field"><label>Tempo real (h)</label><input type="number" id="coRealTimeH" value="${o.realTimeH||''}" step="0.1"></div>
+      <div class="field"><label>Custo real (R$)</label><input type="number" id="coRealCost" value="${o.realCost||''}" step="0.01"></div>
+    </div>
+    <div class="field"><label>Observação</label><input id="coRealObservation" value="${o.realObservation||''}"></div>
+
+    <div class="section-title">5. Resultado e acabamento</div>
+    <div class="row2">
+      <div class="field"><label>Resultado</label><select id="coResult">
+        <option value="" ${!o.result?'selected':''}>Não informado</option>
+        <option value="ok" ${o.result==='ok'?'selected':''}>OK</option>
+        <option value="falha_parcial" ${o.result==='falha_parcial'?'selected':''}>Falha parcial</option>
+        <option value="falha_total" ${o.result==='falha_total'?'selected':''}>Falha total</option>
+      </select></div>
+      <div class="field"><label>Se falhou — % e motivo</label><input id="coFailurePctReason" value="${o.failurePctReason||''}"></div>
+    </div>
+    <div class="field"><label>Pós-processamento realizado</label><input id="coPostProcessingDone" value="${o.postProcessingDone||''}" placeholder="Ex: lixado, pintado"></div>
+
+    <div class="section-title">6. Conferência antes de embalar</div>
+    <div class="row3">
+      <label style="display:flex;align-items:center;gap:6px;font-weight:400;font-size:12.5px;"><input type="checkbox" id="coCheckTextConferred" ${o.checkTextConferred?'checked':''} style="width:auto;"> Texto conferido</label>
+      <label style="display:flex;align-items:center;gap:6px;font-weight:400;font-size:12.5px;"><input type="checkbox" id="coCheckNoLayerFailure" ${o.checkNoLayerFailure?'checked':''} style="width:auto;"> Sem falha de camada</label>
+      <label style="display:flex;align-items:center;gap:6px;font-weight:400;font-size:12.5px;"><input type="checkbox" id="coCheckBurrRemoved" ${o.checkBurrRemoved?'checked':''} style="width:auto;"> Rebarba removida</label>
+    </div>
+    <div class="row3" style="margin-top:8px;">
+      <label style="display:flex;align-items:center;gap:6px;font-weight:400;font-size:12.5px;"><input type="checkbox" id="coCheckHoleFree" ${o.checkHoleFree?'checked':''} style="width:auto;"> Furo/argola livre</label>
+      <label style="display:flex;align-items:center;gap:6px;font-weight:400;font-size:12.5px;"><input type="checkbox" id="coCheckPieceClean" ${o.checkPieceClean?'checked':''} style="width:auto;"> Peça limpa</label>
+      <label style="display:flex;align-items:center;gap:6px;font-weight:400;font-size:12.5px;"><input type="checkbox" id="coCheckPackaged" ${o.checkPackaged?'checked':''} style="width:auto;"> Embalada</label>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn ghost" onclick="closeModal()">Cancelar</button>
+      <button class="btn primary" onclick="confirmCustomOrder(${editing?`'${id}'`:'null'})">${editing?'Salvar alterações':'Criar encomenda'}</button>
+    </div>
+  `);
+  renderFilamentRows();
+  renderLaborActionRows();
+  renderToolsUsedRows();
+  renderPhotoPreview();
+  updateCustomOrderPreview();
+}
+function readCustomOrderForm(){
+  const catSel = document.getElementById('pCategory').value;
+  const customerId = document.getElementById('coCustomerId').value;
+  return {
+    name: document.getElementById('pName').value.trim(),
+    category: catSel==='__new__' ? document.getElementById('pCategoryNew').value.trim() : catSel,
+    filaments: editingFilaments,
+    boxType: document.getElementById('pBox').value,
+    machineId: document.getElementById('pMachine').value,
+    timeH: (parseFloat(document.getElementById('pTimeH').value)||0) + (parseFloat(document.getElementById('pTimeMin').value)||0)/60,
+    bubbleWrapM: parseFloat(document.getElementById('pBubble').value)||0,
+    tapeM: parseFloat(document.getElementById('pTape').value)||0,
+    failureMarginPct: (parseFloat(document.getElementById('pFail').value)||0)/100,
+    laborActions: editingLaborActions,
+    toolsUsed: editingToolsUsed,
+    desiredMarginPct: parseFloat(document.getElementById('pMargin').value)||0,
+    modelOrigin: document.getElementById('pModelOrigin').value,
+    modelLicense: document.getElementById('pModelLicense').value.trim(),
+    modelSourceUrl: document.getElementById('pModelSourceUrl').value.trim(),
+    modelFileName: document.getElementById('coModelFileName').value.trim(),
+    orderNumber: document.getElementById('coOrderNumber').value.trim(),
+    orderDate: document.getElementById('coOrderDate').value,
+    customerId,
+    customerName: document.getElementById('coCustomerName').value.trim(),
+    qty: parseFloat(document.getElementById('coQty').value)||1,
+    sizeLabel: document.getElementById('coSizeLabel').value.trim(),
+    pieceText: document.getElementById('coPieceText').value,
+    baseColor: document.getElementById('coBaseColor').value.trim(),
+    detailColor: document.getElementById('coDetailColor').value.trim(),
+    finish: document.getElementById('coFinish').value.trim(),
+    deliveryDate: document.getElementById('coDeliveryDate').value,
+    depositPaid: parseFloat(document.getElementById('coDepositPaid').value)||0,
+    approved: document.getElementById('coApproved').checked,
+    approvalDate: document.getElementById('coApprovalDate').value,
+    approvedBy: document.getElementById('coApprovedBy').value.trim(),
+    printDate: document.getElementById('coPrintDate').value,
+    nozzleTempC: parseFloat(document.getElementById('coNozzleTempC').value)||0,
+    bedTempC: parseFloat(document.getElementById('coBedTempC').value)||0,
+    layerHeightMm: parseFloat(document.getElementById('coLayerHeightMm').value)||0,
+    nozzleDiameterMm: parseFloat(document.getElementById('coNozzleDiameterMm').value)||0,
+    walls: parseFloat(document.getElementById('coWalls').value)||0,
+    infillPct: parseFloat(document.getElementById('coInfillPct').value)||0,
+    infillPattern: document.getElementById('coInfillPattern').value.trim(),
+    printSpeedMmS: parseFloat(document.getElementById('coPrintSpeedMmS').value)||0,
+    orientation: document.getElementById('coOrientation').value.trim(),
+    supports: document.getElementById('coSupports').value,
+    brimRaft: document.getElementById('coBrimRaft').value.trim(),
+    colorChangeLayer: document.getElementById('coColorChangeLayer').value.trim(),
+    colorChangeHeightMm: document.getElementById('coColorChangeHeightMm').value.trim(),
+    realWeightG: parseFloat(document.getElementById('coRealWeightG').value)||0,
+    realTimeH: parseFloat(document.getElementById('coRealTimeH').value)||0,
+    realCost: parseFloat(document.getElementById('coRealCost').value)||0,
+    realObservation: document.getElementById('coRealObservation').value.trim(),
+    result: document.getElementById('coResult').value,
+    failurePctReason: document.getElementById('coFailurePctReason').value.trim(),
+    postProcessingDone: document.getElementById('coPostProcessingDone').value.trim(),
+    checkTextConferred: document.getElementById('coCheckTextConferred').checked,
+    checkNoLayerFailure: document.getElementById('coCheckNoLayerFailure').checked,
+    checkBurrRemoved: document.getElementById('coCheckBurrRemoved').checked,
+    checkHoleFree: document.getElementById('coCheckHoleFree').checked,
+    checkPieceClean: document.getElementById('coCheckPieceClean').checked,
+    checkPackaged: document.getElementById('coCheckPackaged').checked,
+  };
+}
+function updateCustomOrderPreview(){
+  const form = readCustomOrderForm();
+  const c = calcProduct(form);
+  document.getElementById('customOrderPreview').innerHTML = `
+    <div class="calc-line"><span>Peso total</span><span>${num(totalWeight(form),0)}g</span></div>
+    <div class="calc-line"><span>Custo material</span><span>${brl(c.materialCost)}</span></div>
+    <div class="calc-line"><span>Custo energia</span><span>${brl(c.energyCost)}</span></div>
+    <div class="calc-line"><span>Embalagem (caixa + bolha + fita)</span><span>${brl(c.embalagemCost)}</span></div>
+    <div class="calc-line"><span>Depreciação (${c.machine?c.machine.name:'sem impressora'})</span><span>${brl(c.depreciation)}</span></div>
+    <div class="calc-line"><span>Manutenção</span><span>${brl(c.maintenance)}</span></div>
+    <div class="calc-line"><span>Mão de obra</span><span>${brl(c.laborCost)}</span></div>
+    ${c.toolsCost>0 ? `<div class="calc-line"><span>Ferramentas</span><span>${brl(c.toolsCost)}</span></div>` : ''}
+    <div class="calc-line"><span>Custo de falha</span><span>${brl(c.failureCost)}</span></div>
+    <div class="calc-line total"><span>Custo total</span><span>${brl(c.totalCost)}</span></div>
+    <div class="calc-line total"><span>Preço sugerido (margem de ${num(form.desiredMarginPct,0)}%)</span><span>${brl(c.suggestedPrice)}</span></div>
+    <div class="calc-line total"><span>Margem no valor combinado</span><span style="color:${c.marginValue<0?'var(--red)':'var(--green)'}">${pct(c.marginPct)}</span></div>
+  `;
+  const priceInput = document.getElementById('pPrice');
+  if(priceInput && !priceInput.dataset.touched && document.activeElement!==priceInput){
+    priceInput.placeholder = 'sugerido: '+c.suggestedPrice.toFixed(2);
+  }
+}
+function confirmCustomOrder(id){
+  const form = readCustomOrderForm();
+  if(!form.name){ toast('Informe o nome da peça','err'); return; }
+  const priceRaw = document.getElementById('pPrice').value;
+  const c = calcProduct(form);
+  const practicedPrice = priceRaw ? parseFloat(priceRaw) : c.suggestedPrice;
+  if(practicedPrice<0){ toast('Valor não pode ser negativo','err'); return; }
+  if(id){
+    const o = state.customOrders.find(x=>x.id===id);
+    Object.assign(o, form, { practicedPrice, photo: editingPhotoData });
+  } else {
+    state.customOrders.push({ id:uid(), ...form, practicedPrice, photo: editingPhotoData, createdAt: new Date().toISOString() });
+  }
+  saveCustomOrders();
+  toast(id?'Encomenda atualizada':'Encomenda criada');
+  closeModal(); renderContent();
+}
+function careInstructionsHtml(){
+  return `
+    <div style="background:#FDF3E7;border-radius:10px;padding:16px 18px;margin-top:16px;">
+      <div style="font-weight:700;font-size:13px;color:#1A1D23;margin-bottom:8px;">CUIDADOS COM A PEÇA</div>
+      <ul style="margin:0;padding-left:16px;font-size:11.5px;color:#3A3D45;line-height:1.9;">
+        <li><strong>Não deixe no sol ou dentro do carro.</strong> O PLA amolece a partir de 55 °C e a peça deforma sem chance de recuperação.</li>
+        <li><strong>Limpe com pano úmido e sabão neutro.</strong> Nada de água quente, álcool, acetona ou máquina de lavar.</li>
+        <li><strong>Peça decorativa, não é brinquedo.</strong> Peças pequenas e finas podem quebrar e não são indicadas para crianças pequenas.</li>
+        <li><strong>Marcas de camada são da técnica.</strong> Impressão 3D deposita material em camadas — leve textura é característica, não defeito.</li>
+      </ul>
+      <div style="font-size:11px;color:#5D6270;margin-top:10px;">Dúvida ou ajuste? Fale antes de aprovar — depois da impressão não dá para voltar atrás.</div>
+    </div>
+  `;
+}
+function exportCustomOrderPDF(id){
+  const o = state.customOrders.find(x=>x.id===id);
+  if(!o) return;
+  const c = calcProduct(o);
+  const cuName = customerNameFor(o);
+  const filSummary = (o.filaments||[]).map(f=>`${f.materialName} ${num(f.weightG,0)}g`).join(' + ');
+  const filFirst = (o.filaments||[])[0];
+  const pageHeader = (title, tag) => `
+    <div style="display:flex;align-items:center;justify-content:space-between;background:#1A1D23;color:#fff;padding:16px 20px;border-radius:10px 10px 0 0;">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <img src="${bizLogoSrc()}" alt="${bizName()}" style="width:40px;height:40px;object-fit:cover;border-radius:8px;">
+        <div>
+          <div style="font-family:var(--font-display);font-weight:700;font-size:17px;">${title}</div>
+          <div style="font-size:11px;color:#B9BEC9;">${tag==='cliente'?'Confira os dados abaixo antes de autorizarmos a impressão':'Uso interno — bancada, fatiador e registro de resultado'}</div>
+        </div>
+      </div>
+      <div style="font-size:10px;color:#B9BEC9;text-align:right;">${tag==='cliente'?'PARA O CLIENTE · 1/2':'USO INTERNO · 2/2'}</div>
+    </div>
+    <div style="height:4px;background:#BD4119;"></div>
+  `;
+  const field = (label, value) => `<div style="flex:1;min-width:0;"><div style="font-size:9.5px;font-weight:700;color:#8A8F9C;letter-spacing:.03em;margin-bottom:3px;">${label}</div><div style="font-size:12.5px;color:#1A1D23;min-height:16px;">${value||'—'}</div></div>`;
+  const row = (...fields) => `<div style="display:flex;gap:18px;margin-bottom:12px;">${fields.join('')}</div>`;
+  const sectionTitle = (n, t) => `<div style="border-left:3px solid #BD4119;padding-left:8px;font-weight:700;font-size:12px;color:#1A1D23;margin:16px 0 10px;">${n} · ${t.toUpperCase()}</div>`;
+  const checkbox = (checked, label) => `<span style="display:inline-flex;align-items:center;gap:5px;margin-right:16px;font-size:11.5px;color:#1A1D23;"><span style="display:inline-block;width:12px;height:12px;border:1.5px solid #8A8F9C;border-radius:3px;background:${checked?'#157A45':'#fff'};"></span>${label}</span>`;
+
+  const page1 = `
+    <div class="catalog-summary" style="padding:0;">
+      ${pageHeader('Confirmação da Peça','cliente')}
+      <div style="padding:22px 26px;">
+        ${row(field('Pedido nº',o.orderNumber), field('Data',fmtDate(o.orderDate)), field('Cliente',cuName))}
+        <div style="background:#FDF1EC;border-radius:10px;padding:16px 18px;margin:14px 0;">
+          <div style="font-weight:700;font-size:12px;color:#BD4119;margin-bottom:2px;">O QUE SERÁ IMPRESSO <span style="font-weight:400;color:#8A8F9C;font-size:10.5px;">— confira letra por letra, depois de impresso não há como corrigir</span></div>
+          ${row(field('Produto',o.name), field('Quantidade',o.qty), field('Tamanho (mm)',o.sizeLabel))}
+          ${row(field('Texto que vai na peça', (o.pieceText||'—').replace(/\n/g,'<br>')))}
+          ${row(field('Cor da base',o.baseColor), field('Cor do texto/detalhe',o.detailColor), field('Acabamento',o.finish))}
+        </div>
+        <div style="font-weight:700;font-size:12px;color:#1A1D23;margin:14px 0 8px;border-left:3px solid #1A1D23;padding-left:8px;">PRAZO E VALORES</div>
+        ${row(field('Entrega prevista',fmtDate(o.deliveryDate)), field('Valor total',brl(c.practicedPrice)), field('Sinal pago',brl(o.depositPaid||0)), field('Saldo na entrega',brl(Math.max(0,c.practicedPrice-(o.depositPaid||0)))))}
+        <div style="background:#EAF6EF;border-radius:10px;padding:16px 18px;margin-top:14px;">
+          <div style="font-weight:700;font-size:12px;color:#157A45;margin-bottom:8px;">APROVAÇÃO DO CLIENTE</div>
+          ${checkbox(o.approved,'Conferi o texto, as cores e o tamanho. Autorizo a impressão.')}
+          <div style="font-size:10.5px;color:#5D6270;margin:8px 0;">A produção só entra na fila após esta confirmação. Alteração depois disso implica nova peça e novo valor.</div>
+          ${row(field('Data',fmtDate(o.approvalDate)), field('Confirmado por',o.approvedBy))}
+        </div>
+        ${careInstructionsHtml()}
+        <div style="text-align:center;font-size:10px;color:#8A8F9C;margin-top:16px;">Confirmação da Peça — enviar ao cliente e guardar a resposta. ${bizName().toLowerCase()}</div>
+      </div>
+    </div>`;
+
+  const page2 = `
+    <div class="catalog-summary" style="padding:0;">
+      ${pageHeader('Ficha Técnica de Impressão','interno')}
+      <div style="padding:22px 26px;">
+        ${row(field('Pedido nº',o.orderNumber), field('Produto / SKU',o.name), field('Data de impressão',fmtDate(o.printDate)))}
+        ${sectionTitle(1,'Arquivo e licença')}
+        ${row(field('Nome do arquivo',o.modelFileName), field('Origem',o.modelOrigin==='terceiro'?'Terceiro':'Próprio'), field('Licença',o.modelOrigin==='terceiro'?o.modelLicense:'—'))}
+        ${o.modelOrigin==='terceiro' ? row(field('URL do modelo',o.modelSourceUrl)) : ''}
+        ${sectionTitle(2,'Material')}
+        ${row(field('Filamento',filSummary||'—'), field('Cor',(materialByName((filFirst||{}).materialName)||{}).colorName||'—'), field('R$/g',filFirst?num(filamentCost(filFirst.materialName),4):'—'), field('Bico / temp. mesa',`${o.nozzleTempC||'—'}°C / ${o.bedTempC||'—'}°C`))}
+        ${sectionTitle(3,'Perfil de fatiamento')}
+        ${row(field('Altura de camada',o.layerHeightMm?o.layerHeightMm+'mm':'—'), field('Bico',o.nozzleDiameterMm?o.nozzleDiameterMm+'mm':'—'), field('Paredes',o.walls), field('Preenchimento',o.infillPct?o.infillPct+'%':'—'), field('Padrão',o.infillPattern), field('Velocidade',o.printSpeedMmS?o.printSpeedMmS+'mm/s':'—'))}
+        ${row(field('Orientação na mesa',o.orientation), field('Suportes',o.supports==='sim'?'Sim':'Não'), field('Brim/raft',o.brimRaft))}
+        ${(o.colorChangeLayer||o.colorChangeHeightMm) ? `<div style="background:#FDF1EC;border-radius:8px;padding:10px 14px;margin-bottom:12px;">${row(field('Pausa p/ troca de cor — camada nº',o.colorChangeLayer), field('Altura (mm)',o.colorChangeHeightMm))}</div>` : ''}
+        ${sectionTitle(4,'Estimado × real')}
+        <div style="overflow-x:auto;margin-bottom:4px;"><table style="width:100%;border-collapse:collapse;font-size:11.5px;">
+          <thead><tr style="background:#F6F7F9;"><th style="text-align:left;padding:6px 8px;">​</th><th style="text-align:right;padding:6px 8px;">Peso (g)</th><th style="text-align:right;padding:6px 8px;">Tempo (h)</th><th style="text-align:right;padding:6px 8px;">Custo (R$)</th><th style="text-align:left;padding:6px 8px;">Observação</th></tr></thead>
+          <tbody>
+            <tr><td style="padding:6px 8px;font-weight:600;">Estimado</td><td style="text-align:right;padding:6px 8px;">${num(totalWeight(o),0)}</td><td style="text-align:right;padding:6px 8px;">${num(o.timeH,2)}</td><td style="text-align:right;padding:6px 8px;">${brl(c.totalCost)}</td><td style="padding:6px 8px;">—</td></tr>
+            <tr style="background:#F6F7F9;"><td style="padding:6px 8px;font-weight:600;">Real</td><td style="text-align:right;padding:6px 8px;">${o.realWeightG||'—'}</td><td style="text-align:right;padding:6px 8px;">${o.realTimeH||'—'}</td><td style="text-align:right;padding:6px 8px;">${o.realCost?brl(o.realCost):'—'}</td><td style="padding:6px 8px;">${o.realObservation||'—'}</td></tr>
+          </tbody>
+        </table></div>
+        ${sectionTitle(5,'Resultado e acabamento')}
+        ${row(field('Resultado', o.result==='ok'?'OK':o.result==='falha_parcial'?'Falha parcial':o.result==='falha_total'?'Falha total':'—'), field('Se falhou — % e motivo',o.failurePctReason))}
+        ${row(field('Pós-processamento realizado',o.postProcessingDone))}
+        ${sectionTitle(6,'Conferência antes de embalar')}
+        <div style="margin-bottom:6px;">${checkbox(o.checkTextConferred,'Texto conferido')}${checkbox(o.checkNoLayerFailure,'Sem falha de camada')}${checkbox(o.checkBurrRemoved,'Rebarba removida')}</div>
+        <div style="margin-bottom:14px;">${checkbox(o.checkHoleFree,'Furo/argola livre')}${checkbox(o.checkPieceClean,'Peça limpa')}${checkbox(o.checkPackaged,'Embalada')}</div>
+        <div style="display:flex;gap:18px;padding-top:12px;border-top:2px solid #BD4119;">
+          ${field('Custo real (R$)', o.realCost?brl(o.realCost):brl(c.totalCost))}
+          ${field('Preço de venda (R$)', brl(c.practicedPrice))}
+          ${field('R$ por hora-máquina', o.timeH>0 ? brl(c.practicedPrice/o.timeH) : '—')}
+        </div>
+        <div style="font-size:10px;color:#8A8F9C;margin-top:4px;">Comparar com a estimativa do app. Divergência acima de 20% = revisar o cadastro.</div>
+        <div style="text-align:center;font-size:10px;color:#8A8F9C;margin-top:16px;">Ficha Técnica de Impressão — arquivar junto com a ficha de pedido. ${bizName().toLowerCase()}</div>
+      </div>
+    </div>`;
+
+  printHTML(page1 + page2);
 }
 
 /* ===================== ESTOQUE ===================== */
@@ -5659,7 +6191,7 @@ function blankSettings(){
 async function confirmReset(){
   exportBackup(true);
   await new Promise(r=>setTimeout(r,300));
-  state = { materials: [], products: [], sales: [], orders: [], customers: [], printFailures: [], listings: [], settings: blankSettings() };
+  state = { materials: [], products: [], sales: [], orders: [], customers: [], printFailures: [], listings: [], customOrders: [], settings: blankSettings() };
   await saveAll();
   closeModal();
   currentTab = 'dashboard';
@@ -5754,7 +6286,7 @@ function exportAnnualExcel(){
 function exportBackup(silent){
   const data = {
     app:'piece-of-geek-gestao', version:2, exportedAt: new Date().toISOString(),
-    materials: state.materials, products: state.products, sales: state.sales, orders: state.orders, customers: state.customers, printFailures: state.printFailures, listings: state.listings, settings: state.settings,
+    materials: state.materials, products: state.products, sales: state.sales, orders: state.orders, customers: state.customers, printFailures: state.printFailures, listings: state.listings, customOrders: state.customOrders, settings: state.settings,
   };
   const blob = new Blob([JSON.stringify(data,null,2)], {type:'application/json'});
   const url = URL.createObjectURL(blob);
@@ -5789,6 +6321,7 @@ function importBackup(file){
       state.customers = Array.isArray(data.customers) ? data.customers : [];
       state.printFailures = migratePrintFailures(Array.isArray(data.printFailures) ? data.printFailures : []);
       state.listings = Array.isArray(data.listings) ? data.listings : [];
+      state.customOrders = migrateCustomOrders(Array.isArray(data.customOrders) ? data.customOrders : []);
       backfillMachineHours();
       await saveAll();
       toast('Backup importado com sucesso');
