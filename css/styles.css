@@ -236,7 +236,7 @@ tbody tr:hover{background:rgba(0,0,0,0.025);}
   #topbarActions .btn{padding:8px 11px;font-size:12.5px;}
 }
 @media(max-width:640px){
-  .g-4,.g-3,.g-2{grid-template-columns:1fr;}
+  .g-4,.g-3,.g-2,.g-5{grid-template-columns:1fr;}
   .kpi-value{font-size:19px;}
   .modal{border-radius:14px 14px 0 0;max-width:none;margin-bottom:0;}
   .overlay{padding:0;align-items:flex-start;}

@@ -206,6 +206,7 @@ function migrateCustomOrders(list){
     if(o.paymentMethod==null) o.paymentMethod = '';
     if(o.deliveryMethod==null) o.deliveryMethod = '';
     if(o.deliveryAddress==null) o.deliveryAddress = '';
+    if(!o.status) o.status = 'Incompleto';
     if(o.orderDate==null) o.orderDate = todayStr();
     if(o.customerId==null) o.customerId = '';
     if(o.qty==null) o.qty = 1;
@@ -4429,7 +4430,13 @@ function confirmProduct(id){
 // pedido/cliente e a ficha técnica de impressão — export vira uma peça de cada
 // vez, não o catálogo inteiro. Ficha inspirada no modelo em papel já usado.
 let personalizadosFilter = { search:'' };
+let showDeliveredCustomOrders = false;
 const CUSTOM_ORDER_TYPES = { chaveiro:'Chaveiro', lembrancinha:'Lembrancinha', topo_bolo:'Topo de bolo', outro:'Outro' };
+// Status próprio de Personalizados — NÃO é o ORDER_STATUSES de Pedidos
+// (state.orders), que é outro sistema já em produção com venda vinculada
+// (orderId em sales). Esse aqui é novo, só acompanha o ciclo da encomenda
+// sob medida — nomeado diferente de propósito pra nunca colidir com aquele.
+const CUSTOM_ORDER_STATUSES = ['Incompleto','Aguardando sinal','Na fila','Imprimindo','Pronto','Entregue'];
 function orderTypeLabel(t){ return CUSTOM_ORDER_TYPES[t] || CUSTOM_ORDER_TYPES.outro; }
 function customerNameFor(o){
   if(o.customerId){ const cu = state.customers.find(c=>c.id===o.customerId); if(cu) return cu.name; }
@@ -4442,9 +4449,76 @@ function allocateCustomOrderNumber(){
   saveSettings();
   return String(state.settings.customOrderSeq).padStart(4,'0');
 }
+// Obrigatórios só da aba "Pedido" — "Produção" fica de fora de propósito,
+// porque se preenche naturalmente durante a impressão, travar por ela não
+// faz sentido (o pedido pode estar 100% combinado com o cliente antes disso).
+function orderRequiredFields(o){
+  const common = [
+    {key:'customerName', label:'Nome do cliente', check:x=>!!(x.customerId || (x.customerName&&x.customerName.trim()))},
+    {key:'contact', label:'Contato', check:x=>!!(x.contact&&x.contact.trim())},
+    {key:'orderType', label:'Tipo', check:x=>!!x.orderType},
+    {key:'qty', label:'Quantidade', check:x=>(x.qty||0)>0},
+    {key:'deliveryDate', label:'Data de entrega', check:x=>!!x.deliveryDate},
+    {key:'totalValue', label:'Valor total', check:x=>(x.practicedPrice||0)>0},
+  ];
+  const byType = {
+    chaveiro: [
+      {key:'pieceText', label:'Texto da peça', check:x=>!!(x.pieceText&&x.pieceText.trim())},
+      {key:'baseColor', label:'Cor da base', check:x=>!!(x.baseColor&&x.baseColor.trim())},
+      {key:'detailColor', label:'Cor do texto', check:x=>!!(x.detailColor&&x.detailColor.trim())},
+    ],
+    lembrancinha: [
+      {key:'pieceText', label:'Texto da peça', check:x=>!!(x.pieceText&&x.pieceText.trim())},
+      {key:'baseColor', label:'Cor da base', check:x=>!!(x.baseColor&&x.baseColor.trim())},
+    ],
+    topo_bolo: [
+      {key:'pieceText', label:'Texto da peça', check:x=>!!(x.pieceText&&x.pieceText.trim())},
+      {key:'baseColor', label:'Cor da base', check:x=>!!(x.baseColor&&x.baseColor.trim())},
+      {key:'sizeLabel', label:'Tamanho', check:x=>!!(x.sizeLabel&&x.sizeLabel.trim())},
+    ],
+  };
+  return [...common, ...(byType[o.orderType]||[])];
+}
+function orderCompleteness(o){
+  const fields = orderRequiredFields(o);
+  const missingFields = fields.filter(f=>!f.check(o));
+  const total = fields.length;
+  const filled = total - missingFields.length;
+  return { total, filled, missing: missingFields.map(f=>f.label), missingKeys: missingFields.map(f=>f.key), pct: total>0 ? Math.round((filled/total)*100) : 100 };
+}
+function waLink(o){
+  const digits = (o.contact||'').replace(/\D/g,'');
+  if(!digits) return null;
+  const phone = digits.length>11 ? digits : '55'+digits;
+  return `https://wa.me/${phone}?text=${encodeURIComponent('Oi! Sobre seu pedido '+(o.orderNumber||''))}`;
+}
+// A trava: não deixa avançar pra "Na fila" ou além sem os obrigatórios
+// preenchidos e o texto confirmado com o cliente — é o que evita imprimir
+// peça personalizada errada (perda total, não se revende).
+function changeCustomOrderStatus(id, status){
+  const o = state.customOrders.find(x=>x.id===id);
+  if(!o) return;
+  const gateFrom = CUSTOM_ORDER_STATUSES.indexOf('Na fila');
+  if(CUSTOM_ORDER_STATUSES.indexOf(status)>=gateFrom){
+    const completeness = orderCompleteness(o);
+    if(completeness.missing.length>0){
+      toast(`Faltam ${completeness.missing.length} campo${completeness.missing.length>1?'s':''}: ${completeness.missing.join(', ')}`,'err');
+      renderContent();
+      return;
+    }
+    if(!o.approved){
+      toast('Confirme o texto com o cliente antes de produzir','err');
+      renderContent();
+      return;
+    }
+  }
+  o.status = status;
+  saveCustomOrders();
+  renderContent();
+}
 function renderPersonalizados(){
   if(state.customOrders.length===0) return `<div class="card">${emptyState('Nenhuma encomenda personalizada cadastrada ainda. Clique em "+ Nova encomenda personalizada".')}</div>`;
-  let list = state.customOrders.slice().sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||''));
+  let list = state.customOrders.slice();
   if(personalizadosFilter.search){
     const q = personalizadosFilter.search.toLowerCase();
     list = list.filter(o=>(o.name||'').toLowerCase().includes(q) || (o.orderNumber||'').toLowerCase().includes(q) || customerNameFor(o).toLowerCase().includes(q));
@@ -4452,6 +4526,10 @@ function renderPersonalizados(){
   const resultBadge = (r) => r==='ok' ? '<span class="badge ok">OK</span>' : r==='falha_parcial' ? '<span class="badge warn">Falha parcial</span>' : r==='falha_total' ? '<span class="badge bad">Falha total</span>' : '';
   const cardHtml = (o) => {
     const c = calcProduct(o);
+    const completeness = orderCompleteness(o);
+    const wa = waLink(o);
+    const canProduce = completeness.missing.length===0 && o.approved;
+    const showProduzir = o.status==='Incompleto' || o.status==='Aguardando sinal';
     return `<div class="card" style="padding:14px 16px;">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
         <div style="min-width:0;">
@@ -4459,7 +4537,7 @@ function renderPersonalizados(){
             ${o.name||orderTypeLabel(o.orderType)}
             <span class="badge info">${orderTypeLabel(o.orderType)}</span>
           </div>
-          <div style="font-size:11.5px;color:var(--text-faint);margin-top:3px;">Pedido ${o.orderNumber||'—'} · ${customerNameFor(o)}${o.contact?' · '+o.contact:''}</div>
+          <div style="font-size:11.5px;color:var(--text-faint);margin-top:3px;">Pedido ${o.orderNumber||'—'} · ${customerNameFor(o)}${wa?` · <a href="${wa}" target="_blank" rel="noopener noreferrer">${o.contact}</a>`:(o.contact?' · '+o.contact:'')}</div>
         </div>
         ${resultBadge(o.result)}
       </div>
@@ -4470,21 +4548,43 @@ function renderPersonalizados(){
         <span>Valor: ${brl(c.practicedPrice)}</span>
         <span style="color:${c.marginValue<0?'var(--red)':'var(--green)'}">Margem: ${pct(c.marginPct)}</span>
       </div>
-      <div style="display:flex;gap:6px;margin-top:12px;">
+      <div style="margin-top:8px;">
+        ${completeness.pct>=100
+          ? `<span class="badge ok">Completo</span>`
+          : `<span class="badge warn">Falta preencher · ${completeness.missing.length} campo${completeness.missing.length>1?'s':''}</span><div style="font-size:10.5px;color:var(--amber);margin-top:3px;">${completeness.missing.join(', ')}</div>`}
+      </div>
+      <select style="margin-top:10px;width:100%;" onchange="changeCustomOrderStatus('${o.id}', this.value)">
+        ${CUSTOM_ORDER_STATUSES.map(s=>`<option value="${s}" ${s===o.status?'selected':''}>${s}</option>`).join('')}
+      </select>
+      <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">
         <button class="btn ghost sm" onclick="openCustomOrderModal('${o.id}')">Abrir</button>
+        ${showProduzir ? `<button class="btn sm" ${canProduce?'':'disabled'} onclick="changeCustomOrderStatus('${o.id}','Na fila')" title="${canProduce?'':'Complete os campos obrigatórios e confirme o texto com o cliente'}">Produzir</button>` : ''}
         <button class="btn ghost sm" onclick="exportCustomOrderPDF('${o.id}')">Ficha</button>
         <button class="btn ghost sm" onclick="deleteCustomOrder('${o.id}')">Excluir</button>
       </div>
     </div>`;
   };
+  const visibleStatuses = showDeliveredCustomOrders ? CUSTOM_ORDER_STATUSES : CUSTOM_ORDER_STATUSES.filter(s=>s!=='Entregue');
+  const deliveredCount = state.customOrders.filter(o=>o.status==='Entregue').length;
+  const cols = visibleStatuses.map(status=>{
+    const inCol = list.filter(o=>o.status===status).sort((a,b)=>(a.deliveryDate||'9999').localeCompare(b.deliveryDate||'9999'));
+    return `<div style="min-width:0;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+        <div style="font-family:var(--font-display);font-weight:600;font-size:13px;">${status}</div>
+        <span class="chip">${inCol.length}</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        ${inCol.length ? inCol.map(cardHtml).join('') : `<div class="empty" style="padding:16px 8px;">Nada aqui</div>`}
+      </div>
+    </div>`;
+  }).join('');
   return `
     <div class="filter-bar">
       <div class="field"><label>Buscar</label><input value="${personalizadosFilter.search}" placeholder="Nome, pedido ou cliente..." oninput="personalizadosFilter.search=this.value; renderContent();"></div>
       <div class="field hint" style="padding-top:9px;">${list.length} de ${state.customOrders.length} encomenda(s)</div>
+      ${deliveredCount>0 ? `<button class="btn ghost sm" style="align-self:flex-end;" onclick="showDeliveredCustomOrders=!showDeliveredCustomOrders; renderContent();">${showDeliveredCustomOrders?'Ocultar':'Mostrar'} entregues (${deliveredCount})</button>` : ''}
     </div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:12px;">
-      ${list.map(cardHtml).join('')}
-    </div>
+    <div class="grid g-5" style="align-items:start;">${cols}</div>
   `;
 }
 function deleteCustomOrder(id){
@@ -4541,7 +4641,7 @@ function confirmQuickCustomOrder(){
   const orderNumber = allocateCustomOrderNumber();
   const o = migrateCustomOrders([{
     id:uid(), orderNumber, orderDate: todayStr(), name: orderTypeLabel(type), orderType: type,
-    customerId: cu.id, customerName: clientName, contact, qty, deliveryDate,
+    customerId: cu.id, customerName: clientName, contact, qty, deliveryDate, status:'Incompleto',
     createdAt: new Date().toISOString(),
   }])[0];
   state.customOrders.push(o);
@@ -4571,6 +4671,9 @@ function openCustomOrderModal(id){
   editingLaborActions = JSON.parse(JSON.stringify(o.laborActions||[]));
   editingToolsUsed = JSON.parse(JSON.stringify(o.toolsUsed||[]));
   editingPhotoData = o.photo || null;
+  const completeness = orderCompleteness(o);
+  const missingKeys = new Set(completeness.missingKeys);
+  const reqBorder = (key) => missingKeys.has(key) ? 'border-color:var(--amber);' : '';
   showModal(`Pedido ${o.orderNumber||''} — ${o.name||orderTypeLabel(o.orderType)}`, `
     <div class="tabbar">
       <button class="tabbtn active" id="coTabBtn_pedido" onclick="switchCustomOrderTab('pedido')">Pedido</button>
@@ -4579,6 +4682,9 @@ function openCustomOrderModal(id){
     </div>
 
     <div id="coPanel_pedido">
+      <div style="height:6px;background:var(--line-soft);border-radius:3px;overflow:hidden;margin-bottom:6px;"><div style="height:100%;width:${completeness.pct}%;background:${completeness.pct>=100?'var(--green)':'var(--amber)'};"></div></div>
+      <div class="field hint" style="margin-top:0;margin-bottom:14px;">${completeness.pct>=100 ? 'Pedido completo — pode mover pra "Aguardando sinal" ou "Na fila" na lista.' : `${completeness.filled} de ${completeness.total} campos preenchidos — falta: ${completeness.missing.join(', ')}`}</div>
+
       <div class="section-title" style="margin-top:0;">Cliente</div>
       <div class="row2">
         <div class="field"><label>Cliente</label>
@@ -4587,9 +4693,9 @@ function openCustomOrderModal(id){
             ${state.customers.map(cu=>`<option value="${cu.id}" ${o.customerId===cu.id?'selected':''}>${cu.name}</option>`).join('')}
           </select>
         </div>
-        <div class="field"><label>Contato</label><input id="coContact" value="${o.contact||''}" placeholder="(11) 99999-9999"></div>
+        <div class="field"><label>Contato</label><input id="coContact" value="${o.contact||''}" placeholder="(11) 99999-9999" style="${reqBorder('contact')}"></div>
       </div>
-      <div class="field" id="coCustomerNameWrap" style="display:${o.customerId?'none':'block'};margin-top:-8px;"><label>Nome do cliente (se avulso)</label><input id="coCustomerName" value="${o.customerName||''}"></div>
+      <div class="field" id="coCustomerNameWrap" style="display:${o.customerId?'none':'block'};margin-top:-8px;"><label>Nome do cliente (se avulso)</label><input id="coCustomerName" value="${o.customerName||''}" style="${reqBorder('customerName')}"></div>
       <div class="field hint" style="margin-top:-8px;">${o.customerId?'Cliente cadastrado':'Cliente avulso — sem cadastro'}</div>
 
       <div class="section-title">Item</div>
@@ -4597,7 +4703,7 @@ function openCustomOrderModal(id){
         <div class="field"><label>Tipo</label><select id="coOrderType">
           ${Object.entries(CUSTOM_ORDER_TYPES).map(([v,l])=>`<option value="${v}" ${(o.orderType||'outro')===v?'selected':''}>${l}</option>`).join('')}
         </select></div>
-        <div class="field"><label>Quantidade</label><input type="number" id="coQty" value="${o.qty||1}" min="1" step="1"></div>
+        <div class="field"><label>Quantidade</label><input type="number" id="coQty" value="${o.qty||1}" min="1" step="1" style="${reqBorder('qty')}"></div>
         <div class="field"><label>Produto do catálogo (opcional)</label><select id="coLinkedProductId">
           <option value="">Nenhum</option>
           ${state.products.map(p=>`<option value="${p.id}" ${o.linkedProductId===p.id?'selected':''}>${p.name}</option>`).join('')}
@@ -4607,11 +4713,11 @@ function openCustomOrderModal(id){
 
       <div class="section-title">Personalização</div>
       <div style="background:var(--nozzle-dim);border-left:3px solid var(--nozzle);border-radius:8px;padding:14px 16px 2px;">
-        <div class="field"><label>Texto que vai na peça</label><textarea id="coPieceText" rows="2" style="font-family:var(--font-mono);text-transform:uppercase;">${o.pieceText||''}</textarea></div>
+        <div class="field"><label>Texto que vai na peça</label><textarea id="coPieceText" rows="2" style="font-family:var(--font-mono);text-transform:uppercase;${reqBorder('pieceText')}">${o.pieceText||''}</textarea></div>
         <div class="row3">
-          <div class="field"><label>Cor da base</label><input id="coBaseColor" value="${o.baseColor||''}"></div>
-          <div class="field"><label>Cor do texto/detalhe</label><input id="coDetailColor" value="${o.detailColor||''}"></div>
-          <div class="field"><label>Tamanho (mm)</label><input id="coSizeLabel" value="${o.sizeLabel||''}" placeholder="Ex: 80 x 60"></div>
+          <div class="field"><label>Cor da base</label><input id="coBaseColor" value="${o.baseColor||''}" style="${reqBorder('baseColor')}"></div>
+          <div class="field"><label>Cor do texto/detalhe</label><input id="coDetailColor" value="${o.detailColor||''}" style="${reqBorder('detailColor')}"></div>
+          <div class="field"><label>Tamanho (mm)</label><input id="coSizeLabel" value="${o.sizeLabel||''}" placeholder="Ex: 80 x 60" style="${reqBorder('sizeLabel')}"></div>
         </div>
         <div class="field"><label>Acabamento</label><input id="coFinish" value="${o.finish||''}" placeholder="Ex: fosco, brilhoso"></div>
         <div class="field"><label style="display:flex;align-items:center;gap:8px;font-weight:400;"><input type="checkbox" id="coApproved" ${o.approved?'checked':''} style="width:auto;"> Texto confirmado por escrito com o cliente</label></div>
@@ -4624,7 +4730,7 @@ function openCustomOrderModal(id){
       <div class="section-title">Comercial</div>
       <div class="row2">
         <div class="field"><label>Margem de lucro desejada (%)</label><input type="number" id="pMargin" value="${(o.desiredMarginPct!=null ? o.desiredMarginPct : calcProduct(o).desiredMarginPct).toFixed(0)}" step="1" oninput="document.getElementById('pPrice').dataset.touched=''; refreshCurrentPreview()"></div>
-        <div class="field"><label>Valor total combinado (R$)</label><input type="number" id="pPrice" value="${o.practicedPrice||''}" step="0.01" placeholder="deixe em branco = preço sugerido" oninput="this.dataset.touched='1'; refreshCurrentPreview()"></div>
+        <div class="field"><label>Valor total combinado (R$)</label><input type="number" id="pPrice" value="${o.practicedPrice||''}" step="0.01" placeholder="deixe em branco = preço sugerido" oninput="this.dataset.touched='1'; refreshCurrentPreview()" style="${reqBorder('totalValue')}"></div>
       </div>
       <div class="row2">
         <div class="field"><label>Sinal pago (R$)</label><input type="number" id="coDepositPaid" value="${o.depositPaid||''}" step="0.01" placeholder="0,00"></div>
@@ -4633,7 +4739,7 @@ function openCustomOrderModal(id){
 
       <div class="section-title">Entrega</div>
       <div class="row3">
-        <div class="field"><label>Data prevista</label><input type="date" id="coDeliveryDate" value="${o.deliveryDate||''}"></div>
+        <div class="field"><label>Data prevista</label><input type="date" id="coDeliveryDate" value="${o.deliveryDate||''}" style="${reqBorder('deliveryDate')}"></div>
         <div class="field"><label>Forma de entrega</label><input id="coDeliveryMethod" value="${o.deliveryMethod||''}" placeholder="Ex: retirada, Correios"></div>
         <div class="field"><label>Endereço</label><input id="coDeliveryAddress" value="${o.deliveryAddress||''}"></div>
       </div>
@@ -4873,9 +4979,15 @@ function confirmCustomOrder(id){
   const c = calcProduct(form);
   const practicedPrice = priceRaw ? parseFloat(priceRaw) : c.suggestedPrice;
   if(practicedPrice<0){ toast('Valor não pode ser negativo','err'); return; }
+  const wasIncomplete = o.status==='Incompleto';
   Object.assign(o, form, { practicedPrice, photo: editingPhotoData });
   saveCustomOrders();
-  toast('Encomenda atualizada');
+  // Sugere, nunca muda sozinho — quem decide que já pode entrar na fila é o usuário.
+  if(wasIncomplete && orderCompleteness(o).pct>=100){
+    toast('Encomenda atualizada — pedido completo! Pode mudar o status pra "Aguardando sinal" na lista.');
+  } else {
+    toast('Encomenda atualizada');
+  }
   closeModal(); renderContent();
 }
 function careInstructionsHtml(){
