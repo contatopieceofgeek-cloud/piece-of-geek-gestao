@@ -107,7 +107,7 @@ Deno.serve(async (req) => {
     }
 
     if (body.action === "fee-lookup") {
-      const { price, categoryId, listingTypeId } = body;
+      const { price, categoryId, listingTypeId, weightG, lengthCm, widthCm, heightCm } = body;
       if (!price || !categoryId) throw new Error("faltou preço ou categoria");
 
       const { data: row, error: tokenErr } = await admin
@@ -125,6 +125,20 @@ Deno.serve(async (req) => {
         category_id: String(categoryId),
         listing_type_id: String(listingTypeId || "gold_special"),
       });
+      // Desde mar/2026 o ML só calcula o custo operacional por peso (itens < R$79)
+      // se vier billable_weight (peso real x peso cúbico, o que for maior) junto
+      // com o modo de envio. Vendedor que embala e leva numa agência/Correios =
+      // Mercado Envios modo 2, despacho em drop-off — não é Fulfillment.
+      const realKg = (Number(weightG) || 0) / 1000;
+      const cubicKg = (Number(lengthCm) > 0 && Number(widthCm) > 0 && Number(heightCm) > 0)
+        ? (Number(lengthCm) * Number(widthCm) * Number(heightCm)) / 6000
+        : 0;
+      const billableKg = Math.max(realKg, cubicKg);
+      if (billableKg > 0) {
+        params.set("billable_weight", billableKg.toFixed(3));
+        params.set("logistic_type", "drop_off");
+        params.set("shipping_mode", "me2");
+      }
       const mlResp = await fetch(`https://api.mercadolibre.com/sites/MLB/listing_prices?${params}`, {
         headers: { Authorization: `Bearer ${fresh.access_token}` },
       });

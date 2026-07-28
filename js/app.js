@@ -208,6 +208,7 @@ function migrateSettings(settings){
       }
     });
   }
+  if(settings.minMarginPct==null) settings.minMarginPct = 25;
   if(!Array.isArray(settings.expenses)){
     settings.expenses = settings.opExpenses ? [{id:uid(),name:'Despesas operacionais (migrado)',value:settings.opExpenses}] : [];
   }
@@ -565,7 +566,9 @@ function calcProduct(prod){
   const totalLaborMinutes = (prod.laborActions||[]).reduce((a,x)=>a+(x.minutes||0),0);
   const laborCost = (totalLaborMinutes/60) * (s.laborHourlyRate||0);
   const toolsCost = (prod.toolsUsed||[]).reduce((a,t)=>a+(t.uses||0)*toolCostPerUse(state.materials.find(x=>x.id===t.toolId)),0);
-  const failureCost = (materialCost + energyCost + depreciation) * prod.failureMarginPct;
+  // Embalagem fica de fora (caixa/bolha não são gastos numa impressão que falha),
+  // mas metade da mão de obra entra — setup e a descoberta da falha consomem tempo.
+  const failureCost = (materialCost + energyCost + depreciation + laborCost*0.5) * prod.failureMarginPct;
   const totalCost = materialCost + energyCost + embalagemCost + depreciation + failureCost + laborCost + toolsCost;
   const defaultMargin = 1 - (1/(s.markupMultiplier||2.5));
   const desiredMargin = prod.desiredMarginPct!=null ? Math.min(0.95,Math.max(0,prod.desiredMarginPct/100)) : defaultMargin;
@@ -576,9 +579,9 @@ function calcProduct(prod){
   // Se já buscamos a taxa real do ML pra esse produto (ver mlRealFeePct), usa ela
   // em vez da % manual de Configurações — mesma fórmula, só troca de onde vem a taxa.
   const suggestedPriceMl = prod.mlRealFeePct!=null
-    ? suggestedPrice / (1 - Math.min(0.95, prod.mlRealFeePct/100))
-    : suggestedPriceForPlatform(suggestedPrice, 'Mercado Livre');
-  const suggestedPriceShopee = suggestedPriceForPlatform(suggestedPrice, 'Shopee');
+    ? (suggestedPrice + (prod.estimatedFreightMl||0)) / (1 - Math.min(0.95, prod.mlRealFeePct/100))
+    : suggestedPriceForPlatform(suggestedPrice, 'Mercado Livre', prod.estimatedFreightMl||0);
+  const suggestedPriceShopee = suggestedPriceForPlatform(suggestedPrice, 'Shopee', prod.estimatedFreightShopee||0);
   const practicedPriceMl = prod.practicedPriceMl || suggestedPriceMl;
   const practicedPriceShopee = prod.practicedPriceShopee || suggestedPriceShopee;
   const suggestedPriceExtra = {}, practicedPriceExtra = {};
@@ -592,16 +595,24 @@ function calcProduct(prod){
     : feeAtPrice('Mercado Livre', practicedPriceMl);
   const shopeeFeeAmount = feeAtPrice('Shopee', practicedPriceShopee);
   const effectiveFreightMl = prod.estimatedFreightMl||0;
-  const effectiveFreightShopee = (prod.estimatedFreightShopee>0) ? prod.estimatedFreightShopee : (estimatedShopeeFreightCap||0);
+  // A Shopee subsidia o frete até o teto da faixa de preço (freightCapTiers) — o
+  // vendedor só paga o que passar disso. Sem frete real informado, o custo é 0
+  // (assume que o subsídio cobre), não o teto inteiro.
+  const shopeeFreightReal = prod.estimatedFreightShopee||0;
+  const effectiveFreightShopee = Math.max(0, shopeeFreightReal - (estimatedShopeeFreightCap||0));
   const netReceiptMl = practicedPriceMl - mlFeeAmount - effectiveFreightMl;
   const netReceiptShopee = practicedPriceShopee - shopeeFeeAmount - effectiveFreightShopee;
   const mlFeePct = practicedPriceMl > 0 ? (mlFeeAmount/practicedPriceMl)*100 : 0;
   const shopeeFeePct = practicedPriceShopee > 0 ? (shopeeFeeAmount/practicedPriceShopee)*100 : 0;
-  return { materialCost, energyCost, boxCost:bCost, bubbleCost, tapeCost, embalagemCost, depreciation, laborCost, totalLaborMinutes, toolsCost, failureCost, totalCost, suggestedPrice, suggestedPriceMl, suggestedPriceShopee, suggestedPriceExtra, practicedPrice, practicedPriceMl, practicedPriceShopee, practicedPriceExtra, estimatedShopeeFreightCap, mlFeeAmount, shopeeFeeAmount, mlFeePct, shopeeFeePct, effectiveFreightMl, effectiveFreightShopee, netReceiptMl, netReceiptShopee, marginValue, marginPct, desiredMarginPct: desiredMargin*100, machine };
+  const marginMlValue = netReceiptMl - totalCost;
+  const marginShopeeValue = netReceiptShopee - totalCost;
+  const marginMlPct = practicedPriceMl > 0 ? (marginMlValue/practicedPriceMl)*100 : 0;
+  const marginShopeePct = practicedPriceShopee > 0 ? (marginShopeeValue/practicedPriceShopee)*100 : 0;
+  return { materialCost, energyCost, boxCost:bCost, bubbleCost, tapeCost, embalagemCost, depreciation, laborCost, totalLaborMinutes, toolsCost, failureCost, totalCost, suggestedPrice, suggestedPriceMl, suggestedPriceShopee, suggestedPriceExtra, practicedPrice, practicedPriceMl, practicedPriceShopee, practicedPriceExtra, estimatedShopeeFreightCap, mlFeeAmount, shopeeFeeAmount, mlFeePct, shopeeFeePct, effectiveFreightMl, effectiveFreightShopee, netReceiptMl, netReceiptShopee, marginValue, marginPct, marginMlValue, marginShopeeValue, marginMlPct, marginShopeePct, desiredMarginPct: desiredMargin*100, machine };
 }
-// Teto do cupom de frete grátis que a Shopee subsidia (obrigatório desde mar/2026) —
-// é só uma estimativa de custo (o frete real pode custar menos que o teto), por
-// isso não entra em suggestedPriceShopee, só é exibida como referência.
+// Teto até onde a Shopee subsidia o frete grátis obrigatório (por faixa de
+// preço, desde mar/2026). O vendedor só paga o que passar desse teto — ver
+// effectiveFreightShopee em calcProduct().
 function shopeeFreightCap(price){
   const shopee = (state.settings.platforms||[]).find(p=>p.name==='Shopee');
   if(!shopee || !Array.isArray(shopee.freightCapTiers) || !shopee.freightCapTiers.length) return null;
@@ -609,15 +620,20 @@ function shopeeFreightCap(price){
   return tier.cap;
 }
 // Preço que, depois de descontada a taxa daquela plataforma (fixa ou por
-// faixa, ex: Shopee), ainda rende o mesmo "preço sem taxa" de referência —
+// faixa, ex: Shopee) e o frete que sobra pro vendedor (extraCost — na Shopee,
+// só a parte acima do subsídio, recalculada a cada iteração pois o teto
+// depende da faixa de preço), ainda rende o "preço sem taxa" de referência —
 // resolvido por aproximações sucessivas pra funcionar com taxa em faixas.
-function suggestedPriceForPlatform(targetNet, platformName){
+function suggestedPriceForPlatform(targetNet, platformName, extraCost=0){
   const plat = (state.settings.platforms||[]).find(pl=>pl.name===platformName);
-  if(!plat) return targetNet;
-  let price = targetNet;
-  for(let i=0;i<20;i++){
+  if(!plat) return targetNet + extraCost;
+  let price = targetNet + extraCost;
+  let prev = 0;
+  for(let i=0;i<30 && Math.abs(price-prev)>0.005;i++){
+    prev = price;
     const fee = plat.tiers ? computeTieredFee(plat.tiers, price).fee : price*(plat.pct/100)+(plat.fixed||0);
-    price = targetNet + fee;
+    const freight = (platformName==='Shopee' && extraCost>0) ? Math.max(0, extraCost - (shopeeFreightCap(price)||0)) : extraCost;
+    price = targetNet + freight + fee;
   }
   return price;
 }
@@ -2371,8 +2387,8 @@ function renderCalculo(){
         </div>
         <div>
           <div style="font-weight:600;font-size:13.5px;">6. Custo de falha</div>
-          <div class="chip" style="font-family:var(--font-mono);margin:5px 0;">(material + energia + depreciação) × margem de falha%</div>
-          <div style="font-size:12px;color:var(--text-dim);">Cobre o risco de uma impressão falhar antes de terminar. Só entra material, energia e depreciação — embalagem e mão de obra são gastos que só acontecem depois que a peça já saiu boa, então não têm risco de falha.</div>
+          <div class="chip" style="font-family:var(--font-mono);margin:5px 0;">(material + energia + depreciação + 50% da mão de obra) × margem de falha%</div>
+          <div style="font-size:12px;color:var(--text-dim);">Cobre o risco de uma impressão falhar antes de terminar. Embalagem fica de fora — caixa e plástico bolha só são gastos depois que a peça sai boa. Metade da mão de obra entra porque setup e a descoberta da falha consomem tempo mesmo quando a impressão não termina.</div>
         </div>
         <div style="border-top:1px solid var(--line);padding-top:14px;">
           <div style="font-weight:600;font-size:13.5px;">Custo total</div>
@@ -2417,14 +2433,14 @@ function updateCalculoExample(){
       <div class="calc-line"><span>Depreciação (${prod.timeH}h × ${brl(c.machine?machineDeprCostPerHour(c.machine):0)}/h em ${c.machine?c.machine.name:'—'})</span><span>${brl(c.depreciation)}</span></div>
       <div class="calc-line"><span>Mão de obra (${(prod.laborActions||[]).length ? (prod.laborActions||[]).map(a=>`${a.action||'(sem nome)'} ${a.minutes}min`).join(' + ') : 'nenhuma ação cadastrada'} × ${brl(state.settings.laborHourlyRate||0)}/h)</span><span>${brl(c.laborCost)}</span></div>
       ${(prod.toolsUsed||[]).length ? `<div class="calc-line"><span>Ferramentas (${(prod.toolsUsed||[]).map(t=>{ const tool=state.materials.find(x=>x.id===t.toolId); return `${tool?tool.name:'?'} ${t.uses}x`; }).join(' + ')})</span><span>${brl(c.toolsCost)}</span></div>` : ''}
-      <div class="calc-line"><span>Custo de falha (${num(prod.failureMarginPct*100,0)}% sobre material+energia+depreciação)</span><span>${brl(c.failureCost)}</span></div>
+      <div class="calc-line"><span>Custo de falha (${num(prod.failureMarginPct*100,0)}% sobre material+energia+depreciação+50% da mão de obra)</span><span>${brl(c.failureCost)}</span></div>
       <div class="calc-line total"><span>Custo total</span><span>${brl(c.totalCost)}</span></div>
-      <div class="calc-line"><span>Preço sugerido — venda própria (margem de ${num(c.desiredMarginPct,0)}%)</span><span>${brl(c.suggestedPrice)}</span></div>
-      <div class="calc-line" style="color:var(--text-faint);"><span>↳ Mercado Livre (já com a taxa)</span><span>${brl(c.suggestedPriceMl)}</span></div>
-      <div class="calc-line" style="color:var(--text-faint);"><span>↳ Shopee (já com a taxa)</span><span>${brl(c.suggestedPriceShopee)}</span></div>
-    ${c.estimatedShopeeFreightCap!=null ? `<div class="calc-line" style="color:var(--text-faint);"><span>↳ Shopee — custo estimado de frete (teto do cupom)</span><span>${brl(c.estimatedShopeeFreightCap)}</span></div>` : ''}
+      <div class="calc-line total"><span>Preço sugerido — venda própria (margem de ${num(c.desiredMarginPct,0)}%)</span><span>${brl(c.suggestedPrice)}</span></div>
+      ${platformBreakdownHtml('Mercado Livre', c.suggestedPriceMl, c.mlFeeAmount, c.mlFeePct, prod.mlRealFeePct!=null?'real':'estimada', c.effectiveFreightMl, 'Frete estimado', c.netReceiptMl)}
+      ${platformBreakdownHtml('Shopee', c.suggestedPriceShopee, c.shopeeFeeAmount, c.shopeeFeePct, 'estimada', c.effectiveFreightShopee, 'Frete acima do subsídio (sai do seu bolso)', c.netReceiptShopee, c.estimatedShopeeFreightCap!=null ? `Shopee subsidia o frete até ${brl(c.estimatedShopeeFreightCap)} nessa faixa de preço — você só paga o que passar disso.` : null)}
       ${extraListingPlatforms().map(plat=>`<div class="calc-line" style="color:var(--text-faint);"><span>↳ ${plat.name} (já com a taxa)</span><span>${brl(c.suggestedPriceExtra[plat.id])}</span></div>`).join('')}
-      <div class="calc-line"><span>Preço praticado</span><span>${brl(c.practicedPrice)}</span></div>
+      <div class="calc-line" style="margin-top:8px;"><span>Preço praticado</span><span>${brl(c.practicedPrice)}</span></div>
+      <div class="calc-line"><span>Margem — venda própria / ML / Shopee</span><span style="color:${c.marginValue<0?'var(--red)':'var(--green)'}">${pct(c.marginPct)} · ${pct(c.marginMlPct)} · ${pct(c.marginShopeePct)}</span></div>
     </div>
   `;
 }
@@ -3131,7 +3147,7 @@ function renderProdutos(){
     const filSummary = (p.filaments||[]).map(f=>`${f.materialName} ${num(f.weightG,0)}g`).join(' + ');
     return `<tr>
       <td data-label="Foto">${p.photo ? `<img src="${p.photo}" alt="${p.name}" style="width:36px;height:36px;object-fit:cover;border-radius:6px;">` : `<div style="width:36px;height:36px;border-radius:6px;background:var(--panel-2);"></div>`}</td>
-      <td data-label="Produto">${p.name}${p.kitComponents && p.kitComponents.length ? `<div style="font-size:11px;font-style:italic;color:var(--text-faint);margin-top:2px;">${p.kitComponents.map(kc=>`${kc.qty>1?kc.qty+'x ':''}${kc.productName}`).join(' + ')}</div>` : ''}</td>
+      <td data-label="Produto">${p.name}${p.kitComponents && p.kitComponents.length ? `<div style="font-size:11px;font-style:italic;color:var(--text-faint);margin-top:2px;">${p.kitComponents.map(kc=>`${kc.qty>1?kc.qty+'x ':''}${kc.productName}`).join(' + ')}</div>` : ''}${(!p.laborActions || !p.laborActions.length) ? `<div style="margin-top:3px;"><span class="badge warn" title="Nenhuma ação de mão de obra cadastrada — o custo de mão de obra desse produto está zerado, o que deixa a margem otimista demais">sem mão de obra</span></div>` : ''}</td>
       <td title="${filSummary}" data-label="Filamentos">${filSummary}</td>
       <td data-label="Impressora">${c.machine ? c.machine.name : '<span class="badge bad">nenhuma</span>'}</td>
       <td class="right num" data-label="Peso total">${num(totalWeight(p),0)}g</td>
@@ -3139,7 +3155,7 @@ function renderProdutos(){
       <td class="right num" data-label="Custo total">${brl(c.totalCost)}</td>
       <td class="right num" data-label="Preço sugerido">${brl(c.suggestedPrice)}</td>
       <td class="right num" data-label="Preço praticado">${brl(c.practicedPrice)}<div style="font-size:10px;font-weight:400;color:var(--text-faint);white-space:nowrap;">ML ${brl(c.practicedPriceMl)} · Shopee ${brl(c.practicedPriceShopee)}${extraListingPlatforms().map(plat=>` · ${plat.name} ${brl(c.practicedPriceExtra[plat.id])}`).join('')}</div></td>
-      <td class="right num" data-label="Margem" style="color:${c.marginValue<0?'var(--red)':'var(--green)'}">${pct(c.marginPct)}</td>
+      <td class="right num" data-label="Margem" style="color:${c.marginValue<0?'var(--red)':'var(--green)'}">${pct(c.marginPct)}<div style="font-size:10px;font-weight:400;white-space:nowrap;">ML <span style="color:${c.marginMlPct<(state.settings.minMarginPct!=null?state.settings.minMarginPct:25)?'var(--red)':'var(--text-faint)'}">${pct(c.marginMlPct)}</span> · Shopee <span style="color:${c.marginShopeePct<(state.settings.minMarginPct!=null?state.settings.minMarginPct:25)?'var(--red)':'var(--text-faint)'}">${pct(c.marginShopeePct)}</span></div></td>
       <td class="right num" data-label="Estoque">${p.stock<=0?`<span class="badge mut">0</span>`:num(p.stock,0)}</td>
       <td class="right"><button class="btn ghost sm" onclick="openProductModal('${p.id}')">Editar</button> <button class="btn ghost sm" onclick="duplicateProduct('${p.id}')">Duplicar</button> <button class="btn ghost sm" onclick="deleteProduct('${p.id}')">Excluir</button></td>
     </tr>`;
@@ -4165,11 +4181,12 @@ function updateBoxFitStatus(){
 }
 // Detalha preço de venda → (–) taxa → (–) frete → valor líquido, passo a passo,
 // pra ficar claro de onde vem cada desconto (em vez de só um "já com a taxa").
-function platformBreakdownHtml(platformName, salePrice, feeAmount, feePct, feeQualifier, freightAmount, freightLabel, netReceipt){
+function platformBreakdownHtml(platformName, salePrice, feeAmount, feePct, feeQualifier, freightAmount, freightLabel, netReceipt, note){
   return `
     <div style="margin-top:8px;padding:8px 10px;background:var(--bg-alt);border-radius:8px;">
       <div class="calc-line" style="font-weight:600;"><span>${platformName} — preço de venda</span><span>${brl(salePrice)}</span></div>
       <div class="calc-line" style="color:var(--text-faint);font-size:11.5px;"><span>(–) Taxa ${platformName} (${feeQualifier}, ${num(feePct,1)}%)</span><span>-${brl(feeAmount)}</span></div>
+      ${note ? `<div style="color:var(--text-faint);font-size:11px;font-style:italic;padding:2px 0;">${note}</div>` : ''}
       ${freightAmount>0 ? `<div class="calc-line" style="color:var(--text-faint);font-size:11.5px;"><span>(–) ${freightLabel}</span><span>-${brl(freightAmount)}</span></div>` : ''}
       <div class="calc-line" style="border-top:1px dashed var(--line-soft);margin-top:4px;padding-top:4px;font-weight:600;color:var(--green);"><span>= Você recebe</span><span>${brl(netReceipt)}</span></div>
     </div>
@@ -4191,7 +4208,7 @@ function updateProductPreview(){
     <div class="calc-line total"><span>Custo total</span><span>${brl(c.totalCost)}</span></div>
     <div class="calc-line total"><span>Preço sugerido — venda própria (margem de ${num(form.desiredMarginPct,0)}%)</span><span>${brl(c.suggestedPrice)}</span></div>
     ${platformBreakdownHtml('Mercado Livre', c.suggestedPriceMl, c.mlFeeAmount, c.mlFeePct, editingProductMlFee!=null?'real':'estimada', c.effectiveFreightMl, 'Frete estimado', c.netReceiptMl)}
-    ${platformBreakdownHtml('Shopee', c.suggestedPriceShopee, c.shopeeFeeAmount, c.shopeeFeePct, 'estimada', c.effectiveFreightShopee, (form.estimatedFreightShopee>0?'Frete estimado':'Frete estimado (teto do cupom)'), c.netReceiptShopee)}
+    ${platformBreakdownHtml('Shopee', c.suggestedPriceShopee, c.shopeeFeeAmount, c.shopeeFeePct, 'estimada', c.effectiveFreightShopee, 'Frete acima do subsídio (sai do seu bolso)', c.netReceiptShopee, c.estimatedShopeeFreightCap!=null ? `Shopee subsidia o frete até ${brl(c.estimatedShopeeFreightCap)} nessa faixa de preço — você só paga o que passar disso.` : null)}
     ${extraListingPlatforms().map(plat=>`<div class="calc-line" style="color:var(--text-faint);"><span>↳ ${plat.name} (já com a taxa)</span><span>${brl(c.suggestedPriceExtra[plat.id])}</span></div>`).join('')}
   `;
   const priceInput = document.getElementById('pPrice');
@@ -4817,6 +4834,8 @@ function renderTaxas(){
     <div class="card">
       <div class="field"><label>Margem de lucro padrão sugerida (%)</label><input type="number" id="cfgMargin" value="${((1-1/(s.markupMultiplier||2.5))*100).toFixed(0)}" step="1"></div>
       <div class="field hint" style="margin-top:-8px;">Usada como ponto de partida ao criar um produto novo — depois, cada produto pode ter a margem ajustada individualmente no próprio cadastro.</div>
+      <div class="field"><label>Piso de alerta de margem (%)</label><input type="number" id="cfgMinMargin" value="${s.minMarginPct!=null?s.minMarginPct:25}" step="1"></div>
+      <div class="field hint" style="margin-top:-8px;">Abaixo desse valor, a margem por Mercado Livre/Shopee aparece em vermelho na lista de Produtos — é a taxa da plataforma que costuma corroer a margem, não o preço de venda direta.</div>
     </div>
   `;
 }
@@ -5076,6 +5095,7 @@ function confirmTaxas(){
   s.platforms = cleanPlatforms;
   const cfgMarginPct = Math.min(95, Math.max(0, parseFloat(document.getElementById('cfgMargin').value)||0));
   s.markupMultiplier = cfgMarginPct<100 ? 1/(1-cfgMarginPct/100) : 20;
+  s.minMarginPct = Math.min(95, Math.max(0, parseFloat(document.getElementById('cfgMinMargin').value)||0));
   saveSettings(); toast('Taxas salvas'); renderContent();
 }
 function confirmConfiguracoes(){
@@ -5437,7 +5457,7 @@ async function fetchMlRealFee(){
   const statusEl = document.getElementById('pMlFeeStatus');
   if(statusEl) statusEl.textContent = 'Buscando...';
   try{
-    const { data, error } = await client.functions.invoke('ml-api', { body:{ action:'fee-lookup', price, categoryId, listingTypeId } });
+    const { data, error } = await client.functions.invoke('ml-api', { body:{ action:'fee-lookup', price, categoryId, listingTypeId, weightG: totalWeight(form), lengthCm: form.lengthCm||0, widthCm: form.widthCm||0, heightCm: form.heightCm||0 } });
     if(error || !data || data.error || data.feePct==null){
       toast((data && data.error) || 'Não consegui buscar a taxa real — confira a conexão em Configurações','err');
       if(statusEl) statusEl.textContent = 'Falha ao buscar — tente de novo.';
