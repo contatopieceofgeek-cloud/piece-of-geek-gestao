@@ -60,8 +60,13 @@ Netlify, hoje via drag-and-drop manual (`app.netlify.com/drop` ou arrastar a pas
 
 Dashboard, Pedidos (Kanban com capacidade de produção), Vendas (carrinho multi-item, taxa de plataforma editável/automática, PIX, vínculo automático com Pedidos), Clientes (com status de atividade), Produtos (com foto, kit, orçamento rápido), Estoque (matéria-prima + produtos prontos), Cálculo (fórmulas, falhas de impressão), Caixa (blocos A-D de fluxo de caixa, fechamento mensal de reservas), Anual (MEI, investimentos, export Excel/PDF), catálogo em imagem/PDF, backup export/import, PWA instalável, sincronização multi-dispositivo.
 
+**Taxa automática do Mercado Livre via API oficial** — construída e deployada (não é mais um "cogitado"). Duas Edge Functions no Supabase (`supabase/functions/`):
+- `ml-oauth-callback`: recebe o redirect do OAuth do ML e grava o token em `ml_oauth_tokens` (RLS por `user_id`).
+- `ml-api`: ponte autenticada pro app — ações `sign-state` (assina o `state` do fluxo OAuth), `search-category` (sugestão de categoria ML) e `fee-lookup` (taxa real via `GET /sites/MLB/listing_prices`, já passando `billable_weight`/`logistic_type`/`shipping_mode` pra cobrir o custo operacional por peso de itens < R$79, regra do ML desde mar/2026).
+
+Variáveis de ambiente exigidas pelas Edge Functions (configuradas nos *secrets* do projeto Supabase, nunca no `app.js`): `ML_CLIENT_ID`, `ML_CLIENT_SECRET`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`.
+
 ## O que foi cogitado mas não construído
 
-- Taxa automática do Mercado Livre via API oficial (precisa de OAuth + backend — ver seção Supabase acima).
 - Alternar entre tema claro/escuro (hoje só tem o claro; o tema escuro original foi comparado num mockup, direção poderia ser recuperada se quiser os dois).
 - App nativo publicado em loja (App Store/Play Store) — considerado desnecessário já que o PWA instalado já atende "só eu ter acesso".

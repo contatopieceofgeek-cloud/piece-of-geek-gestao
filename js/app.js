@@ -21,7 +21,8 @@ function addMonths(ym, delta){
   const d = new Date(y, m-1+delta, 1);
   return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
 }
-const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; };
+const localDateStr = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+const todayStr = () => localDateStr(new Date());
 currentMonth = todayStr().slice(0,7);
 
 /* ===================== SEED DATA ===================== */
@@ -37,7 +38,7 @@ function seedData(){
     {id:uid(),name:'Caixa Grande',category:'Embalagem',unit:'un',costPerUnit:4.94,stock:0,lowStock:3,purchasePrice:49.40,purchaseQty:10,purchaseUnit:'un',isBox:true},
   ];
   const machines = [
-    {id:uid(),name:'Bambu Lab A1 Mini',price:2279,residual:227.9,lifeHours:5000,energyCostPerHour:0.0704,powerConsumptionKw:0.1,installmentValue:108.523809,installmentsTotal:21,startMonth:'2026-07',maintenanceLog:[]},
+    {id:uid(),name:'Bambu Lab A1 Mini',price:2279,residual:0,lifeHours:4000,energyCostPerHour:0.0704,powerConsumptionKw:0.1,maintenanceCostPerHour:0.25,installmentValue:108.523809,installmentsTotal:21,startMonth:'2026-07',maintenanceLog:[]},
   ];
   const p = (name,filamentType,weightG,timeH,boxType,practicedPrice) => ({
     id:uid(),name,filaments:[{materialName:filamentType,weightG}],timeH,bubbleWrapM:0.5,boxType,failureMarginPct:0.10,practicedPrice,stock:0,machineId:machines[0].id
@@ -82,7 +83,7 @@ function seedData(){
     instagram:'piece.of.geek',
     mlClientId:'',
     mlConnected:false,
-    printHoursPerDay:16,
+    printHoursPerDay:8,
     machines,
     expenses:[
       {id:uid(),name:'Assinatura STLFLIX',value:79.9},
@@ -166,6 +167,9 @@ function migrateProducts(products){
     if(!prod.toolsUsed) prod.toolsUsed = [];
     if(prod.estimatedFreightMl==null) prod.estimatedFreightMl = 0;
     if(prod.estimatedFreightShopee==null) prod.estimatedFreightShopee = 0;
+    if(!prod.modelOrigin) prod.modelOrigin = 'proprio';
+    if(prod.modelLicense==null) prod.modelLicense = '';
+    if(prod.modelSourceUrl==null) prod.modelSourceUrl = '';
   });
   return products;
 }
@@ -233,7 +237,7 @@ function migrateSettings(settings){
       settings.machines = [];
     }
   }
-  settings.machines.forEach(m=>{ if(m.energyCostPerHour==null) m.energyCostPerHour = 0.0704; if(m.powerConsumptionKw==null) m.powerConsumptionKw = 0; if(!m.id) m.id = uid(); if(!Array.isArray(m.maintenanceLog)) m.maintenanceLog = []; });
+  settings.machines.forEach(m=>{ if(m.energyCostPerHour==null) m.energyCostPerHour = 0.0704; if(m.powerConsumptionKw==null) m.powerConsumptionKw = 0; if(!m.id) m.id = uid(); if(!Array.isArray(m.maintenanceLog)) m.maintenanceLog = []; if(m.maintenanceCostPerHour==null) m.maintenanceCostPerHour = 0.25; });
   if(settings.energyTariffPerKwh==null) settings.energyTariffPerKwh = 0.75;
   if(settings.meiRevenueLimit==null) settings.meiRevenueLimit = 81000;
   if(settings.monthlyGoal==null) settings.monthlyGoal = 0;
@@ -247,7 +251,7 @@ function migrateSettings(settings){
   if(settings.instagram==null) settings.instagram = 'piece.of.geek';
   if(settings.mlClientId==null) settings.mlClientId = '';
   if(settings.mlConnected==null) settings.mlConnected = false;
-  if(settings.printHoursPerDay==null) settings.printHoursPerDay = 16;
+  if(settings.printHoursPerDay==null) settings.printHoursPerDay = 8;
   delete settings.machine;
   delete settings.machineCostPerHour;
   delete settings.energyCostPerHour;
@@ -553,6 +557,10 @@ function machineEnergyCostPerHour(machine){
   if(machine.powerConsumptionKw>0) return machine.powerConsumptionKw * (state.settings.energyTariffPerKwh||0);
   return machine.energyCostPerHour||0;
 }
+function machineMaintenanceCostPerHour(machine){
+  if(!machine) return 0;
+  return machine.maintenanceCostPerHour!=null ? machine.maintenanceCostPerHour : 0.25;
+}
 function calcProduct(prod){
   const s = state.settings;
   const machine = findMachine(prod.machineId);
@@ -563,13 +571,14 @@ function calcProduct(prod){
   const tapeCost = (prod.tapeM||0) * tapeUnitCost();
   const embalagemCost = bCost + bubbleCost + tapeCost;
   const depreciation = prod.timeH * machineDeprCostPerHour(machine);
+  const maintenance = prod.timeH * machineMaintenanceCostPerHour(machine);
   const totalLaborMinutes = (prod.laborActions||[]).reduce((a,x)=>a+(x.minutes||0),0);
   const laborCost = (totalLaborMinutes/60) * (s.laborHourlyRate||0);
   const toolsCost = (prod.toolsUsed||[]).reduce((a,t)=>a+(t.uses||0)*toolCostPerUse(state.materials.find(x=>x.id===t.toolId)),0);
   // Embalagem fica de fora (caixa/bolha não são gastos numa impressão que falha),
   // mas metade da mão de obra entra — setup e a descoberta da falha consomem tempo.
   const failureCost = (materialCost + energyCost + depreciation + laborCost*0.5) * prod.failureMarginPct;
-  const totalCost = materialCost + energyCost + embalagemCost + depreciation + failureCost + laborCost + toolsCost;
+  const totalCost = materialCost + energyCost + embalagemCost + depreciation + maintenance + failureCost + laborCost + toolsCost;
   const defaultMargin = 1 - (1/(s.markupMultiplier||2.5));
   const desiredMargin = prod.desiredMarginPct!=null ? Math.min(0.95,Math.max(0,prod.desiredMarginPct/100)) : defaultMargin;
   const suggestedPrice = desiredMargin < 1 ? totalCost / (1 - desiredMargin) : totalCost * (s.markupMultiplier||2.5);
@@ -608,7 +617,7 @@ function calcProduct(prod){
   const marginShopeeValue = netReceiptShopee - totalCost;
   const marginMlPct = practicedPriceMl > 0 ? (marginMlValue/practicedPriceMl)*100 : 0;
   const marginShopeePct = practicedPriceShopee > 0 ? (marginShopeeValue/practicedPriceShopee)*100 : 0;
-  return { materialCost, energyCost, boxCost:bCost, bubbleCost, tapeCost, embalagemCost, depreciation, laborCost, totalLaborMinutes, toolsCost, failureCost, totalCost, suggestedPrice, suggestedPriceMl, suggestedPriceShopee, suggestedPriceExtra, practicedPrice, practicedPriceMl, practicedPriceShopee, practicedPriceExtra, estimatedShopeeFreightCap, mlFeeAmount, shopeeFeeAmount, mlFeePct, shopeeFeePct, effectiveFreightMl, effectiveFreightShopee, netReceiptMl, netReceiptShopee, marginValue, marginPct, marginMlValue, marginShopeeValue, marginMlPct, marginShopeePct, desiredMarginPct: desiredMargin*100, machine };
+  return { materialCost, energyCost, boxCost:bCost, bubbleCost, tapeCost, embalagemCost, depreciation, maintenance, laborCost, totalLaborMinutes, toolsCost, failureCost, totalCost, suggestedPrice, suggestedPriceMl, suggestedPriceShopee, suggestedPriceExtra, practicedPrice, practicedPriceMl, practicedPriceShopee, practicedPriceExtra, estimatedShopeeFreightCap, mlFeeAmount, shopeeFeeAmount, mlFeePct, shopeeFeePct, effectiveFreightMl, effectiveFreightShopee, netReceiptMl, netReceiptShopee, marginValue, marginPct, marginMlValue, marginShopeeValue, marginMlPct, marginShopeePct, desiredMarginPct: desiredMargin*100, machine };
 }
 // Teto até onde a Shopee subsidia o frete grátis obrigatório (por faixa de
 // preço, desde mar/2026). O vendedor só paga o que passar desse teto — ver
@@ -1113,7 +1122,7 @@ function renderDashboard(){
 }
 function productProfitability(days){
   const cutoff = new Date(todayStr()+'T00:00:00'); cutoff.setDate(cutoff.getDate()-days);
-  const cutoffStr = cutoff.toISOString().slice(0,10);
+  const cutoffStr = localDateStr(cutoff);
   const byProduct = {};
   state.sales.filter(s=>s.date>=cutoffStr).forEach(s=>{
     if(!byProduct[s.productId]) byProduct[s.productId] = { productId:s.productId, name:s.productName, qty:0, revenue:0, profit:0, hours:0 };
@@ -1124,7 +1133,15 @@ function productProfitability(days){
     ...p,
     marginPct: p.revenue>0 ? (p.profit/p.revenue)*100 : 0,
     profitPerHour: p.hours>0 ? p.profit/p.hours : null,
-  })).sort((a,b)=>b.profit-a.profit);
+  // Com uma única impressora, hora de máquina é o recurso escasso — ordenar
+  // por lucro total colocaria no topo produtos de ticket alto e impressão
+  // longa, que são o pior uso da máquina, não o melhor.
+  })).sort((a,b)=>{
+    if(a.profitPerHour==null && b.profitPerHour==null) return b.profit-a.profit;
+    if(a.profitPerHour==null) return 1;
+    if(b.profitPerHour==null) return -1;
+    return b.profitPerHour-a.profitPerHour;
+  });
 }
 function renderProfitabilityTable(){
   const rows = productProfitability(90).slice(0,10);
@@ -1371,7 +1388,7 @@ function renderCapacityPanel(){
   const today = new Date();
   const lastDay = new Date(today.getFullYear(), today.getMonth()+1, 0).getDate();
   const daysLeft = Math.max(1, lastDay - today.getDate() + 1);
-  const hoursPerDay = state.settings.printHoursPerDay||16;
+  const hoursPerDay = state.settings.printHoursPerDay||8;
   const availableHours = daysLeft * hoursPerDay;
   const rows = machines.map(m=>{
     const neededHours = pending.reduce((sum,o)=>{
@@ -1408,7 +1425,7 @@ function orderDeadlineRisk(o){
   const machines = state.settings.machines||[];
   if(machines.length===0) return null;
   const machineId = prod.machineId || machines[0].id;
-  const hoursPerDay = state.settings.printHoursPerDay||16;
+  const hoursPerDay = state.settings.printHoursPerDay||8;
   const sameQueue = state.orders.filter(x=>x.status!=='Enviado').filter(x=>{
     const p2 = state.products.find(p=>p.id===x.productId);
     return p2 && (p2.machineId||machines[0].id)===machineId;
@@ -2381,18 +2398,23 @@ function renderCalculo(){
           <div style="font-size:12px;color:var(--text-dim);">É quanto a impressora "se desgasta" durante essa impressão específica — não é a parcela que você paga por mês, é um custo de uso da máquina.</div>
         </div>
         <div>
-          <div style="font-weight:600;font-size:13.5px;">5. Custo de mão de obra</div>
+          <div style="font-weight:600;font-size:13.5px;">5. Manutenção</div>
+          <div class="chip" style="font-family:var(--font-mono);margin:5px 0;">tempo de impressão (h) × custo de manutenção da impressora (R$/h)</div>
+          <div style="font-size:12px;color:var(--text-dim);">Estimativa fixa de troca de bico, correias, limpeza — configurável em "Gerenciar impressoras", não é calculada a partir do histórico de manutenção (poucas horas rodadas fariam o valor oscilar demais).</div>
+        </div>
+        <div>
+          <div style="font-weight:600;font-size:13.5px;">6. Custo de mão de obra</div>
           <div class="chip" style="font-family:var(--font-mono);margin:5px 0;">(minutos de pós-processamento ÷ 60) × valor da sua hora</div>
           <div style="font-size:12px;color:var(--text-dim);">Pintura, montagem, acabamento — qualquer trabalho manual depois que a peça sai da impressora.</div>
         </div>
         <div>
-          <div style="font-weight:600;font-size:13.5px;">6. Custo de falha</div>
+          <div style="font-weight:600;font-size:13.5px;">7. Custo de falha</div>
           <div class="chip" style="font-family:var(--font-mono);margin:5px 0;">(material + energia + depreciação + 50% da mão de obra) × margem de falha%</div>
           <div style="font-size:12px;color:var(--text-dim);">Cobre o risco de uma impressão falhar antes de terminar. Embalagem fica de fora — caixa e plástico bolha só são gastos depois que a peça sai boa. Metade da mão de obra entra porque setup e a descoberta da falha consomem tempo mesmo quando a impressão não termina.</div>
         </div>
         <div style="border-top:1px solid var(--line);padding-top:14px;">
           <div style="font-weight:600;font-size:13.5px;">Custo total</div>
-          <div class="chip" style="font-family:var(--font-mono);margin:5px 0;">material + energia + embalagem + depreciação + mão de obra + falha</div>
+          <div class="chip" style="font-family:var(--font-mono);margin:5px 0;">material + energia + embalagem + depreciação + manutenção + mão de obra + falha</div>
         </div>
         <div>
           <div style="font-weight:600;font-size:13.5px;">Preço sugerido</div>
@@ -2431,6 +2453,7 @@ function updateCalculoExample(){
       <div class="calc-line"><span>Energia (${prod.timeH}h × ${brl(c.machine?machineEnergyCostPerHour(c.machine):0)}/h em ${c.machine?c.machine.name:'—'})</span><span>${brl(c.energyCost)}</span></div>
       <div class="calc-line"><span>Embalagem (caixa + plástico bolha + fita)</span><span>${brl(c.embalagemCost)}</span></div>
       <div class="calc-line"><span>Depreciação (${prod.timeH}h × ${brl(c.machine?machineDeprCostPerHour(c.machine):0)}/h em ${c.machine?c.machine.name:'—'})</span><span>${brl(c.depreciation)}</span></div>
+      <div class="calc-line"><span>Manutenção (${prod.timeH}h × ${brl(c.machine?machineMaintenanceCostPerHour(c.machine):0)}/h)</span><span>${brl(c.maintenance)}</span></div>
       <div class="calc-line"><span>Mão de obra (${(prod.laborActions||[]).length ? (prod.laborActions||[]).map(a=>`${a.action||'(sem nome)'} ${a.minutes}min`).join(' + ') : 'nenhuma ação cadastrada'} × ${brl(state.settings.laborHourlyRate||0)}/h)</span><span>${brl(c.laborCost)}</span></div>
       ${(prod.toolsUsed||[]).length ? `<div class="calc-line"><span>Ferramentas (${(prod.toolsUsed||[]).map(t=>{ const tool=state.materials.find(x=>x.id===t.toolId); return `${tool?tool.name:'?'} ${t.uses}x`; }).join(' + ')})</span><span>${brl(c.toolsCost)}</span></div>` : ''}
       <div class="calc-line"><span>Custo de falha (${num(prod.failureMarginPct*100,0)}% sobre material+energia+depreciação+50% da mão de obra)</span><span>${brl(c.failureCost)}</span></div>
@@ -3147,7 +3170,7 @@ function renderProdutos(){
     const filSummary = (p.filaments||[]).map(f=>`${f.materialName} ${num(f.weightG,0)}g`).join(' + ');
     return `<tr>
       <td data-label="Foto">${p.photo ? `<img src="${p.photo}" alt="${p.name}" style="width:36px;height:36px;object-fit:cover;border-radius:6px;">` : `<div style="width:36px;height:36px;border-radius:6px;background:var(--panel-2);"></div>`}</td>
-      <td data-label="Produto">${p.name}${p.kitComponents && p.kitComponents.length ? `<div style="font-size:11px;font-style:italic;color:var(--text-faint);margin-top:2px;">${p.kitComponents.map(kc=>`${kc.qty>1?kc.qty+'x ':''}${kc.productName}`).join(' + ')}</div>` : ''}${(!p.laborActions || !p.laborActions.length) ? `<div style="margin-top:3px;"><span class="badge warn" title="Nenhuma ação de mão de obra cadastrada — o custo de mão de obra desse produto está zerado, o que deixa a margem otimista demais">sem mão de obra</span></div>` : ''}</td>
+      <td data-label="Produto">${p.name}${p.kitComponents && p.kitComponents.length ? `<div style="font-size:11px;font-style:italic;color:var(--text-faint);margin-top:2px;">${p.kitComponents.map(kc=>`${kc.qty>1?kc.qty+'x ':''}${kc.productName}`).join(' + ')}</div>` : ''}${(!p.laborActions || !p.laborActions.length) ? `<div style="margin-top:3px;"><span class="badge warn" title="Nenhuma ação de mão de obra cadastrada — o custo de mão de obra desse produto está zerado, o que deixa a margem otimista demais">sem mão de obra</span></div>` : ''}${(p.modelOrigin==='terceiro' && !p.modelLicense) ? `<div style="margin-top:3px;"><span class="badge bad" title="Modelo de terceiro sem licença registrada — confira se pode vender antes de anunciar em ML/Shopee">sem licença do modelo</span></div>` : ''}</td>
       <td title="${filSummary}" data-label="Filamentos">${filSummary}</td>
       <td data-label="Impressora">${c.machine ? c.machine.name : '<span class="badge bad">nenhuma</span>'}</td>
       <td class="right num" data-label="Peso total">${num(totalWeight(p),0)}g</td>
@@ -3901,6 +3924,20 @@ function openProductModal(id){
     <div class="field"><label>Foto (opcional)</label><input type="file" accept="image/*" id="pPhotoInput" onchange="handlePhotoUpload(this)"></div>
     <div id="pPhotoPreview"></div>
 
+    <div class="field"><label>Origem do modelo 3D</label>
+      <select id="pModelOrigin" onchange="toggleModelLicenseFields(this.value)">
+        <option value="proprio" ${p.modelOrigin!=='terceiro'?'selected':''}>Próprio (desenhei eu mesmo)</option>
+        <option value="terceiro" ${p.modelOrigin==='terceiro'?'selected':''}>Terceiro (baixado ou comprado)</option>
+      </select>
+    </div>
+    <div id="pModelLicenseBlock" style="display:${p.modelOrigin==='terceiro'?'block':'none'};">
+      <div class="row2">
+        <div class="field"><label>Licença</label><input id="pModelLicense" value="${p.modelLicense||''}" placeholder="Ex: CC0, CC BY, Comprada, Standard Digital File License"></div>
+        <div class="field"><label>Fonte do modelo (URL, opcional)</label><input id="pModelSourceUrl" value="${p.modelSourceUrl||''}" placeholder="Link do MakerWorld/Thingiverse/Cults3D..."></div>
+      </div>
+      <div class="field hint" style="margin-top:-8px;">Modelo de terceiro vendido em ML/Shopee exige comprovação de licença comercial — a licença padrão do MakerWorld, por exemplo, proíbe venda da peça impressa.</div>
+    </div>
+
     <div class="field" style="margin-bottom:6px;"><label>Filamentos usados nessa impressão</label></div>
     <div id="filamentRows"></div>
     <button class="btn ghost sm" style="margin-bottom:14px;" onclick="addFilamentRow()">+ Adicionar filamento</button>
@@ -4116,6 +4153,10 @@ function toggleNewCategoryInput(val){
   const el = document.getElementById('pCategoryNew');
   if(el){ el.style.display = val==='__new__' ? 'block' : 'none'; if(val!=='__new__') el.value=''; }
 }
+function toggleModelLicenseFields(val){
+  const el = document.getElementById('pModelLicenseBlock');
+  if(el) el.style.display = val==='terceiro' ? 'block' : 'none';
+}
 function readProductForm(){
   const catSel = document.getElementById('pCategory').value;
   const form = {
@@ -4136,6 +4177,9 @@ function readProductForm(){
     heightCm: parseFloat(document.getElementById('pHeightCm').value)||0,
     estimatedFreightMl: parseFloat(document.getElementById('pFreightMl').value)||0,
     estimatedFreightShopee: parseFloat(document.getElementById('pFreightShopee').value)||0,
+    modelOrigin: document.getElementById('pModelOrigin').value,
+    modelLicense: document.getElementById('pModelLicense').value.trim(),
+    modelSourceUrl: document.getElementById('pModelSourceUrl').value.trim(),
   };
   const mlCatIdEl = document.getElementById('pMlCategoryId');
   if(mlCatIdEl){
@@ -4202,6 +4246,7 @@ function updateProductPreview(){
     <div class="calc-line"><span>Custo energia</span><span>${brl(c.energyCost)}</span></div>
     <div class="calc-line"><span>Embalagem (caixa + bolha + fita)</span><span>${brl(c.embalagemCost)}</span></div>
     <div class="calc-line"><span>Depreciação (${c.machine?c.machine.name:'sem impressora'})</span><span>${brl(c.depreciation)}</span></div>
+    <div class="calc-line"><span>Manutenção</span><span>${brl(c.maintenance)}</span></div>
     <div class="calc-line"><span>Mão de obra</span><span>${brl(c.laborCost)}</span></div>
     ${c.toolsCost>0 ? `<div class="calc-line"><span>Ferramentas</span><span>${brl(c.toolsCost)}</span></div>` : ''}
     <div class="calc-line"><span>Custo de falha</span><span>${brl(c.failureCost)}</span></div>
@@ -4280,7 +4325,7 @@ function renderEstoque(){
 }
 function materialMonthlyConsumption(materialName){
   const cutoff = new Date(); cutoff.setDate(cutoff.getDate()-60);
-  const cutoffStr = cutoff.toISOString().slice(0,10);
+  const cutoffStr = localDateStr(cutoff);
   let total = 0;
   state.sales.filter(s=>s.date && s.date>=cutoffStr).forEach(s=>{
     const prod = state.products.find(p=>p.id===s.productId);
@@ -4885,7 +4930,7 @@ function renderConfiguracoes(){
     <div class="card">
       <div class="row2">
         <div class="field"><label>Limite anual de faturamento do MEI (R$)</label><input type="number" id="cfgMeiLimit" value="${s.meiRevenueLimit||81000}" step="100"></div>
-        <div class="field"><label>Horas de impressão disponíveis por dia (por impressora)</label><input type="number" id="cfgPrintHours" value="${s.printHoursPerDay||16}" step="0.5"></div>
+        <div class="field"><label>Horas de impressão disponíveis por dia (por impressora)</label><input type="number" id="cfgPrintHours" value="${s.printHoursPerDay||8}" step="0.5"></div>
       </div>
       <div class="field"><label>Meta de faturamento mensal (R$)</label><input type="number" id="cfgMonthlyGoal" value="${s.monthlyGoal||0}" step="50" placeholder="0 = sem meta definida"></div>
     </div>
@@ -4952,6 +4997,8 @@ function renderMachineRows(){
       </div>
       <div class="field hint" style="margin-top:-8px;margin-bottom:10px;">${m.powerConsumptionKw>0 ? `Calculado automaticamente pela tarifa (aba Cálculo): ${num(m.powerConsumptionKw,2)}kW × ${brl(state.settings.energyTariffPerKwh||0)}/kWh = ${brl(machineEnergyCostPerHour(m))}/h` : 'Preencha a potência pra calcular sozinho pela tarifa, ou deixe em 0 e informe o R$/h manualmente.'}</div>
       <div class="field hint" style="margin-top:-8px;margin-bottom:10px;">Depreciação calculada: ${brl(machineDeprCostPerHour(m))}/h</div>
+      <div class="field"><label>Manutenção (R$/h)</label><input type="number" step="0.01" value="${m.maintenanceCostPerHour!=null?m.maintenanceCostPerHour:0.25}" oninput="editingMachines[${i}].maintenanceCostPerHour=parseFloat(this.value)||0"></div>
+      <div class="field hint" style="margin-top:-8px;margin-bottom:10px;">Estimativa fixa de troca de bico, correias, limpeza etc. — não é derivada do histórico de manutenção abaixo (poucas horas rodadas fariam o valor oscilar demais). Revise a cada 6 meses.</div>
       <div class="row3">
         <div class="field"><label>Parcela mensal (R$)</label><input type="number" step="0.01" value="${m.installmentValue||0}" oninput="editingMachines[${i}].installmentValue=parseFloat(this.value)||0"></div>
         <div class="field"><label>Total de parcelas</label><input type="number" step="1" value="${m.installmentsTotal||0}" oninput="editingMachines[${i}].installmentsTotal=parseFloat(this.value)||0"></div>
@@ -5006,7 +5053,7 @@ function deleteMaintenanceEntry(machineId, entryId){
   openMaintenanceModal(machineId);
 }
 function addMachineRow(){
-  editingMachines.push({ id:uid(), name:'Nova impressora', price:0, residual:0, lifeHours:5000, energyCostPerHour:0.0704, installmentValue:0, installmentsTotal:0, startMonth:currentMonth });
+  editingMachines.push({ id:uid(), name:'Nova impressora', price:0, residual:0, lifeHours:5000, energyCostPerHour:0.0704, maintenanceCostPerHour:0.25, installmentValue:0, installmentsTotal:0, startMonth:currentMonth });
   renderMachineRows();
 }
 function removeMachineRow(i){
@@ -5110,7 +5157,7 @@ function confirmConfiguracoes(){
   s.laborHourlyRate = parseFloat(document.getElementById('cfgLabor').value)||0;
   s.meiRevenueLimit = parseFloat(document.getElementById('cfgMeiLimit').value)||81000;
   s.monthlyGoal = parseFloat(document.getElementById('cfgMonthlyGoal').value)||0;
-  s.printHoursPerDay = parseFloat(document.getElementById('cfgPrintHours').value)||16;
+  s.printHoursPerDay = parseFloat(document.getElementById('cfgPrintHours').value)||8;
   s.machines = editingMachines.filter(m=>m.name && m.name.trim());
   s.reserveGoals = editingReserveGoals.filter(g=>g.name && g.name.trim());
   saveSettings(); toast('Configurações salvas'); renderContent();
