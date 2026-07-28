@@ -3971,7 +3971,14 @@ function openProductModal(id){
     <div class="field hint" id="pBoxFitStatus" style="margin-top:-8px;"></div>
     <div class="row2">
       <div class="field"><label>Plástico bolha (m)</label><input type="number" id="pBubble" value="${p.bubbleWrapM}" step="0.1" oninput="updateProductPreview()"></div>
-      <div class="field"><label>Tempo impressão (h)</label><input type="number" id="pTime" value="${p.timeH}" step="0.01" oninput="updateProductPreview()"></div>
+      <div class="field"><label>Tempo impressão</label>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <input type="number" id="pTimeH" value="${Math.floor(p.timeH||0)}" min="0" step="1" placeholder="h" style="width:0;flex:1;" oninput="updateProductPreview()">
+          <span style="font-size:12px;color:var(--text-faint);">h</span>
+          <input type="number" id="pTimeMin" value="${Math.round(((p.timeH||0)%1)*60)}" min="0" max="59" step="1" placeholder="min" style="width:0;flex:1;" oninput="updateProductPreview()">
+          <span style="font-size:12px;color:var(--text-faint);">min</span>
+        </div>
+      </div>
     </div>
     <div class="row2">
       <div class="field"><label>Fita adesiva usada (m)</label><input type="number" id="pTape" value="${p.tapeM||0}" step="0.1" oninput="updateProductPreview()"></div>
@@ -4186,7 +4193,7 @@ function readProductForm(){
     filaments: editingFilaments,
     boxType: document.getElementById('pBox').value,
     machineId: document.getElementById('pMachine').value,
-    timeH: parseFloat(document.getElementById('pTime').value)||0,
+    timeH: (parseFloat(document.getElementById('pTimeH').value)||0) + (parseFloat(document.getElementById('pTimeMin').value)||0)/60,
     bubbleWrapM: parseFloat(document.getElementById('pBubble').value)||0,
     tapeM: parseFloat(document.getElementById('pTape').value)||0,
     failureMarginPct: (parseFloat(document.getElementById('pFail').value)||0)/100,
