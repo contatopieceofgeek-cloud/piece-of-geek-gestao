@@ -73,6 +73,7 @@ function seedData(){
   const settings = {
     businessName:'Piece of Geek 3D',
     businessLogo:null,
+    customOrderSeq:0,
     markupMultiplier:2.5,
     energyTariffPerKwh:0.75,
     meiRevenueLimit:81000,
@@ -122,7 +123,7 @@ function seedData(){
     lastActiveMonth: todayStr().slice(0,7),
     laborHourlyRate:25,
   };
-  return { materials, products, sales:[], orders:[], customers:[], printFailures:[], listings:[], settings };
+  return { materials, products, sales:[], orders:[], customers:[], printFailures:[], listings:[], customOrders:[], settings };
 }
 
 /* ===================== STORAGE ===================== */
@@ -199,6 +200,12 @@ function migrateCustomOrders(list){
     if(o.modelSourceUrl==null) o.modelSourceUrl = '';
     if(o.modelFileName==null) o.modelFileName = '';
     if(o.orderNumber==null) o.orderNumber = '';
+    if(o.contact==null) o.contact = '';
+    if(!o.orderType) o.orderType = 'outro';
+    if(o.linkedProductId==null) o.linkedProductId = '';
+    if(o.paymentMethod==null) o.paymentMethod = '';
+    if(o.deliveryMethod==null) o.deliveryMethod = '';
+    if(o.deliveryAddress==null) o.deliveryAddress = '';
     if(o.orderDate==null) o.orderDate = todayStr();
     if(o.customerId==null) o.customerId = '';
     if(o.qty==null) o.qty = 1;
@@ -273,6 +280,13 @@ function migrateSettings(settings){
   if(settings.minMarginPct==null) settings.minMarginPct = 25;
   if(settings.businessName==null) settings.businessName = 'Piece of Geek 3D';
   if(settings.businessLogo===undefined) settings.businessLogo = null;
+  if(settings.customOrderSeq==null){
+    // state.customOrders já foi atribuído antes de migrateSettings rodar (ver
+    // applyLoadedState) — usa o maior número já existente como ponto de partida,
+    // pra não colidir com pedidos que já tenham número (ex: dado de teste).
+    const nums = (state.customOrders||[]).map(o=>parseInt((o.orderNumber||'').replace(/\D/g,''),10)).filter(n=>!isNaN(n));
+    settings.customOrderSeq = nums.length ? Math.max(...nums) : 0;
+  }
   if(!Array.isArray(settings.expenses)){
     settings.expenses = settings.opExpenses ? [{id:uid(),name:'Despesas operacionais (migrado)',value:settings.opExpenses}] : [];
   }
@@ -973,7 +987,7 @@ function renderTopbarActions(){
   else if(currentTab==='vendas') el.innerHTML = `<button class="btn ghost" onclick="switchTab('taxas')">Taxas das plataformas</button> <button class="btn ghost" onclick="exportSalesExcel()">Exportar</button> <button class="btn primary" onclick="openSaleModal()">+ Nova venda</button>`;
   else if(currentTab==='clientes') el.innerHTML = `<button class="btn ghost" onclick="exportCustomersExcel()">Exportar</button> <button class="btn primary" onclick="openCustomerModal()">+ Novo cliente</button>`;
   else if(currentTab==='produtos') el.innerHTML = `<button class="btn ghost" onclick="openQuickQuoteModal()">Orçamento rápido</button> <button class="btn ghost" onclick="openKitModal()">Criar kit</button> <button class="btn ghost" onclick="exportCatalogImage()">Catálogo (imagem)</button> <button class="btn ghost" onclick="exportCatalogPDF()">Catálogo (PDF, 1 pág./produto)</button> <button class="btn primary" onclick="openProductModal()">+ Novo produto</button>`;
-  else if(currentTab==='personalizados') el.innerHTML = `<button class="btn primary" onclick="openCustomOrderModal()">+ Nova encomenda personalizada</button>`;
+  else if(currentTab==='personalizados') el.innerHTML = `<button class="btn primary" onclick="openQuickCustomOrderModal()">+ Nova encomenda personalizada</button>`;
   else if(currentTab==='anuncios') el.innerHTML = '';
   else if(currentTab==='estoque') el.innerHTML = stockTab==='materiais' ? `<button class="btn primary" onclick="openMaterialModal()">+ Nova matéria-prima</button>` : `<button class="btn primary" onclick="switchTab('impressao')">Ir pra Fila de Impressão</button>`;
   else if(currentTab==='impressao') el.innerHTML = `<button class="btn primary" onclick="openPrintJobModal()">+ Nova impressão</button>`;
@@ -4415,14 +4429,18 @@ function confirmProduct(id){
 // pedido/cliente e a ficha técnica de impressão — export vira uma peça de cada
 // vez, não o catálogo inteiro. Ficha inspirada no modelo em papel já usado.
 let personalizadosFilter = { search:'' };
+const CUSTOM_ORDER_TYPES = { chaveiro:'Chaveiro', lembrancinha:'Lembrancinha', topo_bolo:'Topo de bolo', outro:'Outro' };
+function orderTypeLabel(t){ return CUSTOM_ORDER_TYPES[t] || CUSTOM_ORDER_TYPES.outro; }
 function customerNameFor(o){
   if(o.customerId){ const cu = state.customers.find(c=>c.id===o.customerId); if(cu) return cu.name; }
   return o.customerName || 'Avulso';
 }
-function nextCustomOrderNumber(){
-  const nums = state.customOrders.map(o=>parseInt((o.orderNumber||'').replace(/\D/g,''),10)).filter(n=>!isNaN(n));
-  const next = (nums.length ? Math.max(...nums) : 0) + 1;
-  return String(next).padStart(4,'0');
+// Contador persistente em settings — nunca deriva do maior número já usado,
+// senão excluir a última encomenda faz o próximo número ser reaproveitado.
+function allocateCustomOrderNumber(){
+  state.settings.customOrderSeq = (state.settings.customOrderSeq||0) + 1;
+  saveSettings();
+  return String(state.settings.customOrderSeq).padStart(4,'0');
 }
 function renderPersonalizados(){
   if(state.customOrders.length===0) return `<div class="card">${emptyState('Nenhuma encomenda personalizada cadastrada ainda. Clique em "+ Nova encomenda personalizada".')}</div>`;
@@ -4431,30 +4449,42 @@ function renderPersonalizados(){
     const q = personalizadosFilter.search.toLowerCase();
     list = list.filter(o=>(o.name||'').toLowerCase().includes(q) || (o.orderNumber||'').toLowerCase().includes(q) || customerNameFor(o).toLowerCase().includes(q));
   }
-  const resultBadge = (r) => r==='ok' ? '<span class="badge ok">OK</span>' : r==='falha_parcial' ? '<span class="badge warn">Falha parcial</span>' : r==='falha_total' ? '<span class="badge bad">Falha total</span>' : '<span class="badge mut">—</span>';
-  const rowHtml = (o) => {
+  const resultBadge = (r) => r==='ok' ? '<span class="badge ok">OK</span>' : r==='falha_parcial' ? '<span class="badge warn">Falha parcial</span>' : r==='falha_total' ? '<span class="badge bad">Falha total</span>' : '';
+  const cardHtml = (o) => {
     const c = calcProduct(o);
-    return `<tr>
-      <td data-label="Foto">${o.photo ? `<img src="${o.photo}" alt="${o.name}" style="width:36px;height:36px;object-fit:cover;border-radius:6px;">` : `<div style="width:36px;height:36px;border-radius:6px;background:var(--panel-2);"></div>`}</td>
-      <td data-label="Peça">${o.name||'(sem nome)'}${o.orderNumber ? `<div style="font-size:11px;color:var(--text-faint);margin-top:2px;">Pedido ${o.orderNumber}</div>` : ''}</td>
-      <td data-label="Cliente">${customerNameFor(o)}</td>
-      <td class="right num" data-label="Qtd">${o.qty||1}</td>
-      <td class="right num" data-label="Custo total">${brl(c.totalCost)}</td>
-      <td class="right num" data-label="Valor total">${brl(c.practicedPrice)}</td>
-      <td class="right num" data-label="Margem" style="color:${c.marginValue<0?'var(--red)':'var(--green)'}">${pct(c.marginPct)}</td>
-      <td data-label="Resultado">${resultBadge(o.result)}</td>
-      <td class="right"><button class="btn ghost sm" onclick="openCustomOrderModal('${o.id}')">Editar</button> <button class="btn ghost sm" onclick="exportCustomOrderPDF('${o.id}')">Ficha</button> <button class="btn ghost sm" onclick="deleteCustomOrder('${o.id}')">Excluir</button></td>
-    </tr>`;
+    return `<div class="card" style="padding:14px 16px;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
+        <div style="min-width:0;">
+          <div style="font-weight:600;font-size:13.5px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+            ${o.name||orderTypeLabel(o.orderType)}
+            <span class="badge info">${orderTypeLabel(o.orderType)}</span>
+          </div>
+          <div style="font-size:11.5px;color:var(--text-faint);margin-top:3px;">Pedido ${o.orderNumber||'—'} · ${customerNameFor(o)}${o.contact?' · '+o.contact:''}</div>
+        </div>
+        ${resultBadge(o.result)}
+      </div>
+      <div style="display:flex;gap:14px;margin-top:10px;font-size:12px;color:var(--text-dim);flex-wrap:wrap;">
+        <span>Entrega: ${o.deliveryDate?fmtDate(o.deliveryDate):'—'}</span>
+        <span>Qtd: ${o.qty||1}</span>
+        <span>Custo: ${brl(c.totalCost)}</span>
+        <span>Valor: ${brl(c.practicedPrice)}</span>
+        <span style="color:${c.marginValue<0?'var(--red)':'var(--green)'}">Margem: ${pct(c.marginPct)}</span>
+      </div>
+      <div style="display:flex;gap:6px;margin-top:12px;">
+        <button class="btn ghost sm" onclick="openCustomOrderModal('${o.id}')">Abrir</button>
+        <button class="btn ghost sm" onclick="exportCustomOrderPDF('${o.id}')">Ficha</button>
+        <button class="btn ghost sm" onclick="deleteCustomOrder('${o.id}')">Excluir</button>
+      </div>
+    </div>`;
   };
   return `
     <div class="filter-bar">
       <div class="field"><label>Buscar</label><input value="${personalizadosFilter.search}" placeholder="Nome, pedido ou cliente..." oninput="personalizadosFilter.search=this.value; renderContent();"></div>
       <div class="field hint" style="padding-top:9px;">${list.length} de ${state.customOrders.length} encomenda(s)</div>
     </div>
-    <div class="tbl-wrap tbl-responsive"><table>
-      <thead><tr><th></th><th>Peça</th><th>Cliente</th><th class="right">Qtd</th><th class="right">Custo total</th><th class="right">Valor total</th><th class="right">Margem</th><th>Resultado</th><th></th></tr></thead>
-      <tbody>${list.map(rowHtml).join('')}</tbody>
-    </table></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:12px;">
+      ${list.map(cardHtml).join('')}
+    </div>
   `;
 }
 function deleteCustomOrder(id){
@@ -4468,196 +4498,274 @@ function toggleCoCustomerField(val){
   const el = document.getElementById('coCustomerNameWrap');
   if(el) el.style.display = val ? 'none' : 'block';
 }
+
+/* ---- Momento 1: criação rápida — só o que se sabe assim que a encomenda chega ---- */
+function openQuickCustomOrderModal(){
+  showModal('Nova encomenda personalizada', `
+    <div class="field"><label>Nome do cliente</label>
+      <input id="qcoClientName" list="qcoClientNames" placeholder="Ex: Maria Silva" oninput="autofillQcoContact(this.value)">
+      <datalist id="qcoClientNames">${state.customers.map(cu=>`<option value="${cu.name}">`).join('')}</datalist>
+    </div>
+    <div class="field"><label>Contato</label><input id="qcoContact" placeholder="(11) 99999-9999" oninput="this.dataset.touched='1'"></div>
+    <div class="field"><label>Tipo</label>
+      <select id="qcoType">
+        ${Object.entries(CUSTOM_ORDER_TYPES).map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}
+      </select>
+    </div>
+    <div class="row2">
+      <div class="field"><label>Data de entrega</label><input type="date" id="qcoDeliveryDate"></div>
+      <div class="field"><label>Quantidade</label><input type="number" id="qcoQty" value="1" min="1" step="1"></div>
+    </div>
+    <div class="field hint" style="margin-top:-8px;">Só o essencial pra abrir o pedido — peça, material, impressora e ficha técnica você preenche depois, na hora de produzir.</div>
+    <div class="modal-actions">
+      <button class="btn ghost" onclick="closeModal()">Cancelar</button>
+      <button class="btn primary" onclick="confirmQuickCustomOrder()">Criar encomenda</button>
+    </div>
+  `);
+}
+function autofillQcoContact(name){
+  const contactEl = document.getElementById('qcoContact');
+  if(!contactEl || contactEl.dataset.touched) return;
+  const cu = state.customers.find(c=>c.name.trim().toLowerCase()===name.trim().toLowerCase());
+  if(cu) contactEl.value = cu.contact||'';
+}
+function confirmQuickCustomOrder(){
+  const clientName = document.getElementById('qcoClientName').value.trim();
+  const contact = document.getElementById('qcoContact').value.trim();
+  const type = document.getElementById('qcoType').value;
+  const deliveryDate = document.getElementById('qcoDeliveryDate').value;
+  const qty = parseFloat(document.getElementById('qcoQty').value)||1;
+  if(!clientName || !contact || !type || !deliveryDate){ toast('Preencha nome, contato, tipo e data de entrega','err'); return; }
+  let cu = state.customers.find(c=>c.name.trim().toLowerCase()===clientName.toLowerCase());
+  if(!cu){ cu = { id:uid(), name:clientName, contact, notes:'' }; state.customers.push(cu); saveCustomers(); }
+  const orderNumber = allocateCustomOrderNumber();
+  const o = migrateCustomOrders([{
+    id:uid(), orderNumber, orderDate: todayStr(), name: orderTypeLabel(type), orderType: type,
+    customerId: cu.id, customerName: clientName, contact, qty, deliveryDate,
+    createdAt: new Date().toISOString(),
+  }])[0];
+  state.customOrders.push(o);
+  saveCustomOrders();
+  toast('Encomenda criada — pedido '+orderNumber);
+  closeModal();
+  renderContent();
+}
+
+/* ---- Momento 2: detalhe em 3 abas — preenchido aos poucos, na hora certa ---- */
+function switchCustomOrderTab(tab){
+  ['pedido','producao','custos'].forEach(t=>{
+    const panel = document.getElementById('coPanel_'+t);
+    const btn = document.getElementById('coTabBtn_'+t);
+    if(panel) panel.style.display = t===tab ? 'block' : 'none';
+    if(btn) btn.classList.toggle('active', t===tab);
+  });
+}
 function openCustomOrderModal(id){
   currentPreviewFn = updateCustomOrderPreview;
-  const editing = !!id;
+  const o = state.customOrders.find(x=>x.id===id);
+  if(!o) return;
   const filamentOpts = state.materials.filter(m=>m.category==='Filamento');
   const boxOpts = state.materials.filter(m=>m.category==='Embalagem' && m.isBox);
   const machineOpts = state.settings.machines||[];
-  if(filamentOpts.length===0 || boxOpts.length===0){
-    toast('Cadastre ao menos um filamento e uma caixa em Estoque antes de criar uma encomenda personalizada', 'err');
-    return;
-  }
-  if(machineOpts.length===0){
-    toast('Cadastre ao menos uma impressora em Configurações antes de criar uma encomenda personalizada', 'err');
-    return;
-  }
-  const o = editing ? state.customOrders.find(x=>x.id===id) : {
-    name:'', filaments:[{materialName:filamentOpts[0].name,weightG:100}], timeH:3, bubbleWrapM:0.5, tapeM:0.5, boxType:boxOpts[0].name,
-    failureMarginPct:0.10, practicedPrice:0, machineId:machineOpts[0].id, modelOrigin:'proprio', supports:'nao',
-    qty:1, orderNumber: nextCustomOrderNumber(), orderDate: todayStr(), nozzleDiameterMm:0.4,
-  };
-  editingFilaments = JSON.parse(JSON.stringify(o.filaments && o.filaments.length ? o.filaments : [{materialName:filamentOpts[0].name,weightG:100}]));
+  editingFilaments = JSON.parse(JSON.stringify(o.filaments||[]));
   editingLaborActions = JSON.parse(JSON.stringify(o.laborActions||[]));
   editingToolsUsed = JSON.parse(JSON.stringify(o.toolsUsed||[]));
   editingPhotoData = o.photo || null;
-  showModal(editing?'Editar encomenda personalizada':'Nova encomenda personalizada', `
-    <div class="section-title" style="margin-top:0;">A peça</div>
-    <div class="field"><label>Nome da peça</label><input id="pName" value="${o.name||''}" placeholder="Ex: Topo de bolo personalizado"></div>
-    <div class="field"><label>Categoria (opcional)</label>
-      <select id="pCategory" onchange="toggleNewCategoryInput(this.value)">
-        <option value="">Sem categoria</option>
-        ${productCategorySuggestions().map(c=>`<option value="${c}" ${o.category===c?'selected':''}>${c}</option>`).join('')}
-        <option value="__new__" ${o.category && !productCategorySuggestions().includes(o.category)?'selected':''}>+ Nova categoria...</option>
-      </select>
-      <input id="pCategoryNew" placeholder="Nome da nova categoria" style="margin-top:6px;display:${o.category && !productCategorySuggestions().includes(o.category)?'block':'none'};" value="${o.category && !productCategorySuggestions().includes(o.category)?o.category:''}">
+  showModal(`Pedido ${o.orderNumber||''} — ${o.name||orderTypeLabel(o.orderType)}`, `
+    <div class="tabbar">
+      <button class="tabbtn active" id="coTabBtn_pedido" onclick="switchCustomOrderTab('pedido')">Pedido</button>
+      <button class="tabbtn" id="coTabBtn_producao" onclick="switchCustomOrderTab('producao')">Produção</button>
+      <button class="tabbtn" id="coTabBtn_custos" onclick="switchCustomOrderTab('custos')">Custos</button>
     </div>
-    <div class="field"><label>Foto (opcional)</label><input type="file" accept="image/*" id="pPhotoInput" onchange="handlePhotoUpload(this)"></div>
-    <div id="pPhotoPreview"></div>
 
-    <div class="field" style="margin-bottom:6px;"><label>Filamentos usados nessa impressão</label></div>
-    <div id="filamentRows"></div>
-    <button class="btn ghost sm" style="margin-bottom:14px;" onclick="addFilamentRow()">+ Adicionar filamento</button>
+    <div id="coPanel_pedido">
+      <div class="section-title" style="margin-top:0;">Cliente</div>
+      <div class="row2">
+        <div class="field"><label>Cliente</label>
+          <select id="coCustomerId" onchange="toggleCoCustomerField(this.value)">
+            <option value="">Avulso / digitar nome</option>
+            ${state.customers.map(cu=>`<option value="${cu.id}" ${o.customerId===cu.id?'selected':''}>${cu.name}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field"><label>Contato</label><input id="coContact" value="${o.contact||''}" placeholder="(11) 99999-9999"></div>
+      </div>
+      <div class="field" id="coCustomerNameWrap" style="display:${o.customerId?'none':'block'};margin-top:-8px;"><label>Nome do cliente (se avulso)</label><input id="coCustomerName" value="${o.customerName||''}"></div>
+      <div class="field hint" style="margin-top:-8px;">${o.customerId?'Cliente cadastrado':'Cliente avulso — sem cadastro'}</div>
 
-    <div class="row2">
-      <div class="field"><label>Impressora usada</label><select id="pMachine" onchange="refreshCurrentPreview()">
-        ${machineOpts.map(m=>`<option value="${m.id}" ${(o.machineId||machineOpts[0].id)===m.id?'selected':''}>${m.name}</option>`).join('')}
-      </select></div>
-      <div class="field"><label>Tipo de caixa</label><select id="pBox" onchange="refreshCurrentPreview()">
-        ${boxOpts.map(b=>`<option value="${b.name}" ${o.boxType===b.name?'selected':''}>${b.name}</option>`).join('')}
-      </select></div>
-    </div>
-    <div class="row2">
-      <div class="field"><label>Plástico bolha (m)</label><input type="number" id="pBubble" value="${o.bubbleWrapM||0}" step="0.1" oninput="refreshCurrentPreview()"></div>
-      <div class="field"><label>Tempo impressão</label>
-        <div style="display:flex;gap:6px;align-items:center;">
-          <input type="number" id="pTimeH" value="${Math.floor(o.timeH||0)}" min="0" step="1" placeholder="h" style="width:0;flex:1;" oninput="refreshCurrentPreview()">
-          <span style="font-size:12px;color:var(--text-faint);">h</span>
-          <input type="number" id="pTimeMin" value="${Math.round(((o.timeH||0)%1)*60)}" min="0" max="59" step="1" placeholder="min" style="width:0;flex:1;" oninput="refreshCurrentPreview()">
-          <span style="font-size:12px;color:var(--text-faint);">min</span>
+      <div class="section-title">Item</div>
+      <div class="row3">
+        <div class="field"><label>Tipo</label><select id="coOrderType">
+          ${Object.entries(CUSTOM_ORDER_TYPES).map(([v,l])=>`<option value="${v}" ${(o.orderType||'outro')===v?'selected':''}>${l}</option>`).join('')}
+        </select></div>
+        <div class="field"><label>Quantidade</label><input type="number" id="coQty" value="${o.qty||1}" min="1" step="1"></div>
+        <div class="field"><label>Produto do catálogo (opcional)</label><select id="coLinkedProductId">
+          <option value="">Nenhum</option>
+          ${state.products.map(p=>`<option value="${p.id}" ${o.linkedProductId===p.id?'selected':''}>${p.name}</option>`).join('')}
+        </select></div>
+      </div>
+      <div class="field"><label>Nome da peça</label><input id="pName" value="${o.name||''}" placeholder="Ex: Chaveiro Goku"></div>
+
+      <div class="section-title">Personalização</div>
+      <div style="background:var(--nozzle-dim);border-left:3px solid var(--nozzle);border-radius:8px;padding:14px 16px 2px;">
+        <div class="field"><label>Texto que vai na peça</label><textarea id="coPieceText" rows="2" style="font-family:var(--font-mono);text-transform:uppercase;">${o.pieceText||''}</textarea></div>
+        <div class="row3">
+          <div class="field"><label>Cor da base</label><input id="coBaseColor" value="${o.baseColor||''}"></div>
+          <div class="field"><label>Cor do texto/detalhe</label><input id="coDetailColor" value="${o.detailColor||''}"></div>
+          <div class="field"><label>Tamanho (mm)</label><input id="coSizeLabel" value="${o.sizeLabel||''}" placeholder="Ex: 80 x 60"></div>
+        </div>
+        <div class="field"><label>Acabamento</label><input id="coFinish" value="${o.finish||''}" placeholder="Ex: fosco, brilhoso"></div>
+        <div class="field"><label style="display:flex;align-items:center;gap:8px;font-weight:400;"><input type="checkbox" id="coApproved" ${o.approved?'checked':''} style="width:auto;"> Texto confirmado por escrito com o cliente</label></div>
+        <div class="row2">
+          <div class="field"><label>Data da confirmação</label><input type="date" id="coApprovalDate" value="${o.approvalDate||''}"></div>
+          <div class="field"><label>Confirmado por</label><input id="coApprovedBy" value="${o.approvedBy||''}"></div>
         </div>
       </div>
-    </div>
-    <div class="row2">
-      <div class="field"><label>Fita adesiva usada (m)</label><input type="number" id="pTape" value="${o.tapeM||0}" step="0.1" oninput="refreshCurrentPreview()"></div>
-      <div class="field"><label>Margem de falha (%)</label><input type="number" id="pFail" value="${(o.failureMarginPct*100)||10}" step="1" oninput="refreshCurrentPreview()"></div>
-    </div>
 
-    <div class="field" style="margin-bottom:6px;"><label>Mão de obra (ações e minutos de cada uma)</label></div>
-    <div id="laborActionRows"></div>
-    <button class="btn ghost sm" style="margin-bottom:14px;" onclick="addLaborActionRow()">+ Adicionar ação</button>
-    ${laborActionOptionsHtml()}
-
-    <div class="field" style="margin-bottom:6px;"><label>Ferramentas usadas (e quantos usos cada uma consome)</label></div>
-    <div id="toolsUsedRows"></div>
-    <button class="btn ghost sm" style="margin-bottom:14px;" onclick="addToolsUsedRow()">+ Adicionar ferramenta</button>
-
-    <div class="section-title">Pedido e cliente</div>
-    <div class="row3">
-      <div class="field"><label>Pedido nº</label><input id="coOrderNumber" value="${o.orderNumber||''}"></div>
-      <div class="field"><label>Data do pedido</label><input type="date" id="coOrderDate" value="${o.orderDate||todayStr()}"></div>
-      <div class="field"><label>Quantidade</label><input type="number" id="coQty" value="${o.qty||1}" min="1" step="1"></div>
-    </div>
-    <div class="field"><label>Cliente</label>
-      <select id="coCustomerId" onchange="toggleCoCustomerField(this.value)">
-        <option value="">Avulso / digitar nome</option>
-        ${state.customers.map(cu=>`<option value="${cu.id}" ${o.customerId===cu.id?'selected':''}>${cu.name}</option>`).join('')}
-      </select>
-    </div>
-    <div class="field" id="coCustomerNameWrap" style="display:${o.customerId?'none':'block'};"><label>Nome do cliente (se avulso)</label><input id="coCustomerName" value="${o.customerName||''}"></div>
-    <div class="field"><label>Tamanho (mm)</label><input id="coSizeLabel" value="${o.sizeLabel||''}" placeholder="Ex: 80 x 60"></div>
-    <div class="field"><label>Texto que vai na peça</label><textarea id="coPieceText" rows="2">${o.pieceText||''}</textarea></div>
-    <div class="row3">
-      <div class="field"><label>Cor da base</label><input id="coBaseColor" value="${o.baseColor||''}"></div>
-      <div class="field"><label>Cor do texto/detalhe</label><input id="coDetailColor" value="${o.detailColor||''}"></div>
-      <div class="field"><label>Acabamento</label><input id="coFinish" value="${o.finish||''}" placeholder="Ex: fosco, brilhoso"></div>
-    </div>
-    <div class="row2">
-      <div class="field"><label>Entrega prevista</label><input type="date" id="coDeliveryDate" value="${o.deliveryDate||''}"></div>
-      <div class="field"><label>Sinal pago (R$)</label><input type="number" id="coDepositPaid" value="${o.depositPaid||''}" step="0.01" placeholder="0,00"></div>
-    </div>
-    <div class="row2">
-      <div class="field"><label>Margem de lucro desejada (%)</label><input type="number" id="pMargin" value="${(o.desiredMarginPct!=null ? o.desiredMarginPct : calcProduct(o).desiredMarginPct).toFixed(0)}" step="1" oninput="document.getElementById('pPrice').dataset.touched=''; refreshCurrentPreview()"></div>
-      <div class="field"><label>Valor total combinado (R$)</label><input type="number" id="pPrice" value="${o.practicedPrice||''}" step="0.01" placeholder="deixe em branco = preço sugerido" oninput="this.dataset.touched='1'; refreshCurrentPreview()"></div>
-    </div>
-    <div class="helper-block" id="customOrderPreview"></div>
-    <div class="field" style="margin-top:10px;"><label style="display:flex;align-items:center;gap:8px;font-weight:400;"><input type="checkbox" id="coApproved" ${o.approved?'checked':''} style="width:auto;"> Conferi o texto, as cores e o tamanho — cliente autorizou a impressão</label></div>
-    <div class="row2">
-      <div class="field"><label>Data da aprovação</label><input type="date" id="coApprovalDate" value="${o.approvalDate||''}"></div>
-      <div class="field"><label>Confirmado por</label><input id="coApprovedBy" value="${o.approvedBy||''}"></div>
-    </div>
-
-    <div class="section-title">Ficha técnica — 1. Arquivo e licença</div>
-    <div class="row2">
-      <div class="field"><label>Nome do arquivo</label><input id="coModelFileName" value="${o.modelFileName||''}" placeholder="Ex: topo_bolo_v2.3mf"></div>
-      <div class="field"><label>Data de impressão</label><input type="date" id="coPrintDate" value="${o.printDate||''}"></div>
-    </div>
-    <div class="field"><label>Origem do modelo 3D</label>
-      <select id="pModelOrigin" onchange="toggleModelLicenseFields(this.value)">
-        <option value="proprio" ${o.modelOrigin!=='terceiro'?'selected':''}>Próprio (desenhei eu mesmo)</option>
-        <option value="terceiro" ${o.modelOrigin==='terceiro'?'selected':''}>Terceiro (baixado ou comprado)</option>
-      </select>
-    </div>
-    <div id="pModelLicenseBlock" style="display:${o.modelOrigin==='terceiro'?'block':'none'};">
+      <div class="section-title">Comercial</div>
       <div class="row2">
-        <div class="field"><label>Licença</label><input id="pModelLicense" value="${o.modelLicense||''}" placeholder="Ex: CC0, CC BY, Comprada"></div>
-        <div class="field"><label>Fonte do modelo (URL)</label><input id="pModelSourceUrl" value="${o.modelSourceUrl||''}" placeholder="Link do MakerWorld/Thingiverse/Cults3D..."></div>
+        <div class="field"><label>Margem de lucro desejada (%)</label><input type="number" id="pMargin" value="${(o.desiredMarginPct!=null ? o.desiredMarginPct : calcProduct(o).desiredMarginPct).toFixed(0)}" step="1" oninput="document.getElementById('pPrice').dataset.touched=''; refreshCurrentPreview()"></div>
+        <div class="field"><label>Valor total combinado (R$)</label><input type="number" id="pPrice" value="${o.practicedPrice||''}" step="0.01" placeholder="deixe em branco = preço sugerido" oninput="this.dataset.touched='1'; refreshCurrentPreview()"></div>
+      </div>
+      <div class="row2">
+        <div class="field"><label>Sinal pago (R$)</label><input type="number" id="coDepositPaid" value="${o.depositPaid||''}" step="0.01" placeholder="0,00"></div>
+        <div class="field"><label>Forma de pagamento</label><input id="coPaymentMethod" value="${o.paymentMethod||''}" placeholder="Ex: PIX, dinheiro"></div>
+      </div>
+
+      <div class="section-title">Entrega</div>
+      <div class="row3">
+        <div class="field"><label>Data prevista</label><input type="date" id="coDeliveryDate" value="${o.deliveryDate||''}"></div>
+        <div class="field"><label>Forma de entrega</label><input id="coDeliveryMethod" value="${o.deliveryMethod||''}" placeholder="Ex: retirada, Correios"></div>
+        <div class="field"><label>Endereço</label><input id="coDeliveryAddress" value="${o.deliveryAddress||''}"></div>
       </div>
     </div>
 
-    <div class="section-title">2 e 3. Material e perfil de fatiamento</div>
-    <div class="row2">
-      <div class="field"><label>Bico (°C)</label><input type="number" id="coNozzleTempC" value="${o.nozzleTempC||''}" step="1"></div>
-      <div class="field"><label>Temp. mesa (°C)</label><input type="number" id="coBedTempC" value="${o.bedTempC||''}" step="1"></div>
-    </div>
-    <div class="row3">
-      <div class="field"><label>Altura de camada (mm)</label><input type="number" id="coLayerHeightMm" value="${o.layerHeightMm||''}" step="0.01"></div>
-      <div class="field"><label>Diâmetro do bico (mm)</label><input type="number" id="coNozzleDiameterMm" value="${o.nozzleDiameterMm||0.4}" step="0.1"></div>
-      <div class="field"><label>Paredes</label><input type="number" id="coWalls" value="${o.walls||''}" step="1"></div>
-    </div>
-    <div class="row3">
-      <div class="field"><label>Preenchimento (%)</label><input type="number" id="coInfillPct" value="${o.infillPct||''}" step="1"></div>
-      <div class="field"><label>Padrão</label><input id="coInfillPattern" value="${o.infillPattern||''}" placeholder="Ex: grid, gyroid"></div>
-      <div class="field"><label>Velocidade (mm/s)</label><input type="number" id="coPrintSpeedMmS" value="${o.printSpeedMmS||''}" step="1"></div>
-    </div>
-    <div class="row2">
-      <div class="field"><label>Orientação na mesa</label><input id="coOrientation" value="${o.orientation||''}"></div>
-      <div class="field"><label>Suportes</label><select id="coSupports">
-        <option value="nao" ${o.supports!=='sim'?'selected':''}>Não</option>
-        <option value="sim" ${o.supports==='sim'?'selected':''}>Sim</option>
-      </select></div>
-    </div>
-    <div class="field"><label>Brim / raft</label><input id="coBrimRaft" value="${o.brimRaft||''}"></div>
-    <div class="row2">
-      <div class="field"><label>Pausa p/ troca de cor — camada nº</label><input id="coColorChangeLayer" value="${o.colorChangeLayer||''}"></div>
-      <div class="field"><label>Altura (mm)</label><input id="coColorChangeHeightMm" value="${o.colorChangeHeightMm||''}"></div>
+    <div id="coPanel_producao" style="display:none;">
+      <div class="section-title" style="margin-top:0;">Arquivo e licença</div>
+      <div class="row2">
+        <div class="field"><label>Nome do arquivo</label><input id="coModelFileName" value="${o.modelFileName||''}" placeholder="Ex: topo_bolo_v2.3mf"></div>
+        <div class="field"><label>Data de impressão</label><input type="date" id="coPrintDate" value="${o.printDate||''}"></div>
+      </div>
+      <div class="field"><label>Origem do modelo 3D</label>
+        <select id="pModelOrigin" onchange="toggleModelLicenseFields(this.value)">
+          <option value="proprio" ${o.modelOrigin!=='terceiro'?'selected':''}>Próprio (desenhei eu mesmo)</option>
+          <option value="terceiro" ${o.modelOrigin==='terceiro'?'selected':''}>Terceiro (baixado ou comprado)</option>
+        </select>
+      </div>
+      <div id="pModelLicenseBlock" style="display:${o.modelOrigin==='terceiro'?'block':'none'};">
+        <div class="row2">
+          <div class="field"><label>Licença</label><input id="pModelLicense" value="${o.modelLicense||''}" placeholder="Ex: CC0, CC BY, Comprada"></div>
+          <div class="field"><label>Fonte do modelo (URL)</label><input id="pModelSourceUrl" value="${o.modelSourceUrl||''}" placeholder="Link do MakerWorld/Thingiverse/Cults3D..."></div>
+        </div>
+      </div>
+
+      <div class="section-title">Insumos</div>
+      <div class="field" style="margin-bottom:6px;"><label>Filamentos usados nessa impressão</label></div>
+      <div id="filamentRows"></div>
+      <button class="btn ghost sm" style="margin-bottom:14px;" onclick="addFilamentRow()">+ Adicionar filamento</button>
+      <div class="row2">
+        <div class="field"><label>Impressora usada</label><select id="pMachine" onchange="refreshCurrentPreview()">
+          <option value="">Selecione...</option>
+          ${machineOpts.map(m=>`<option value="${m.id}" ${o.machineId===m.id?'selected':''}>${m.name}</option>`).join('')}
+        </select></div>
+        <div class="field"><label>Tipo de caixa</label><select id="pBox" onchange="refreshCurrentPreview()">
+          <option value="">Nenhuma</option>
+          ${boxOpts.map(b=>`<option value="${b.name}" ${o.boxType===b.name?'selected':''}>${b.name}</option>`).join('')}
+        </select></div>
+      </div>
+      <div class="row2">
+        <div class="field"><label>Plástico bolha (m)</label><input type="number" id="pBubble" value="${o.bubbleWrapM||0}" step="0.1" oninput="refreshCurrentPreview()"></div>
+        <div class="field"><label>Tempo impressão</label>
+          <div style="display:flex;gap:6px;align-items:center;">
+            <input type="number" id="pTimeH" value="${Math.floor(o.timeH||0)}" min="0" step="1" placeholder="h" style="width:0;flex:1;" oninput="refreshCurrentPreview()">
+            <span style="font-size:12px;color:var(--text-faint);">h</span>
+            <input type="number" id="pTimeMin" value="${Math.round(((o.timeH||0)%1)*60)}" min="0" max="59" step="1" placeholder="min" style="width:0;flex:1;" oninput="refreshCurrentPreview()">
+            <span style="font-size:12px;color:var(--text-faint);">min</span>
+          </div>
+        </div>
+      </div>
+      <div class="row2">
+        <div class="field"><label>Fita adesiva usada (m)</label><input type="number" id="pTape" value="${o.tapeM||0}" step="0.1" oninput="refreshCurrentPreview()"></div>
+        <div class="field"><label>Margem de falha (%)</label><input type="number" id="pFail" value="${(o.failureMarginPct*100)||10}" step="1" oninput="refreshCurrentPreview()"></div>
+      </div>
+      <div class="field" style="margin-bottom:6px;"><label>Mão de obra (ações e minutos de cada uma)</label></div>
+      <div id="laborActionRows"></div>
+      <button class="btn ghost sm" style="margin-bottom:14px;" onclick="addLaborActionRow()">+ Adicionar ação</button>
+      ${laborActionOptionsHtml()}
+      <div class="field" style="margin-bottom:6px;"><label>Ferramentas usadas (e quantos usos cada uma consome)</label></div>
+      <div id="toolsUsedRows"></div>
+      <button class="btn ghost sm" style="margin-bottom:14px;" onclick="addToolsUsedRow()">+ Adicionar ferramenta</button>
+
+      <div class="section-title">Perfil de fatiamento</div>
+      <div class="row2">
+        <div class="field"><label>Bico (°C)</label><input type="number" id="coNozzleTempC" value="${o.nozzleTempC||''}" step="1"></div>
+        <div class="field"><label>Temp. mesa (°C)</label><input type="number" id="coBedTempC" value="${o.bedTempC||''}" step="1"></div>
+      </div>
+      <div class="row3">
+        <div class="field"><label>Altura de camada (mm)</label><input type="number" id="coLayerHeightMm" value="${o.layerHeightMm||''}" step="0.01"></div>
+        <div class="field"><label>Diâmetro do bico (mm)</label><input type="number" id="coNozzleDiameterMm" value="${o.nozzleDiameterMm||0.4}" step="0.1"></div>
+        <div class="field"><label>Paredes</label><input type="number" id="coWalls" value="${o.walls||''}" step="1"></div>
+      </div>
+      <div class="row3">
+        <div class="field"><label>Preenchimento (%)</label><input type="number" id="coInfillPct" value="${o.infillPct||''}" step="1"></div>
+        <div class="field"><label>Padrão</label><input id="coInfillPattern" value="${o.infillPattern||''}" placeholder="Ex: grid, gyroid"></div>
+        <div class="field"><label>Velocidade (mm/s)</label><input type="number" id="coPrintSpeedMmS" value="${o.printSpeedMmS||''}" step="1"></div>
+      </div>
+      <div class="row2">
+        <div class="field"><label>Orientação na mesa</label><input id="coOrientation" value="${o.orientation||''}"></div>
+        <div class="field"><label>Suportes</label><select id="coSupports">
+          <option value="nao" ${o.supports!=='sim'?'selected':''}>Não</option>
+          <option value="sim" ${o.supports==='sim'?'selected':''}>Sim</option>
+        </select></div>
+      </div>
+      <div class="field"><label>Brim / raft</label><input id="coBrimRaft" value="${o.brimRaft||''}"></div>
+      <div style="background:var(--panel-2);border-radius:8px;padding:10px 14px;">
+        <div class="field hint" style="margin-top:0;margin-bottom:8px;">Pausa para troca de cor</div>
+        <div class="row2">
+          <div class="field"><label>Camada nº</label><input id="coColorChangeLayer" value="${o.colorChangeLayer||''}"></div>
+          <div class="field"><label>Altura (mm)</label><input id="coColorChangeHeightMm" value="${o.colorChangeHeightMm||''}"></div>
+        </div>
+      </div>
+
+      <div class="section-title">Estimado × real</div>
+      <div class="row3">
+        <div class="field"><label>Peso real (g)</label><input type="number" id="coRealWeightG" value="${o.realWeightG||''}" step="0.1"></div>
+        <div class="field"><label>Tempo real (h)</label><input type="number" id="coRealTimeH" value="${o.realTimeH||''}" step="0.1"></div>
+        <div class="field"><label>Custo real (R$)</label><input type="number" id="coRealCost" value="${o.realCost||''}" step="0.01"></div>
+      </div>
+      <div class="field"><label>Observação</label><input id="coRealObservation" value="${o.realObservation||''}"></div>
+
+      <div class="section-title">Resultado</div>
+      <div class="row2">
+        <div class="field"><label>Resultado</label><select id="coResult">
+          <option value="" ${!o.result?'selected':''}>Não informado</option>
+          <option value="ok" ${o.result==='ok'?'selected':''}>OK</option>
+          <option value="falha_parcial" ${o.result==='falha_parcial'?'selected':''}>Falha parcial</option>
+          <option value="falha_total" ${o.result==='falha_total'?'selected':''}>Falha total</option>
+        </select></div>
+        <div class="field"><label>Se falhou — % e motivo</label><input id="coFailurePctReason" value="${o.failurePctReason||''}"></div>
+      </div>
+      <div class="field"><label>Pós-processamento realizado</label><input id="coPostProcessingDone" value="${o.postProcessingDone||''}" placeholder="Ex: lixado, pintado"></div>
+
+      <div class="section-title">Conferência antes de embalar</div>
+      <div class="row3">
+        <label style="display:flex;align-items:center;gap:6px;font-weight:400;font-size:12.5px;"><input type="checkbox" id="coCheckTextConferred" ${o.checkTextConferred?'checked':''} style="width:auto;"> Texto conferido</label>
+        <label style="display:flex;align-items:center;gap:6px;font-weight:400;font-size:12.5px;"><input type="checkbox" id="coCheckNoLayerFailure" ${o.checkNoLayerFailure?'checked':''} style="width:auto;"> Sem falha de camada</label>
+        <label style="display:flex;align-items:center;gap:6px;font-weight:400;font-size:12.5px;"><input type="checkbox" id="coCheckBurrRemoved" ${o.checkBurrRemoved?'checked':''} style="width:auto;"> Rebarba removida</label>
+      </div>
+      <div class="row3" style="margin-top:8px;">
+        <label style="display:flex;align-items:center;gap:6px;font-weight:400;font-size:12.5px;"><input type="checkbox" id="coCheckHoleFree" ${o.checkHoleFree?'checked':''} style="width:auto;"> Furo/argola livre</label>
+        <label style="display:flex;align-items:center;gap:6px;font-weight:400;font-size:12.5px;"><input type="checkbox" id="coCheckPieceClean" ${o.checkPieceClean?'checked':''} style="width:auto;"> Peça limpa</label>
+        <label style="display:flex;align-items:center;gap:6px;font-weight:400;font-size:12.5px;"><input type="checkbox" id="coCheckPackaged" ${o.checkPackaged?'checked':''} style="width:auto;"> Embalada</label>
+      </div>
     </div>
 
-    <div class="section-title">4. Estimado × real</div>
-    <div class="row3">
-      <div class="field"><label>Peso real (g)</label><input type="number" id="coRealWeightG" value="${o.realWeightG||''}" step="0.1"></div>
-      <div class="field"><label>Tempo real (h)</label><input type="number" id="coRealTimeH" value="${o.realTimeH||''}" step="0.1"></div>
-      <div class="field"><label>Custo real (R$)</label><input type="number" id="coRealCost" value="${o.realCost||''}" step="0.01"></div>
-    </div>
-    <div class="field"><label>Observação</label><input id="coRealObservation" value="${o.realObservation||''}"></div>
-
-    <div class="section-title">5. Resultado e acabamento</div>
-    <div class="row2">
-      <div class="field"><label>Resultado</label><select id="coResult">
-        <option value="" ${!o.result?'selected':''}>Não informado</option>
-        <option value="ok" ${o.result==='ok'?'selected':''}>OK</option>
-        <option value="falha_parcial" ${o.result==='falha_parcial'?'selected':''}>Falha parcial</option>
-        <option value="falha_total" ${o.result==='falha_total'?'selected':''}>Falha total</option>
-      </select></div>
-      <div class="field"><label>Se falhou — % e motivo</label><input id="coFailurePctReason" value="${o.failurePctReason||''}"></div>
-    </div>
-    <div class="field"><label>Pós-processamento realizado</label><input id="coPostProcessingDone" value="${o.postProcessingDone||''}" placeholder="Ex: lixado, pintado"></div>
-
-    <div class="section-title">6. Conferência antes de embalar</div>
-    <div class="row3">
-      <label style="display:flex;align-items:center;gap:6px;font-weight:400;font-size:12.5px;"><input type="checkbox" id="coCheckTextConferred" ${o.checkTextConferred?'checked':''} style="width:auto;"> Texto conferido</label>
-      <label style="display:flex;align-items:center;gap:6px;font-weight:400;font-size:12.5px;"><input type="checkbox" id="coCheckNoLayerFailure" ${o.checkNoLayerFailure?'checked':''} style="width:auto;"> Sem falha de camada</label>
-      <label style="display:flex;align-items:center;gap:6px;font-weight:400;font-size:12.5px;"><input type="checkbox" id="coCheckBurrRemoved" ${o.checkBurrRemoved?'checked':''} style="width:auto;"> Rebarba removida</label>
-    </div>
-    <div class="row3" style="margin-top:8px;">
-      <label style="display:flex;align-items:center;gap:6px;font-weight:400;font-size:12.5px;"><input type="checkbox" id="coCheckHoleFree" ${o.checkHoleFree?'checked':''} style="width:auto;"> Furo/argola livre</label>
-      <label style="display:flex;align-items:center;gap:6px;font-weight:400;font-size:12.5px;"><input type="checkbox" id="coCheckPieceClean" ${o.checkPieceClean?'checked':''} style="width:auto;"> Peça limpa</label>
-      <label style="display:flex;align-items:center;gap:6px;font-weight:400;font-size:12.5px;"><input type="checkbox" id="coCheckPackaged" ${o.checkPackaged?'checked':''} style="width:auto;"> Embalada</label>
+    <div id="coPanel_custos" style="display:none;">
+      <div class="helper-block" id="customOrderPreview"></div>
     </div>
 
     <div class="modal-actions">
       <button class="btn ghost" onclick="closeModal()">Cancelar</button>
-      <button class="btn primary" onclick="confirmCustomOrder(${editing?`'${id}'`:'null'})">${editing?'Salvar alterações':'Criar encomenda'}</button>
+      <button class="btn primary" onclick="confirmCustomOrder('${id}')">Salvar alterações</button>
     </div>
   `);
   renderFilamentRows();
@@ -4667,11 +4775,9 @@ function openCustomOrderModal(id){
   updateCustomOrderPreview();
 }
 function readCustomOrderForm(){
-  const catSel = document.getElementById('pCategory').value;
   const customerId = document.getElementById('coCustomerId').value;
   return {
     name: document.getElementById('pName').value.trim(),
-    category: catSel==='__new__' ? document.getElementById('pCategoryNew').value.trim() : catSel,
     filaments: editingFilaments,
     boxType: document.getElementById('pBox').value,
     machineId: document.getElementById('pMachine').value,
@@ -4686,10 +4792,11 @@ function readCustomOrderForm(){
     modelLicense: document.getElementById('pModelLicense').value.trim(),
     modelSourceUrl: document.getElementById('pModelSourceUrl').value.trim(),
     modelFileName: document.getElementById('coModelFileName').value.trim(),
-    orderNumber: document.getElementById('coOrderNumber').value.trim(),
-    orderDate: document.getElementById('coOrderDate').value,
     customerId,
     customerName: document.getElementById('coCustomerName').value.trim(),
+    contact: document.getElementById('coContact').value.trim(),
+    orderType: document.getElementById('coOrderType').value,
+    linkedProductId: document.getElementById('coLinkedProductId').value,
     qty: parseFloat(document.getElementById('coQty').value)||1,
     sizeLabel: document.getElementById('coSizeLabel').value.trim(),
     pieceText: document.getElementById('coPieceText').value,
@@ -4697,7 +4804,10 @@ function readCustomOrderForm(){
     detailColor: document.getElementById('coDetailColor').value.trim(),
     finish: document.getElementById('coFinish').value.trim(),
     deliveryDate: document.getElementById('coDeliveryDate').value,
+    deliveryMethod: document.getElementById('coDeliveryMethod').value.trim(),
+    deliveryAddress: document.getElementById('coDeliveryAddress').value.trim(),
     depositPaid: parseFloat(document.getElementById('coDepositPaid').value)||0,
+    paymentMethod: document.getElementById('coPaymentMethod').value.trim(),
     approved: document.getElementById('coApproved').checked,
     approvalDate: document.getElementById('coApprovalDate').value,
     approvedBy: document.getElementById('coApprovedBy').value.trim(),
@@ -4733,6 +4843,7 @@ function readCustomOrderForm(){
 function updateCustomOrderPreview(){
   const form = readCustomOrderForm();
   const c = calcProduct(form);
+  const profitPerHour = form.timeH>0 ? (c.practicedPrice - c.totalCost)/form.timeH : null;
   document.getElementById('customOrderPreview').innerHTML = `
     <div class="calc-line"><span>Peso total</span><span>${num(totalWeight(form),0)}g</span></div>
     <div class="calc-line"><span>Custo material</span><span>${brl(c.materialCost)}</span></div>
@@ -4746,6 +4857,7 @@ function updateCustomOrderPreview(){
     <div class="calc-line total"><span>Custo total</span><span>${brl(c.totalCost)}</span></div>
     <div class="calc-line total"><span>Preço sugerido (margem de ${num(form.desiredMarginPct,0)}%)</span><span>${brl(c.suggestedPrice)}</span></div>
     <div class="calc-line total"><span>Margem no valor combinado</span><span style="color:${c.marginValue<0?'var(--red)':'var(--green)'}">${pct(c.marginPct)}</span></div>
+    <div class="calc-line"><span>R$ por hora-máquina (lucro ÷ tempo)</span><span style="color:${profitPerHour!=null && profitPerHour<0?'var(--red)':'var(--text)'}">${profitPerHour!=null?brl(profitPerHour)+'/h':'—'}</span></div>
   `;
   const priceInput = document.getElementById('pPrice');
   if(priceInput && !priceInput.dataset.touched && document.activeElement!==priceInput){
@@ -4753,20 +4865,17 @@ function updateCustomOrderPreview(){
   }
 }
 function confirmCustomOrder(id){
+  const o = state.customOrders.find(x=>x.id===id);
+  if(!o) return;
   const form = readCustomOrderForm();
   if(!form.name){ toast('Informe o nome da peça','err'); return; }
   const priceRaw = document.getElementById('pPrice').value;
   const c = calcProduct(form);
   const practicedPrice = priceRaw ? parseFloat(priceRaw) : c.suggestedPrice;
   if(practicedPrice<0){ toast('Valor não pode ser negativo','err'); return; }
-  if(id){
-    const o = state.customOrders.find(x=>x.id===id);
-    Object.assign(o, form, { practicedPrice, photo: editingPhotoData });
-  } else {
-    state.customOrders.push({ id:uid(), ...form, practicedPrice, photo: editingPhotoData, createdAt: new Date().toISOString() });
-  }
+  Object.assign(o, form, { practicedPrice, photo: editingPhotoData });
   saveCustomOrders();
-  toast(id?'Encomenda atualizada':'Encomenda criada');
+  toast('Encomenda atualizada');
   closeModal(); renderContent();
 }
 function careInstructionsHtml(){
