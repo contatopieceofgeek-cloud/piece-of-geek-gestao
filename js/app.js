@@ -5293,46 +5293,56 @@ function openOnboardingModal(){
     `);
     return;
   }
+  const stepDone = {
+    estoque: state.materials.length>0,
+    investimentos: (state.settings.investments||[]).length>0,
+    produtos: state.products.length>0,
+    config: (state.settings.expenses||[]).length>0,
+    clientes: state.customers.length>0,
+    venda: state.sales.length>0,
+    anuncios: (state.listings||[]).length>0,
+  };
+  const stepBadge = (done, num, colorClass) => done ? `<span class="badge ok" title="Concluído">✓</span>` : `<span class="badge ${colorClass}">${num}</span>`;
   showModal('Vamos configurar seu negócio', `
-    <div class="field hint" style="margin-bottom:16px;">Essa é a ordem que faz os números baterem desde a primeira venda. Pode seguir na sequência ou fechar e voltar quando quiser — o link fica no rodapé do menu.</div>
+    <div class="field hint" style="margin-bottom:16px;">Essa é a ordem que faz os números baterem desde a primeira venda. Pode seguir na sequência ou fechar e voltar quando quiser — o link fica no rodapé do menu. O ✓ aparece sozinho quando você já fez aquele passo.</div>
     <div style="display:flex;flex-direction:column;gap:10px;">
-      <div class="card" style="padding:14px 16px;">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;"><span class="badge info">1</span><div style="font-weight:600;font-size:13.5px;">Cadastre sua matéria-prima</div></div>
+      <div class="card" style="padding:14px 16px;${stepDone.estoque?'border:1px solid var(--green-dim);':''}">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">${stepBadge(stepDone.estoque,1,'info')}<div style="font-weight:600;font-size:13.5px;">Cadastre sua matéria-prima</div></div>
         <div style="font-size:12.5px;color:var(--text-dim);margin:0 0 10px 30px;">Filamentos, caixas e plástico bolha, com o preço que você realmente pagou. É a base de todo cálculo de custo do app.</div>
         <button class="btn sm" style="margin-left:30px;" onclick="closeModal(); switchTab('estoque');">Ir para Estoque</button>
       </div>
-      <div class="card" style="padding:14px 16px;border:1px solid var(--nozzle-dim);">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;"><span class="badge warn">2</span><div style="font-weight:600;font-size:13.5px;">Lance seus investimentos iniciais</div></div>
+      <div class="card" style="padding:14px 16px;border:1px solid ${stepDone.investimentos?'var(--green-dim)':'var(--nozzle-dim)'};">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">${stepBadge(stepDone.investimentos,2,'warn')}<div style="font-weight:600;font-size:13.5px;">Lance seus investimentos iniciais</div></div>
         <div style="font-size:12.5px;color:var(--text-dim);margin:0 0 10px 30px;">O que você já gastou pra montar o negócio: impressora (se pagou à vista), estoque inicial de filamento, caixas em lote, ferramentas. Isso é o que a aba Anual usa pra mostrar quando o negócio se paga — sem isso, o saldo final fica sempre otimista demais.</div>
         <button class="btn sm primary" style="margin-left:30px;" onclick="closeModal(); switchTab('anual'); openInvestmentModal();">+ Adicionar investimento inicial</button>
       </div>
-      <div class="card" style="padding:14px 16px;">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;"><span class="badge info">3</span><div style="font-weight:600;font-size:13.5px;">Cadastre seus produtos</div></div>
+      <div class="card" style="padding:14px 16px;${stepDone.produtos?'border:1px solid var(--green-dim);':''}">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">${stepBadge(stepDone.produtos,3,'info')}<div style="font-weight:600;font-size:13.5px;">Cadastre seus produtos</div></div>
         <div style="font-size:12.5px;color:var(--text-dim);margin:0 0 10px 30px;">Peso, tempo de impressão, mão de obra e margem de lucro desejada de cada peça. O custo e o preço sugerido são calculados sozinhos a partir da matéria-prima do passo 1.</div>
         <button class="btn sm" style="margin-left:30px;" onclick="closeModal(); switchTab('produtos');">Ir para Produtos</button>
       </div>
-      <div class="card" style="padding:14px 16px;">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;"><span class="badge info">4</span><div style="font-weight:600;font-size:13.5px;">Configure taxas, despesas e a parcela da impressora</div></div>
+      <div class="card" style="padding:14px 16px;${stepDone.config?'border:1px solid var(--green-dim);':''}">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">${stepBadge(stepDone.config,4,'info')}<div style="font-weight:600;font-size:13.5px;">Configure taxas, despesas e a parcela da impressora</div></div>
         <div style="font-size:12.5px;color:var(--text-dim);margin:0 0 10px 30px;">Taxas do Mercado Livre/Shopee, despesas mensais fixas e, se estiver financiando a impressora, o mês da 1ª parcela — as parcelas restantes passam a contar sozinhas a partir daí.</div>
         <button class="btn sm" style="margin-left:30px;" onclick="closeModal(); switchTab('taxas');">Ir para Taxas</button>
         <button class="btn sm" style="margin-left:8px;" onclick="closeModal(); switchTab('configuracoes');">Ir para Configurações</button>
       </div>
-      <div class="card" style="padding:14px 16px;">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;"><span class="badge info">5</span><div style="font-weight:600;font-size:13.5px;">Cadastre seus clientes (opcional)</div></div>
+      <div class="card" style="padding:14px 16px;${stepDone.clientes?'border:1px solid var(--green-dim);':''}">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">${stepBadge(stepDone.clientes,5,'info')}<div style="font-weight:600;font-size:13.5px;">Cadastre seus clientes (opcional)</div></div>
         <div style="font-size:12.5px;color:var(--text-dim);margin:0 0 10px 30px;">Não é obrigatório — dá pra cadastrar um cliente novo na hora de registrar a venda. Mas ter cadastrado antes deixa o histórico de compras mais fácil de acompanhar.</div>
         <button class="btn sm" style="margin-left:30px;" onclick="closeModal(); switchTab('clientes');">Ir para Clientes</button>
       </div>
-      <div class="card" style="padding:14px 16px;">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;"><span class="badge ok">6</span><div style="font-weight:600;font-size:13.5px;">Registre sua primeira venda</div></div>
+      <div class="card" style="padding:14px 16px;${stepDone.venda?'border:1px solid var(--green-dim);':''}">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">${stepBadge(stepDone.venda,6,'ok')}<div style="font-weight:600;font-size:13.5px;">Registre sua primeira venda</div></div>
         <div style="font-size:12.5px;color:var(--text-dim);margin:0 0 10px 30px;">A partir daqui o Dashboard, o Caixa, a aba Anual e a fila de Pedidos começam a se preencher sozinhos.</div>
         <button class="btn sm" style="margin-left:30px;" onclick="closeModal(); switchTab('vendas');">Ir para Vendas</button>
       </div>
     </div>
 
     <div class="section-title" style="margin-top:18px;">Anúncios</div>
-    <div class="card" style="padding:14px 16px;">
-      <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:10px;">Depois de cadastrar um produto (passo 3), gera o rascunho de anúncio já preenchido pra Mercado Livre e Shopee — título, categoria, dimensões, taxa.</div>
-      <button class="btn sm" onclick="closeModal(); switchTab('anuncios');">Ir para Anúncios</button>
+    <div class="card" style="padding:14px 16px;${stepDone.anuncios?'border:1px solid var(--green-dim);':''}">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">${stepDone.anuncios ? `<span class="badge ok" title="Concluído">✓</span>` : ''}<div style="font-size:12.5px;color:var(--text-dim);">Depois de cadastrar um produto (passo 3), gera o rascunho de anúncio já preenchido pra Mercado Livre e Shopee — título, categoria, dimensões, taxa.</div></div>
+      <button class="btn sm" style="margin-top:6px;" onclick="closeModal(); switchTab('anuncios');">Ir para Anúncios</button>
     </div>
 
     <div class="section-title" style="margin-top:18px;">As outras abas</div>
