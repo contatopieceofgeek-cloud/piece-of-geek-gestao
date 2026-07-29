@@ -333,6 +333,7 @@ function migrateSettings(settings){
   if(!settings.marketByGroup) settings.marketByGroup = {};
   if(settings.targetHourlyProfit==null) settings.targetHourlyProfit = 15.00;
   if(settings.goodHourlyProfit==null) settings.goodHourlyProfit = 20.00;
+  if(settings.minProfitPerSale==null) settings.minProfitPerSale = 8.00;
   delete settings.machine;
   delete settings.machineCostPerHour;
   delete settings.energyCostPerHour;
@@ -747,41 +748,54 @@ function feeAtPrice(platformName, price){
 /* ===== Modelo de precificação por R$/hora-máquina (blocos 4-6) =====
    O recurso escasso é hora de impressora, não grama de filamento — o preço
    vem do mercado (input), o R$/hora é o resultado e o critério de aceite.
-   channelName null/undefined = "Direto" (venda própria — sem taxa de plataforma,
-   feeAtPrice já devolve 0 pra uma plataforma que não existe em settings.platforms). */
-function channelFeeAt(channelName, price){
-  return channelName ? feeAtPrice(channelName, price) : 0;
+   Produtos é exclusivamente marketplace (venda sob medida vive em
+   Personalizados) — todo canal aqui é ML/Shopee/plataforma extra, nunca
+   "venda direta". channelName sempre precisa ser o nome de uma plataforma. */
+// Taxa + frete líquido do canal num preço específico — mesma lógica que
+// calcProduct() já usa (effectiveFreightMl/effectiveFreightShopee, e a taxa
+// REAL do ML quando já foi buscada via mlRealFeePct) — é a função que faz o
+// Diagnóstico bater com a margem que a tela de Produtos já mostrava certo.
+function channelFeeAt(channelName, price, prod){
+  if(!channelName || !(price>0)) return 0;
+  let fee;
+  if(channelName==='Mercado Livre' && prod && prod.mlRealFeePct!=null){
+    fee = price * Math.min(0.95, prod.mlRealFeePct/100);
+  } else {
+    fee = feeAtPrice(channelName, price);
+  }
+  let freight = 0;
+  if(prod){
+    if(channelName==='Mercado Livre') freight = prod.estimatedFreightMl||0;
+    else if(channelName==='Shopee') freight = Math.max(0, (prod.estimatedFreightShopee||0) - (shopeeFreightCap(price)||0));
+  }
+  return fee + freight;
 }
-// (preço − taxa do canal − custo unitário) ÷ tempo por unidade
-function profitPerHourAt(c, channelName, price){
-  if(!(c.unitTimeH>0) || price==null) return null;
-  return (price - channelFeeAt(channelName, price) - c.totalCost) / c.unitTimeH;
+// (preço − taxa/frete do canal − custo unitário) ÷ tempo por unidade
+function profitPerHourAt(c, channelName, price, prod){
+  if(!(c.unitTimeH>0) || !(price>0)) return null;
+  return (price - channelFeeAt(channelName, price, prod) - c.totalCost) / c.unitTimeH;
 }
-// Preço mínimo pra bater a meta de R$/hora configurada. Taxa fixa+%: fórmula
-// fechada. Taxa em faixas (Shopee): aproximações sucessivas, mesmo padrão de
-// suggestedPriceForPlatform, já que a faixa muda com o próprio preço.
-function minPriceForTarget(c, channelName){
-  if(!(c.unitTimeH>0)) return null;
+// Preço mínimo pra bater a meta de R$/hora configurada, já com frete embutido.
+// Reaproveita suggestedPriceForPlatform (mesma iteração que o resto do app já
+// usa pra taxa em faixas + subsídio de frete da Shopee por preço).
+function minPriceForTarget(c, channelName, prod){
+  if(!(c.unitTimeH>0) || !channelName) return null;
   const target = state.settings.targetHourlyProfit!=null ? state.settings.targetHourlyProfit : 15;
   const needNet = target*c.unitTimeH + c.totalCost;
-  if(!channelName) return needNet;
-  const plat = (state.settings.platforms||[]).find(pl=>pl.name===channelName);
-  if(!plat) return needNet;
-  if(plat.tiers){
-    let price = needNet, prev = 0;
-    for(let i=0;i<30 && Math.abs(price-prev)>0.005;i++){ prev=price; price = needNet + computeTieredFee(plat.tiers, price).fee; }
-    return price;
+  const freight = channelName==='Mercado Livre' ? ((prod&&prod.estimatedFreightMl)||0) : channelName==='Shopee' ? ((prod&&prod.estimatedFreightShopee)||0) : 0;
+  if(channelName==='Mercado Livre' && prod && prod.mlRealFeePct!=null){
+    const pct = Math.min(0.95, prod.mlRealFeePct/100);
+    return pct<1 ? (needNet+freight)/(1-pct) : needNet+freight;
   }
-  const pct = (plat.pct||0)/100;
-  return pct<1 ? (needNet+(plat.fixed||0))/(1-pct) : needNet+(plat.fixed||0);
+  return suggestedPriceForPlatform(needNet, channelName, freight);
 }
 // Dado um preço de referência (mercado da categoria ou exceção do produto),
 // quanto tempo de impressão POR UNIDADE ainda bate a meta de R$/hora — pode
 // sair negativo (nem a preço de mercado dá pra bater a meta em tempo nenhum).
-function maxTimeAtMarketPrice(c, channelName, marketPrice){
+function maxTimeAtMarketPrice(c, channelName, marketPrice, prod){
   const target = state.settings.targetHourlyProfit!=null ? state.settings.targetHourlyProfit : 15;
   if(marketPrice==null || !(target>0)) return null;
-  return (marketPrice - channelFeeAt(channelName, marketPrice) - c.totalCost) / target;
+  return (marketPrice - channelFeeAt(channelName, marketPrice, prod) - c.totalCost) / target;
 }
 // Preço de mercado efetivo do produto: exceção da peça, senão média da
 // categoria. min/max sempre vêm da categoria (uma exceção pontual não tem
@@ -792,10 +806,18 @@ function effectiveMarketPrice(prod){
   const source = prod.marketPriceOverride>0 ? 'override' : (g.avg>0 ? 'category' : 'none');
   return { value, source, min:g.min||0, max:g.max||0, avg:g.avg||0 };
 }
-function hourlyVerdict(hourlyProfit){
+// absoluteProfit (R$ por venda, já líquido de taxa+frete) sobrepõe o veredito
+// por hora quando fica abaixo do piso configurado — um R$/hora ótimo não
+// significa nada se cada venda individual mal cobre o cafezinho: um produto
+// que "compensa" só em volume gigantesco (milhares de vendas) é risco, não meta.
+function hourlyVerdict(hourlyProfit, absoluteProfit){
   if(hourlyProfit==null) return { label:'—', cls:'mut' };
   const target = state.settings.targetHourlyProfit!=null ? state.settings.targetHourlyProfit : 15;
   const good = state.settings.goodHourlyProfit!=null ? state.settings.goodHourlyProfit : 20;
+  const minProfit = state.settings.minProfitPerSale!=null ? state.settings.minProfitPerSale : 8;
+  if(hourlyProfit>=target && absoluteProfit!=null && absoluteProfit<minProfit){
+    return { label:'Lucro por venda baixo demais', cls:'bad' };
+  }
   if(hourlyProfit>=good) return { label:'Bom produto', cls:'ok' };
   if(hourlyProfit>=target) return { label:'Aceitável', cls:'info' };
   if(hourlyProfit>=target*0.6) return { label:'Revisar tempo ou preço', cls:'warn' };
@@ -810,15 +832,16 @@ function marketAlertFor(marketInfo, price){
   if(marketInfo.min>0 && price<marketInfo.min) return { label:'Abaixo de todos os concorrentes — dá pra subir o preço', cls:'info' };
   return null;
 }
-// Painel de preço por canal (Direto/ML/Shopee/extras) — piso pra bater a
-// meta, R$/hora no preço praticado com veredito, tempo máximo viável ao
-// preço de mercado, e margem só como consequência (fonte menor, sem destaque).
-function pricingChannelBlockHtml(label, channelName, price, c, marketInfo){
-  const floor = minPriceForTarget(c, channelName);
-  const hourly = profitPerHourAt(c, channelName, price);
-  const verdict = hourlyVerdict(hourly);
-  const maxTime = marketInfo.value!=null ? maxTimeAtMarketPrice(c, channelName, marketInfo.value) : null;
-  const marginPctAt = (price>0) ? ((price - channelFeeAt(channelName,price) - c.totalCost)/price)*100 : null;
+// Painel de preço por canal (ML/Shopee/extras — Produtos é só marketplace) —
+// piso pra bater a meta, R$/hora no preço praticado com veredito, tempo
+// máximo viável ao preço de mercado, e margem só como consequência.
+function pricingChannelBlockHtml(label, channelName, price, c, marketInfo, prod){
+  const floor = minPriceForTarget(c, channelName, prod);
+  const hourly = profitPerHourAt(c, channelName, price, prod);
+  const absoluteProfit = (price>0) ? (price - channelFeeAt(channelName, price, prod) - c.totalCost) : null;
+  const verdict = hourlyVerdict(hourly, absoluteProfit);
+  const maxTime = marketInfo.value!=null ? maxTimeAtMarketPrice(c, channelName, marketInfo.value, prod) : null;
+  const marginPctAt = (price>0) ? (absoluteProfit/price)*100 : null;
   const alert = marketAlertFor(marketInfo, price);
   const target = state.settings.targetHourlyProfit!=null ? state.settings.targetHourlyProfit : 15;
   return `
@@ -829,6 +852,7 @@ function pricingChannelBlockHtml(label, channelName, price, c, marketInfo){
       </div>
       <div class="calc-line" style="font-size:11.5px;color:var(--text-faint);"><span>Piso p/ meta de ${brl(target)}/h</span><span>${floor!=null?brl(floor):'—'}</span></div>
       <div class="calc-line" style="font-size:12.5px;"><span>No preço praticado (${price>0?brl(price):'—'})</span><span style="font-weight:600;">${hourly!=null?brl(hourly)+'/h':'—'}</span></div>
+      <div class="calc-line" style="font-size:11.5px;color:var(--text-faint);"><span>Lucro por venda</span><span style="color:${absoluteProfit!=null&&absoluteProfit<0?'var(--red)':'inherit'}">${absoluteProfit!=null?brl(absoluteProfit):'—'}</span></div>
       <div class="calc-line" style="font-size:11.5px;color:var(--text-faint);"><span>Tempo máximo viável${marketInfo.value!=null?` a ${brl(marketInfo.value)}`:''}</span><span>${marketInfo.value==null?'sem preço de mercado':(maxTime==null?'—':(maxTime<=0?'inviável a qualquer tempo':fmtHm(maxTime)))}</span></div>
       <div class="calc-line" style="font-size:11px;color:var(--text-faint);"><span>Margem resultante</span><span>${marginPctAt!=null?pct(marginPctAt):'—'}</span></div>
       ${alert ? `<div style="margin-top:4px;"><span class="badge ${alert.cls}">${alert.label}</span></div>` : ''}
@@ -3329,6 +3353,7 @@ function confirmKit(){
 /* ===================== PRODUTOS ===================== */
 let produtosFilter = { search:'', machineId:'', sortKey:'name', sortDir:1 };
 let produtosView = 'lista';
+let diagnosticoChannel = 'Mercado Livre';
 function toggleProductSort(key){
   if(produtosFilter.sortKey===key){ produtosFilter.sortDir*=-1; }
   else { produtosFilter.sortKey=key; produtosFilter.sortDir=1; }
@@ -3420,15 +3445,38 @@ function renderProdutos(){
 // Diagnóstico do catálogo — ordena pelo recurso escasso (R$/hora-máquina), não
 // por lucro total: um produto lento pode dar mais lucro por venda e ainda
 // assim ser pior escolha, porque ocupa a impressora por muito mais tempo.
+// ML e Shopee são os únicos canais de Produtos (marketplace) — venda sob
+// medida/direta vive em Personalizados, fora do escopo do Diagnóstico.
+function channelPriceFor(c, channelName){
+  return channelName==='Mercado Livre' ? c.practicedPriceMl : c.practicedPriceShopee;
+}
+// "vende melhor" só quando os dois canais dão lucro — comparar razão com
+// número negativo não tem leitura útil (o canal ruim já aparece na cor certa).
+function betterChannelInfo(hourlyMl, hourlyShopee){
+  if(hourlyMl==null && hourlyShopee==null) return { best:null, label:'—', flag:null };
+  if(hourlyMl==null) return { best:'Shopee', label:'Shopee', flag:null };
+  if(hourlyShopee==null) return { best:'Mercado Livre', label:'ML', flag:null };
+  const best = hourlyMl>=hourlyShopee ? 'Mercado Livre' : 'Shopee';
+  let flag = null;
+  if(hourlyMl>0 && hourlyShopee>0 && Math.max(hourlyMl,hourlyShopee)/Math.min(hourlyMl,hourlyShopee)>=2){
+    flag = `vende melhor n${best==='Mercado Livre'?'o ML':'a Shopee'}`;
+  }
+  return { best, label: best==='Mercado Livre'?'ML':'Shopee', flag };
+}
 function renderProdutosDiagnostico(){
   if(state.products.length===0) return `<div class="card">${emptyState('Nenhum produto cadastrado ainda.')}</div>`;
   const target = state.settings.targetHourlyProfit!=null ? state.settings.targetHourlyProfit : 15;
+  const channel = diagnosticoChannel;
   const list = state.products.map(p=>{
     const c = calcProduct(p);
-    const hourly = profitPerHourAt(c, null, c.practicedPrice);
-    const profit = c.practicedPrice - c.totalCost;
-    const verdict = hourlyVerdict(hourly);
-    return { p, c, hourly, profit, verdict };
+    const hourlyMl = profitPerHourAt(c, 'Mercado Livre', c.practicedPriceMl, p);
+    const hourlyShopee = profitPerHourAt(c, 'Shopee', c.practicedPriceShopee, p);
+    const price = channelPriceFor(c, channel);
+    const hourly = channel==='Mercado Livre' ? hourlyMl : hourlyShopee;
+    const profit = (price>0) ? (price - channelFeeAt(channel, price, p) - c.totalCost) : null;
+    const verdict = hourlyVerdict(hourly, profit);
+    const better = betterChannelInfo(hourlyMl, hourlyShopee);
+    return { p, c, hourly, hourlyMl, hourlyShopee, profit, verdict, better };
   });
   const sorted = list.slice().sort((a,b)=>{
     if(a.hourly==null) return 1;
@@ -3449,8 +3497,13 @@ function renderProdutosDiagnostico(){
   belowTarget.forEach(x=>{ const cat=(x.p.category||'').trim(); if(cat) (byCatBelow[cat]=byCatBelow[cat]||[]).push(x); });
   const canibalizacao = Object.entries(byCatBelow).filter(([,items])=>items.length>=2)
     .map(([cat,items])=>`${items.length} produtos em ${cat} — eles dividem o mesmo comprador em vez de somar vendas`);
+  const channelTabs = `<div class="tabbar" style="margin-bottom:14px;">
+    <button class="tabbtn ${channel==='Mercado Livre'?'active':''}" onclick="diagnosticoChannel='Mercado Livre'; renderContent();">Mercado Livre</button>
+    <button class="tabbtn ${channel==='Shopee'?'active':''}" onclick="diagnosticoChannel='Shopee'; renderContent();">Shopee</button>
+  </div>`;
   const summary = `
     <div class="card" style="margin-bottom:14px;">
+      <div class="field hint" style="margin:0 0 10px;">Veredito, ordenação e média ponderada abaixo usam o canal <strong>${channel}</strong> — troque na aba acima.</div>
       <div class="row3">
         <div><div class="field hint" style="margin:0;">Média ponderada do catálogo</div><div style="font-family:var(--font-mono);font-size:18px;font-weight:700;color:${weightedAvg!=null&&weightedAvg<target?'var(--red)':'var(--green)'};">${weightedAvg!=null?brl(weightedAvg)+'/h':'—'}</div></div>
         <div><div class="field hint" style="margin:0;">Abaixo da meta (${brl(target)}/h)</div><div style="font-family:var(--font-mono);font-size:18px;font-weight:700;">${belowTarget.length} de ${withHourly.length}</div></div>
@@ -3458,17 +3511,18 @@ function renderProdutosDiagnostico(){
       </div>
       ${canibalizacao.length ? `<div style="margin-top:10px;">${canibalizacao.map(w=>`<div class="calc-line" style="font-size:12.5px;"><span class="badge warn">Canibalização</span> <span style="margin-left:6px;">${w}</span></div>`).join('')}</div>` : ''}
     </div>`;
-  const rows = sorted.map(({p,c,hourly,profit,verdict})=>`<tr>
+  const rows = sorted.map(({p,c,hourlyMl,hourlyShopee,profit,verdict,better})=>`<tr>
     <td data-label="Produto">${p.name}${p.category?`<div style="font-size:11px;color:var(--text-faint);">${p.category}</div>`:''}</td>
     <td class="right num" data-label="Peso/un">${num(c.unitWeightG,1)}g</td>
     <td class="right num" data-label="Tempo/un">${fmtHm(c.unitTimeH)}</td>
-    <td class="right num" data-label="Preço praticado">${brl(c.practicedPrice)}</td>
-    <td class="right num" data-label="Lucro">${brl(profit)}</td>
-    <td class="right num" data-label="R$/hora" style="font-weight:600;">${hourly!=null?brl(hourly)+'/h':'—'}</td>
+    <td class="right num" data-label="Lucro/venda (${channel==='Mercado Livre'?'ML':'Shopee'})" style="color:${profit!=null&&profit<0?'var(--red)':'inherit'}">${profit!=null?brl(profit):'—'}</td>
+    <td class="right num" data-label="R$/hora ML">${hourlyMl!=null?brl(hourlyMl)+'/h':'—'}</td>
+    <td class="right num" data-label="R$/hora Shopee">${hourlyShopee!=null?brl(hourlyShopee)+'/h':'—'}</td>
+    <td data-label="Melhor canal">${better.best?better.label:'—'}${better.flag?`<div style="font-size:10px;color:var(--text-faint);">${better.flag}</div>`:''}</td>
     <td data-label="Veredito"><span class="badge ${verdict.cls}">${verdict.label}</span></td>
   </tr>`).join('');
-  return summary + `<div class="card"><div class="tbl-wrap tbl-responsive tbl-compact-mobile"><table>
-    <thead><tr><th>Produto</th><th class="right">Peso/un</th><th class="right">Tempo/un</th><th class="right">Preço praticado</th><th class="right">Lucro</th><th class="right">R$/hora</th><th>Veredito</th></tr></thead>
+  return channelTabs + summary + `<div class="card"><div class="tbl-wrap tbl-responsive tbl-compact-mobile"><table>
+    <thead><tr><th>Produto</th><th class="right">Peso/un</th><th class="right">Tempo/un</th><th class="right">Lucro/venda</th><th class="right">R$/hora ML</th><th class="right">R$/hora Shopee</th><th>Melhor canal</th><th>Veredito</th></tr></thead>
     <tbody>${rows}</tbody>
   </table></div></div>`;
 }
@@ -4587,10 +4641,9 @@ function updateProductPreview(){
     <div class="calc-line"><span>Custo de falha</span><span>${brl(c.failureCost)}</span></div>
     <div class="calc-line total"><span>Custo total — por unidade</span><span>${brl(c.totalCost)}</span></div>
     ${marketRangeLine}
-    ${pricingChannelBlockHtml('Direto (venda própria)', null, c.practicedPrice, c, marketInfo)}
-    ${pricingChannelBlockHtml('Mercado Livre', 'Mercado Livre', c.practicedPriceMl, c, marketInfo)}
-    ${pricingChannelBlockHtml('Shopee', 'Shopee', c.practicedPriceShopee, c, marketInfo)}
-    ${extraListingPlatforms().map(plat=>pricingChannelBlockHtml(plat.name, plat.name, c.practicedPriceExtra[plat.id], c, marketInfo)).join('')}
+    ${pricingChannelBlockHtml('Mercado Livre', 'Mercado Livre', c.practicedPriceMl, c, marketInfo, form)}
+    ${pricingChannelBlockHtml('Shopee', 'Shopee', c.practicedPriceShopee, c, marketInfo, form)}
+    ${extraListingPlatforms().map(plat=>pricingChannelBlockHtml(plat.name, plat.name, c.practicedPriceExtra[plat.id], c, marketInfo, form)).join('')}
   `;
   const priceInput = document.getElementById('pPrice');
   if(priceInput && !priceInput.dataset.touched && document.activeElement!==priceInput){
@@ -5959,6 +6012,8 @@ function renderConfiguracoes(){
         <div class="field"><label>R$/hora-máquina de produto bom</label><input type="number" id="cfgGoodHourlyProfit" value="${s.goodHourlyProfit!=null?s.goodHourlyProfit:20}" step="0.5"></div>
       </div>
       <div class="field hint" style="margin-top:-8px;">Com uma impressora, o recurso escasso é hora de bico. Abaixo da meta, o produto não paga o tempo que ocupa.</div>
+      <div class="field"><label>Lucro mínimo aceitável por venda (R$)</label><input type="number" id="cfgMinProfitPerSale" value="${s.minProfitPerSale!=null?s.minProfitPerSale:8}" step="0.5"></div>
+      <div class="field hint" style="margin-top:-8px;">Um R$/hora ótimo não significa nada se cada venda mal cobre o cafezinho — produto abaixo desse piso é sinalizado mesmo com R$/hora alto, porque só compensa em volume gigantesco de vendas.</div>
     </div>
 
     <div class="section-title">Preço de mercado por categoria</div>
@@ -6213,6 +6268,7 @@ function confirmConfiguracoes(){
   s.printHoursPerDay = parseFloat(document.getElementById('cfgPrintHours').value)||8;
   s.targetHourlyProfit = parseFloat(document.getElementById('cfgTargetHourlyProfit').value)||15;
   s.goodHourlyProfit = parseFloat(document.getElementById('cfgGoodHourlyProfit').value)||20;
+  s.minProfitPerSale = parseFloat(document.getElementById('cfgMinProfitPerSale').value)||8;
   s.marketByGroup = {};
   editingMarketGroups.forEach(g=>{ s.marketByGroup[g.category] = { min:g.min||0, avg:g.avg||0, max:g.max||0, checkedAt:g.checkedAt||'', note:g.note||'' }; });
   s.machines = editingMachines.filter(m=>m.name && m.name.trim());
