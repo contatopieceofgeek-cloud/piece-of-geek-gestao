@@ -3432,8 +3432,8 @@ function renderProdutos(){
       case 'time': return c.unitTimeH;
       case 'cost': return c.totalCost;
       case 'suggested': return c.suggestedPrice;
-      case 'practiced': return c.practicedPrice;
-      case 'margin': return c.marginPct;
+      case 'practiced': return c.practicedPriceMl;
+      case 'margin': return c.marginMlPct;
       case 'stock': return p.stock;
       default: return p.name.toLowerCase();
     }
@@ -3464,8 +3464,8 @@ function renderProdutos(){
       <td class="right num" data-label="Tempo/un">${fmtHm(c.unitTimeH)}${c.printUnits>1?`<div style="font-size:10px;font-weight:400;color:var(--text-faint);white-space:nowrap;">leva: ${num(p.timeH,1)}h</div>`:''}</td>
       <td class="right num" data-label="Custo/venda">${brl(c.totalCost)}${c.saleUnits>1?`<div style="font-size:10px;font-weight:400;color:var(--text-faint);white-space:nowrap;">venda de ${c.saleUnits}un</div>`:''}</td>
       <td class="right num" data-label="Preço sugerido/venda">${brl(c.suggestedPrice)}</td>
-      <td class="right num" data-label="Preço praticado/venda">${brl(c.practicedPrice)}<div style="font-size:10px;font-weight:400;color:var(--text-faint);white-space:nowrap;">ML ${brl(c.practicedPriceMl)} · Shopee ${brl(c.practicedPriceShopee)}${extraListingPlatforms().map(plat=>` · ${plat.name} ${brl(c.practicedPriceExtra[plat.id])}`).join('')}</div></td>
-      <td class="right num" data-label="Margem" style="color:${c.marginValue<0?'var(--red)':'var(--green)'}">${pct(c.marginPct)}<div style="font-size:10px;font-weight:400;white-space:nowrap;">ML <span style="color:${c.marginMlPct<(state.settings.minMarginPct!=null?state.settings.minMarginPct:25)?'var(--red)':'var(--text-faint)'}">${pct(c.marginMlPct)}</span> · Shopee <span style="color:${c.marginShopeePct<(state.settings.minMarginPct!=null?state.settings.minMarginPct:25)?'var(--red)':'var(--text-faint)'}">${pct(c.marginShopeePct)}</span></div></td>
+      <td class="right num" data-label="Preço praticado/venda">${brl(c.practicedPriceMl)}<div style="font-size:10px;font-weight:400;color:var(--text-faint);white-space:nowrap;">Shopee ${brl(c.practicedPriceShopee)}${extraListingPlatforms().map(plat=>` · ${plat.name} ${brl(c.practicedPriceExtra[plat.id])}`).join('')}</div></td>
+      <td class="right num" data-label="Margem" style="color:${c.marginMlValue<0?'var(--red)':'var(--green)'}">${pct(c.marginMlPct)}<div style="font-size:10px;font-weight:400;white-space:nowrap;">Shopee <span style="color:${c.marginShopeePct<(state.settings.minMarginPct!=null?state.settings.minMarginPct:25)?'var(--red)':'var(--text-faint)'}">${pct(c.marginShopeePct)}</span></div></td>
       <td class="right num" data-label="Estoque">${p.stock<=0?`<span class="badge mut">0</span>`:num(p.stock,0)}</td>
       <td class="right"><button class="btn ghost sm" onclick="openProductModal('${p.id}')">Editar</button> <button class="btn ghost sm" onclick="duplicateProduct('${p.id}')">Duplicar</button> <button class="btn ghost sm" onclick="deleteProduct('${p.id}')">Excluir</button></td>
     </tr>`;
@@ -4365,10 +4365,7 @@ function openProductModal(id){
       <div class="field"><label>Frete aproximado — Shopee (R$)</label><input type="number" id="pFreightShopee" value="${p.estimatedFreightShopee||''}" step="0.01" placeholder="opcional" oninput="this.dataset.touched='1'; updateProductPreview()"></div>
     </div>
 
-    <div class="row2">
-      <div class="field"><label>Preço de mercado — exceção deste produto (R$)</label><input type="number" id="pMarketOverride" value="${p.marketPriceOverride||''}" step="0.01" placeholder="deixe em branco = herdar da categoria" oninput="updateMarketHint()"></div>
-      <div class="field"><label id="pPriceLabel">Preço praticado — Venda própria</label><input type="number" id="pPrice" value="${p.practicedPrice||''}" step="0.01" placeholder="deixe em branco = preço sugerido" oninput="this.dataset.touched='1'"></div>
-    </div>
+    <div class="field"><label>Preço de mercado — exceção deste produto (R$)</label><input type="number" id="pMarketOverride" value="${p.marketPriceOverride||''}" step="0.01" placeholder="deixe em branco = herdar da categoria" oninput="updateMarketHint()"></div>
     <div class="field hint" id="pMarketHint" style="margin-top:-8px;"></div>
     <div class="row2">
       <div class="field"><label id="pPriceMlLabel">Preço praticado — Mercado Livre</label><input type="number" id="pPriceMl" value="${p.practicedPriceMl||''}" step="0.01" placeholder="deixe em branco = preço sugerido" oninput="this.dataset.touched='1'"></div>
@@ -4606,8 +4603,9 @@ function readProductForm(){
   // Preço praticado por canal — só pra a pré-visualização calcular o R$/hora no
   // que está sendo DIGITADO, não no preço sugerido (confirmProduct lê os campos
   // de novo, direto do DOM, na hora de salvar — isso aqui não afeta o que é salvo).
-  const priceRaw = document.getElementById('pPrice').value;
-  form.practicedPrice = priceRaw ? parseFloat(priceRaw) : undefined;
+  // Produtos é só marketplace — não tem mais campo de "venda própria" aqui
+  // (isso vive em Personalizados); practicedPrice fica sem input próprio e
+  // cai no fallback de calcProduct (preço sugerido por custo).
   const priceMlRaw = document.getElementById('pPriceMl').value;
   form.practicedPriceMl = priceMlRaw ? parseFloat(priceMlRaw) : undefined;
   const priceShopeeRaw = document.getElementById('pPriceShopee').value;
@@ -4690,8 +4688,6 @@ function updateProductPreview(){
   // quando é avulsa — evita a ambiguidade de não saber se o preço cobre 1
   // peça ou o anúncio inteiro.
   const saleQualifier = c.saleUnits>1 ? `(por venda de ${c.saleUnits} un)` : '(por unidade)';
-  const priceLabelEl = document.getElementById('pPriceLabel');
-  if(priceLabelEl) priceLabelEl.textContent = `Preço praticado — Venda própria ${saleQualifier}`;
   const priceMlLabelEl = document.getElementById('pPriceMlLabel');
   if(priceMlLabelEl) priceMlLabelEl.textContent = `Preço praticado — Mercado Livre ${saleQualifier}`;
   const priceShopeeLabelEl = document.getElementById('pPriceShopeeLabel');
@@ -4707,7 +4703,6 @@ function updateProductPreview(){
       <div class="calc-line"><span>Vende</span><span style="font-weight:600;">${c.saleUnits} unidade${c.saleUnits>1?'s':''} por venda${c.printUnits>1?` <span style="font-weight:400;color:var(--text-faint);font-size:11px;">(leva rende ${c.printUnits})</span>`:''}</span></div>
       <div class="calc-line"><span>Tempo por venda</span><span style="font-weight:600;">${fmtHm(c.saleTimeH)}</span></div>
       <div class="calc-line"><span>Custo por venda</span><span style="font-weight:600;">${brl(c.totalCost)}</span></div>
-      <div class="calc-line"><span>Preço</span><span style="font-weight:600;">${c.practicedPrice>0?brl(c.practicedPrice):'—'}</span></div>
     </div>`;
   document.getElementById('productPreview').innerHTML = `
     ${saleSummary}
@@ -4727,10 +4722,6 @@ function updateProductPreview(){
     ${pricingChannelBlockHtml('Shopee', 'Shopee', c.practicedPriceShopee, c, marketInfo, form)}
     ${extraListingPlatforms().map(plat=>pricingChannelBlockHtml(plat.name, plat.name, c.practicedPriceExtra[plat.id], c, marketInfo, form)).join('')}
   `;
-  const priceInput = document.getElementById('pPrice');
-  if(priceInput && !priceInput.dataset.touched && document.activeElement!==priceInput){
-    priceInput.placeholder = 'sugerido: '+c.suggestedPrice.toFixed(2);
-  }
   const priceMlInput = document.getElementById('pPriceMl');
   if(priceMlInput && !priceMlInput.dataset.touched && document.activeElement!==priceMlInput){
     priceMlInput.placeholder = 'sugerido: '+c.suggestedPriceMl.toFixed(2);
@@ -4759,12 +4750,14 @@ function confirmProduct(id){
     const fits = boxFitsDimensions(materialByName(form.boxType), form.lengthCm, form.widthCm, form.heightCm);
     if(fits===false){ toast('Esse produto não cabe na caixa selecionada — escolha outra caixa ou ajuste as medidas','err'); return; }
   }
-  const priceRaw = document.getElementById('pPrice').value;
   const priceMlRaw = document.getElementById('pPriceMl').value;
   const priceShopeeRaw = document.getElementById('pPriceShopee').value;
   const stock = parseFloat(document.getElementById('pStock').value)||0;
   const c = calcProduct(form);
-  const practicedPrice = priceRaw ? parseFloat(priceRaw) : c.suggestedPrice;
+  // Produtos não tem mais campo de "venda própria" — practicedPrice fica no
+  // fallback por custo, só pra outros lugares do app (Cálculo, catálogo) que
+  // ainda leem esse campo não quebrarem.
+  const practicedPrice = c.suggestedPrice;
   const practicedPriceMl = priceMlRaw ? parseFloat(priceMlRaw) : c.suggestedPriceMl;
   const practicedPriceShopee = priceShopeeRaw ? parseFloat(priceShopeeRaw) : c.suggestedPriceShopee;
   const practicedPriceExtra = {};
