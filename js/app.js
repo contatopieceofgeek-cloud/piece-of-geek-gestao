@@ -334,6 +334,8 @@ function migrateSettings(settings){
   if(settings.targetHourlyProfit==null) settings.targetHourlyProfit = 15.00;
   if(settings.goodHourlyProfit==null) settings.goodHourlyProfit = 20.00;
   if(settings.minProfitPerSale==null) settings.minProfitPerSale = 8.00;
+  if(!settings.customOrderPriceTable) settings.customOrderPriceTable = {};
+  ['chaveiro','lembrancinha','topo_bolo'].forEach(t=>{ if(!Array.isArray(settings.customOrderPriceTable[t])) settings.customOrderPriceTable[t] = []; });
   delete settings.machine;
   delete settings.machineCostPerHour;
   delete settings.energyCostPerHour;
@@ -806,6 +808,15 @@ function effectiveMarketPrice(prod){
   const source = prod.marketPriceOverride>0 ? 'override' : (g.avg>0 ? 'category' : 'none');
   return { value, source, min:g.min||0, max:g.max||0, avg:g.avg||0 };
 }
+// Preço de tabela (por unidade, com desconto por faixa) pra Personalizados —
+// faixa sem "até" cadastrado cobre tudo dali pra cima. null = sem tabela
+// pra esse tipo (não bloqueia nada, o Diagnóstico só deixa de comparar).
+function tablePriceFor(orderType, qty){
+  const tiers = (state.settings.customOrderPriceTable||{})[orderType];
+  if(!tiers || !tiers.length || !(qty>0)) return null;
+  const tier = tiers.find(t=>qty>=(t.minQty||1) && qty<=(t.maxQty>0?t.maxQty:Infinity));
+  return tier ? tier.unitPrice*qty : null;
+}
 // absoluteProfit (R$ por venda, já líquido de taxa+frete) sobrepõe o veredito
 // por hora quando fica abaixo do piso configurado — um R$/hora ótimo não
 // significa nada se cada venda individual mal cobre o cafezinho: um produto
@@ -1096,6 +1107,11 @@ function switchTab(t){
         const g = (s.marketByGroup||{})[cat] || {};
         return { category:cat, min:g.min||0, avg:g.avg||0, max:g.max||0, checkedAt:g.checkedAt||'', note:g.note||'' };
       });
+      editingCustomOrderPriceTable = {
+        chaveiro: JSON.parse(JSON.stringify((s.customOrderPriceTable||{}).chaveiro||[])),
+        lembrancinha: JSON.parse(JSON.stringify((s.customOrderPriceTable||{}).lembrancinha||[])),
+        topo_bolo: JSON.parse(JSON.stringify((s.customOrderPriceTable||{}).topo_bolo||[])),
+      };
     }
   }
   currentTab=t; closeSidebar(); render();
@@ -1127,7 +1143,7 @@ function renderTopbarActions(){
   else if(currentTab==='vendas') el.innerHTML = `<button class="btn ghost" onclick="switchTab('taxas')">Taxas das plataformas</button> <button class="btn ghost" onclick="exportSalesExcel()">Exportar</button> <button class="btn primary" onclick="openSaleModal()">+ Nova venda</button>`;
   else if(currentTab==='clientes') el.innerHTML = `<button class="btn ghost" onclick="exportCustomersExcel()">Exportar</button> <button class="btn primary" onclick="openCustomerModal()">+ Novo cliente</button>`;
   else if(currentTab==='produtos') el.innerHTML = `<button class="btn ghost" onclick="produtosView=(produtosView==='diagnostico'?'lista':'diagnostico'); renderContent(); renderTopbarActions();">${produtosView==='diagnostico'?'Voltar à lista':'Diagnóstico'}</button> <button class="btn ghost" onclick="openQuickQuoteModal()">Orçamento rápido</button> <button class="btn ghost" onclick="openKitModal()">Criar kit</button> <button class="btn ghost" onclick="exportCatalogImage()">Catálogo (imagem)</button> <button class="btn ghost" onclick="exportCatalogPDF()">Catálogo (PDF, 1 pág./produto)</button> <button class="btn primary" onclick="openProductModal()">+ Novo produto</button>`;
-  else if(currentTab==='personalizados') el.innerHTML = `<button class="btn primary" onclick="openQuickCustomOrderModal()">+ Nova encomenda personalizada</button>`;
+  else if(currentTab==='personalizados') el.innerHTML = `<button class="btn ghost" onclick="personalizadosView=(personalizadosView==='diagnostico'?'kanban':'diagnostico'); renderContent(); renderTopbarActions();">${personalizadosView==='diagnostico'?'Voltar ao quadro':'Diagnóstico'}</button> <button class="btn primary" onclick="openQuickCustomOrderModal()">+ Nova encomenda personalizada</button>`;
   else if(currentTab==='anuncios') el.innerHTML = '';
   else if(currentTab==='estoque') el.innerHTML = stockTab==='materiais' ? `<button class="btn primary" onclick="openMaterialModal()">+ Nova matéria-prima</button>` : `<button class="btn primary" onclick="switchTab('impressao')">Ir pra Fila de Impressão</button>`;
   else if(currentTab==='impressao') el.innerHTML = `<button class="btn primary" onclick="openPrintJobModal()">+ Nova impressão</button>`;
@@ -1145,7 +1161,7 @@ function renderContent(){
   else if(currentTab==='vendas') c.innerHTML = renderVendas();
   else if(currentTab==='clientes') c.innerHTML = renderClientes();
   else if(currentTab==='produtos') c.innerHTML = produtosView==='diagnostico' ? renderProdutosDiagnostico() : renderProdutos();
-  else if(currentTab==='personalizados') c.innerHTML = renderPersonalizados();
+  else if(currentTab==='personalizados') c.innerHTML = personalizadosView==='diagnostico' ? renderPersonalizadosDiagnostico() : renderPersonalizados();
   else if(currentTab==='anuncios') c.innerHTML = renderAnuncios();
   else if(currentTab==='estoque') c.innerHTML = renderEstoque();
   else if(currentTab==='calculo') c.innerHTML = renderCalculo();
@@ -1163,6 +1179,7 @@ function renderContent(){
     renderMachineRows();
     renderReserveRows();
     renderMarketGroupRows();
+    ['chaveiro','lembrancinha','topo_bolo'].forEach(renderCustomOrderPriceTierRows);
   }
 }
 
@@ -3521,7 +3538,7 @@ function renderProdutosDiagnostico(){
     <td data-label="Melhor canal">${better.best?better.label:'—'}${better.flag?`<div style="font-size:10px;color:var(--text-faint);">${better.flag}</div>`:''}</td>
     <td data-label="Veredito"><span class="badge ${verdict.cls}">${verdict.label}</span></td>
   </tr>`).join('');
-  return channelTabs + summary + `<div class="card"><div class="tbl-wrap tbl-responsive tbl-compact-mobile"><table>
+  return channelTabs + summary + `<div class="card"><div class="tbl-wrap tbl-responsive"><table>
     <thead><tr><th>Produto</th><th class="right">Peso/un</th><th class="right">Tempo/un</th><th class="right">Lucro/venda</th><th class="right">R$/hora ML</th><th class="right">R$/hora Shopee</th><th>Melhor canal</th><th>Veredito</th></tr></thead>
     <tbody>${rows}</tbody>
   </table></div></div>`;
@@ -4709,6 +4726,7 @@ function confirmProduct(id){
 // vez, não o catálogo inteiro. Ficha inspirada no modelo em papel já usado.
 let personalizadosFilter = { search:'' };
 let showDeliveredCustomOrders = false;
+let personalizadosView = 'kanban';
 const CUSTOM_ORDER_TYPES = { chaveiro:'Chaveiro', lembrancinha:'Lembrancinha', topo_bolo:'Topo de bolo', outro:'Outro' };
 // Status próprio de Personalizados — NÃO é o ORDER_STATUSES de Pedidos
 // (state.orders), que é outro sistema já em produção com venda vinculada
@@ -4864,6 +4882,77 @@ function renderPersonalizados(){
     </div>
     <div class="grid g-5" style="align-items:start;">${cols}</div>
   `;
+}
+// Diagnóstico de Personalizados — mesmo espírito do Diagnóstico de Produtos,
+// adaptado ao canal direto (sem taxa de marketplace) e só com encomendas
+// ENTREGUES: é a única fase em que peso/tempo/custo reais já existem — antes
+// disso ainda é plano, não fato, e não serve pra calibrar nada.
+function renderPersonalizadosDiagnostico(){
+  const delivered = state.customOrders.filter(o=>o.status==='Entregue');
+  if(delivered.length===0) return `<div class="card">${emptyState('Nenhuma encomenda entregue ainda — o Diagnóstico usa o histórico real pra calibrar as estimativas.')}</div>`;
+  const list = delivered.map(o=>{
+    const c = calcProduct(o);
+    const estWeight = totalWeight(o);
+    const estTimeH = o.timeH||0;
+    // Prefere o dado REAL (preenchido na aba Produção após a impressão) sobre
+    // a estimativa — é o ponto inteiro de calibrar com o histórico.
+    const effTimeH = o.realTimeH>0 ? o.realTimeH : estTimeH;
+    const effCost = o.realCost>0 ? o.realCost : c.totalCost;
+    const profit = (o.practicedPrice||0) - effCost;
+    const hourly = effTimeH>0 ? profit/effTimeH : null;
+    const verdict = hourlyVerdict(hourly, profit);
+    const tablePrice = tablePriceFor(o.orderType, o.qty);
+    const weightDevPct = (o.realWeightG>0 && estWeight>0) ? ((o.realWeightG-estWeight)/estWeight)*100 : null;
+    const timeDevPct = (o.realTimeH>0 && estTimeH>0) ? ((o.realTimeH-estTimeH)/estTimeH)*100 : null;
+    return { o, estWeight, estTimeH, effTimeH, profit, hourly, verdict, tablePrice, weightDevPct, timeDevPct };
+  });
+  const byType = {};
+  list.forEach(x=>{ const t=x.o.orderType||'outro'; (byType[t]=byType[t]||[]).push(x); });
+  const typeOrder = ['chaveiro','lembrancinha','topo_bolo','outro'];
+
+  const withWeightDev = list.filter(x=>x.weightDevPct!=null);
+  const withTimeDev = list.filter(x=>x.timeDevPct!=null);
+  const avgWeightDev = withWeightDev.length ? withWeightDev.reduce((a,x)=>a+x.weightDevPct,0)/withWeightDev.length : null;
+  const avgTimeDev = withTimeDev.length ? withTimeDev.reduce((a,x)=>a+x.timeDevPct,0)/withTimeDev.length : null;
+
+  const calibrationCard = `
+    <div class="card" style="margin-bottom:14px;">
+      <div class="field hint" style="margin:0 0 10px;">Comparativo estimado × real — calibra o peso/tempo cadastrado em novas encomendas com o que de fato aconteceu na produção.</div>
+      <div class="row2">
+        <div><div class="field hint" style="margin:0;">Peso real vs. estimado (média)</div><div style="font-family:var(--font-mono);font-size:18px;font-weight:700;">${avgWeightDev!=null?(avgWeightDev>=0?'+':'')+pct(avgWeightDev):'—'}${withWeightDev.length?` <span style="font-size:11px;font-weight:400;color:var(--text-faint);">(${withWeightDev.length} encomenda${withWeightDev.length>1?'s':''})</span>`:''}</div></div>
+        <div><div class="field hint" style="margin:0;">Tempo real vs. estimado (média)</div><div style="font-family:var(--font-mono);font-size:18px;font-weight:700;">${avgTimeDev!=null?(avgTimeDev>=0?'+':'')+pct(avgTimeDev):'—'}${withTimeDev.length?` <span style="font-size:11px;font-weight:400;color:var(--text-faint);">(${withTimeDev.length} encomenda${withTimeDev.length>1?'s':''})</span>`:''}</div></div>
+      </div>
+    </div>`;
+
+  const typeSections = typeOrder.filter(t=>byType[t] && byType[t].length).map(t=>{
+    const items = byType[t];
+    const withHourly = items.filter(x=>x.hourly!=null);
+    const totalHours = withHourly.reduce((a,x)=>a+(x.effTimeH||0),0);
+    const totalProfitOverHours = withHourly.reduce((a,x)=>a+x.hourly*(x.effTimeH||0),0);
+    const weightedAvg = totalHours>0 ? totalProfitOverHours/totalHours : null;
+    const totalRevenue = items.reduce((a,x)=>a+(x.o.practicedPrice||0),0);
+    const rows = items.map(({o,estWeight,estTimeH,profit,hourly,verdict,tablePrice,weightDevPct,timeDevPct})=>{
+      const tableDeltaPct = (tablePrice!=null && tablePrice>0) ? ((o.practicedPrice-tablePrice)/tablePrice)*100 : null;
+      return `<tr>
+        <td data-label="Encomenda">${o.orderNumber?`#${o.orderNumber} — `:''}${customerNameFor(o)}<div style="font-size:11px;color:var(--text-faint);">${o.deliveryDate?fmtDate(o.deliveryDate):''}</div></td>
+        <td class="right num" data-label="Qtd">${num(o.qty||0,0)}</td>
+        <td class="right num" data-label="Peso (est. → real)">${num(estWeight,1)}g → ${o.realWeightG>0?num(o.realWeightG,1)+'g':'—'}${weightDevPct!=null?`<div style="font-size:10px;color:${Math.abs(weightDevPct)>15?'var(--red)':'var(--text-faint)'};">${weightDevPct>=0?'+':''}${pct(weightDevPct)}</div>`:''}</td>
+        <td class="right num" data-label="Tempo (est. → real)">${fmtHm(estTimeH)} → ${o.realTimeH>0?fmtHm(o.realTimeH):'—'}${timeDevPct!=null?`<div style="font-size:10px;color:${Math.abs(timeDevPct)>15?'var(--red)':'var(--text-faint)'};">${timeDevPct>=0?'+':''}${pct(timeDevPct)}</div>`:''}</td>
+        <td class="right num" data-label="Preço praticado">${brl(o.practicedPrice||0)}</td>
+        <td class="right num" data-label="Preço de tabela">${tablePrice!=null?brl(tablePrice):'<span class="badge mut">sem tabela</span>'}${tableDeltaPct!=null?`<div style="font-size:10px;color:${tableDeltaPct<0?'var(--red)':'var(--text-faint)'};">${tableDeltaPct>=0?'+':''}${pct(tableDeltaPct)}</div>`:''}</td>
+        <td class="right num" data-label="Lucro">${brl(profit)}</td>
+        <td class="right num" data-label="R$/hora" style="font-weight:600;">${hourly!=null?brl(hourly)+'/h':'—'}</td>
+        <td data-label="Veredito"><span class="badge ${verdict.cls}">${verdict.label}</span></td>
+      </tr>`;
+    }).join('');
+    return `<div class="section-title">${orderTypeLabel(t)} — ${items.length} encomenda${items.length>1?'s':''}, receita ${brl(totalRevenue)}, média ${weightedAvg!=null?brl(weightedAvg)+'/h':'—'}</div>
+      <div class="card"><div class="tbl-wrap tbl-responsive"><table>
+        <thead><tr><th>Encomenda</th><th class="right">Qtd</th><th class="right">Peso (est. → real)</th><th class="right">Tempo (est. → real)</th><th class="right">Preço praticado</th><th class="right">Preço de tabela</th><th class="right">Lucro</th><th class="right">R$/hora</th><th>Veredito</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div></div>`;
+  }).join('');
+
+  return calibrationCard + typeSections;
 }
 function deleteCustomOrder(id){
   const o = state.customOrders.find(x=>x.id===id);
@@ -5920,6 +6009,7 @@ let editingTaxes = [];
 let editingMachines = [];
 let editingReserveGoals = [];
 let editingMarketGroups = [];
+let editingCustomOrderPriceTable = { chaveiro:[], lembrancinha:[], topo_bolo:[] };
 let editingBusinessName = '';
 let editingBusinessLogo = null;
 function renderTaxas(){
@@ -6022,6 +6112,18 @@ function renderConfiguracoes(){
       <div id="marketGroupRows"></div>
     </div>
 
+    <div class="section-title">Tabela de preço — Personalizados</div>
+    <div class="card">
+      <div class="field hint" style="margin-top:0;margin-bottom:10px;">Preço por unidade, com desconto por faixa de quantidade — usado no Diagnóstico de Personalizados pra comparar com o que foi realmente cobrado em cada encomenda. Faixa sem "até" cobre tudo dali pra cima.</div>
+      ${Object.entries({chaveiro:'Chaveiro', lembrancinha:'Lembrancinha', topo_bolo:'Topo de bolo'}).map(([type,label])=>`
+        <div style="margin-bottom:14px;">
+          <div style="font-weight:600;font-size:13px;margin-bottom:6px;">${label}</div>
+          <div id="priceTierRows_${type}"></div>
+          <button class="btn ghost sm" onclick="addPriceTierRow('${type}')">+ Adicionar faixa</button>
+        </div>
+      `).join('')}
+    </div>
+
     <div class="section-title">Impressoras</div>
     <div class="card">
       <div class="field hint" style="margin-top:0;margin-bottom:10px;">Cada impressora tem sua própria depreciação, energia e parcela. O produto escolhe qual impressora usa lá no cadastro.</div>
@@ -6082,6 +6184,28 @@ function renderMarketGroupRows(){
       </div>
     </div>
   `).join('');
+}
+function renderCustomOrderPriceTierRows(type){
+  const el = document.getElementById(`priceTierRows_${type}`);
+  if(!el) return;
+  const tiers = editingCustomOrderPriceTable[type]||[];
+  if(!tiers.length){ el.innerHTML = `<div class="empty" style="padding:8px;font-size:12.5px;">Nenhuma faixa cadastrada — sem faixa, o Diagnóstico não compara com tabela.</div>`; return; }
+  el.innerHTML = tiers.map((t,i)=>`
+    <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) 28px;gap:8px;align-items:center;margin-bottom:8px;">
+      <input type="number" min="1" step="1" value="${t.minQty||1}" placeholder="de (un)" style="min-width:0;" oninput="editingCustomOrderPriceTable['${type}'][${i}].minQty=parseFloat(this.value)||1">
+      <input type="number" min="1" step="1" value="${t.maxQty||''}" placeholder="até (opcional)" style="min-width:0;" oninput="editingCustomOrderPriceTable['${type}'][${i}].maxQty=parseFloat(this.value)||0">
+      <input type="number" step="0.01" value="${t.unitPrice||''}" placeholder="R$/un" style="min-width:0;" oninput="editingCustomOrderPriceTable['${type}'][${i}].unitPrice=parseFloat(this.value)||0">
+      <button class="btn ghost sm" title="Remover" style="padding:6px 8px;" onclick="removePriceTierRow('${type}',${i})">×</button>
+    </div>
+  `).join('');
+}
+function addPriceTierRow(type){
+  editingCustomOrderPriceTable[type].push({minQty:1, maxQty:0, unitPrice:0});
+  renderCustomOrderPriceTierRows(type);
+}
+function removePriceTierRow(type, i){
+  editingCustomOrderPriceTable[type].splice(i,1);
+  renderCustomOrderPriceTierRows(type);
 }
 function renderMachineRows(){
   const el = document.getElementById('machineRows');
@@ -6271,6 +6395,11 @@ function confirmConfiguracoes(){
   s.minProfitPerSale = parseFloat(document.getElementById('cfgMinProfitPerSale').value)||8;
   s.marketByGroup = {};
   editingMarketGroups.forEach(g=>{ s.marketByGroup[g.category] = { min:g.min||0, avg:g.avg||0, max:g.max||0, checkedAt:g.checkedAt||'', note:g.note||'' }; });
+  s.customOrderPriceTable = {
+    chaveiro: editingCustomOrderPriceTable.chaveiro.filter(t=>t.unitPrice>0),
+    lembrancinha: editingCustomOrderPriceTable.lembrancinha.filter(t=>t.unitPrice>0),
+    topo_bolo: editingCustomOrderPriceTable.topo_bolo.filter(t=>t.unitPrice>0),
+  };
   s.machines = editingMachines.filter(m=>m.name && m.name.trim());
   s.reserveGoals = editingReserveGoals.filter(g=>g.name && g.name.trim());
   saveSettings(); toast('Configurações salvas'); render();
