@@ -261,7 +261,7 @@ tbody tr:hover{background:rgba(0,0,0,0.025);}
    sem rolar na horizontal — mesmo critério de "secundário" já usado abaixo,
    só que aplicado a th/td por posição, já que no desktop a tabela continua
    <table> de verdade (sem data-label visível/cards). Colunas 3–8 = Filamentos,
-   Impressora, Peso total, Tempo, Custo total, Preço sugerido. */
+   Impressora, Peso/un, Tempo/un, Custo/venda, Preço sugerido/venda. */
 @media(min-width:641px) and (max-width:1700px){
   .tbl-compact-mobile th:nth-child(n+3):nth-child(-n+8),
   .tbl-compact-mobile td:nth-child(n+3):nth-child(-n+8){display:none;}
@@ -278,10 +278,10 @@ tbody tr:hover{background:rgba(0,0,0,0.025);}
   .tbl-responsive tbody td[data-label]::before{content:attr(data-label);font-size:10.5px;color:var(--text-faint);font-weight:600;text-transform:uppercase;letter-spacing:.03em;text-align:left;margin-right:10px;white-space:nowrap;}
   .tbl-compact-mobile tbody td[data-label="Filamentos"],
   .tbl-compact-mobile tbody td[data-label="Impressora"],
-  .tbl-compact-mobile tbody td[data-label="Peso total"],
-  .tbl-compact-mobile tbody td[data-label="Tempo"],
-  .tbl-compact-mobile tbody td[data-label="Custo total"],
-  .tbl-compact-mobile tbody td[data-label="Preço sugerido"]{display:none;}
+  .tbl-compact-mobile tbody td[data-label="Peso/un"],
+  .tbl-compact-mobile tbody td[data-label="Tempo/un"],
+  .tbl-compact-mobile tbody td[data-label="Custo/venda"],
+  .tbl-compact-mobile tbody td[data-label="Preço sugerido/venda"]{display:none;}
   .tbl-responsive tbody td:has(button){justify-content:flex-end;padding-top:10px;}
 }
 @media print{

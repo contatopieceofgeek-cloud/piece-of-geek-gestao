@@ -177,6 +177,7 @@ function migrateProducts(products){
     if(prod.modelLicense==null) prod.modelLicense = '';
     if(prod.modelSourceUrl==null) prod.modelSourceUrl = '';
     if(prod.unitsPerPrint==null || prod.unitsPerPrint<1) prod.unitsPerPrint = 1;
+    if(prod.unitsPerSale==null || prod.unitsPerSale<1) prod.unitsPerSale = 1;
     if(prod.marketPriceOverride==null) prod.marketPriceOverride = null;
   });
   return products;
@@ -331,6 +332,10 @@ function migrateSettings(settings){
   if(settings.mlConnected==null) settings.mlConnected = false;
   if(settings.printHoursPerDay==null) settings.printHoursPerDay = 8;
   if(!settings.marketByGroup) settings.marketByGroup = {};
+  Object.values(settings.marketByGroup).forEach(g=>{
+    if(g.unitBasis!=='kit') g.unitBasis = 'unidade';
+    if(g.kitSize==null || g.kitSize<1) g.kitSize = 1;
+  });
   if(settings.targetHourlyProfit==null) settings.targetHourlyProfit = 15.00;
   if(settings.goodHourlyProfit==null) settings.goodHourlyProfit = 20.00;
   if(settings.minProfitPerSale==null) settings.minProfitPerSale = 8.00;
@@ -652,14 +657,13 @@ function calcProduct(prod){
   const machine = findMachine(prod.machineId);
   // Peso e tempo cadastrados são da LEVA inteira (uma impressão pode render
   // várias unidades vendáveis) — todo custo que escala com peso/tempo/mão de
-  // obra/ferramentas é dividido por unitsPerPrint pra virar custo POR UNIDADE.
-  // Embalagem fica de fora de propósito: cada peça vendida gasta uma caixa
-  // inteira, não uma fração dela. unitsPerPrint ausente (customOrders, kits,
-  // orçamento rápido) cai em 1 — comportamento idêntico ao de antes.
-  const units = Math.max(1, prod.unitsPerPrint||1);
-  const unitWeightG = totalWeight(prod) / units;
-  const unitTimeH = (prod.timeH||0) / units;
-  const materialCost = (prod.filaments||[]).reduce((a,f)=>a+(f.weightG||0)*filamentCost(f.materialName),0) / units;
+  // obra/ferramentas é dividido por unitsPerPrint pra virar custo POR PEÇA.
+  // unitsPerPrint ausente (customOrders, kits, orçamento rápido) cai em 1 —
+  // comportamento idêntico ao de antes.
+  const printUnits = Math.max(1, prod.unitsPerPrint||1);
+  const unitWeightG = totalWeight(prod) / printUnits;
+  const unitTimeH = (prod.timeH||0) / printUnits;
+  const materialCost = (prod.filaments||[]).reduce((a,f)=>a+(f.weightG||0)*filamentCost(f.materialName),0) / printUnits;
   const energyCost = unitTimeH * machineEnergyCostPerHour(machine);
   const bCost = boxCost(prod.boxType);
   const bubbleCost = prod.bubbleWrapM * bubbleWrapUnitCost();
@@ -667,13 +671,20 @@ function calcProduct(prod){
   const embalagemCost = bCost + bubbleCost + tapeCost;
   const depreciation = unitTimeH * machineDeprCostPerHour(machine);
   const maintenance = unitTimeH * machineMaintenanceCostPerHour(machine);
-  const totalLaborMinutes = (prod.laborActions||[]).reduce((a,x)=>a+(x.minutes||0),0) / units;
+  const totalLaborMinutes = (prod.laborActions||[]).reduce((a,x)=>a+(x.minutes||0),0) / printUnits;
   const laborCost = (totalLaborMinutes/60) * (s.laborHourlyRate||0);
-  const toolsCost = (prod.toolsUsed||[]).reduce((a,t)=>a+(t.uses||0)*toolCostPerUse(state.materials.find(x=>x.id===t.toolId)),0) / units;
+  const toolsCost = (prod.toolsUsed||[]).reduce((a,t)=>a+(t.uses||0)*toolCostPerUse(state.materials.find(x=>x.id===t.toolId)),0) / printUnits;
   // Embalagem fica de fora (caixa/bolha não são gastos numa impressão que falha),
   // mas metade da mão de obra entra — setup e a descoberta da falha consomem tempo.
   const failureCost = (materialCost + energyCost + depreciation + laborCost*0.5) * prod.failureMarginPct;
-  const totalCost = materialCost + energyCost + embalagemCost + depreciation + maintenance + failureCost + laborCost + toolsCost;
+  // unitsPerPrint (leva) ≠ unitsPerSale (anúncio/kit) — uma leva de 4 pode ser
+  // vendida avulsa (unitsPerSale=1) ou em kit de 4. O custo POR PEÇA acima
+  // multiplica pelas peças do anúncio; a embalagem entra SÓ UMA VEZ, porque
+  // uma venda de 4 peças no mesmo kit usa uma caixa, não quatro.
+  const saleUnits = Math.max(1, prod.unitsPerSale||1);
+  const saleWeightG = unitWeightG * saleUnits;
+  const saleTimeH = unitTimeH * saleUnits;
+  const totalCost = (materialCost + energyCost + depreciation + maintenance + failureCost + laborCost + toolsCost) * saleUnits + embalagemCost;
   const defaultMargin = 1 - (1/(s.markupMultiplier||2.5));
   const desiredMargin = prod.desiredMarginPct!=null ? Math.min(0.95,Math.max(0,prod.desiredMarginPct/100)) : defaultMargin;
   const suggestedPrice = desiredMargin < 1 ? totalCost / (1 - desiredMargin) : totalCost * (s.markupMultiplier||2.5);
@@ -712,7 +723,7 @@ function calcProduct(prod){
   const marginShopeeValue = netReceiptShopee - totalCost;
   const marginMlPct = practicedPriceMl > 0 ? (marginMlValue/practicedPriceMl)*100 : 0;
   const marginShopeePct = practicedPriceShopee > 0 ? (marginShopeeValue/practicedPriceShopee)*100 : 0;
-  return { units, unitWeightG, unitTimeH, materialCost, energyCost, boxCost:bCost, bubbleCost, tapeCost, embalagemCost, depreciation, maintenance, laborCost, totalLaborMinutes, toolsCost, failureCost, totalCost, suggestedPrice, suggestedPriceMl, suggestedPriceShopee, suggestedPriceExtra, practicedPrice, practicedPriceMl, practicedPriceShopee, practicedPriceExtra, estimatedShopeeFreightCap, mlFeeAmount, shopeeFeeAmount, mlFeePct, shopeeFeePct, effectiveFreightMl, effectiveFreightShopee, netReceiptMl, netReceiptShopee, marginValue, marginPct, marginMlValue, marginShopeeValue, marginMlPct, marginShopeePct, desiredMarginPct: desiredMargin*100, machine };
+  return { printUnits, saleUnits, unitWeightG, unitTimeH, saleWeightG, saleTimeH, materialCost, energyCost, boxCost:bCost, bubbleCost, tapeCost, embalagemCost, depreciation, maintenance, laborCost, totalLaborMinutes, toolsCost, failureCost, totalCost, suggestedPrice, suggestedPriceMl, suggestedPriceShopee, suggestedPriceExtra, practicedPrice, practicedPriceMl, practicedPriceShopee, practicedPriceExtra, estimatedShopeeFreightCap, mlFeeAmount, shopeeFeeAmount, mlFeePct, shopeeFeePct, effectiveFreightMl, effectiveFreightShopee, netReceiptMl, netReceiptShopee, marginValue, marginPct, marginMlValue, marginShopeeValue, marginMlPct, marginShopeePct, desiredMarginPct: desiredMargin*100, machine };
 }
 // Teto até onde a Shopee subsidia o frete grátis obrigatório (por faixa de
 // preço, desde mar/2026). O vendedor só paga o que passar desse teto — ver
@@ -772,18 +783,20 @@ function channelFeeAt(channelName, price, prod){
   }
   return fee + freight;
 }
-// (preço − taxa/frete do canal − custo unitário) ÷ tempo por unidade
+// (preço − taxa/frete do canal − custo da venda) ÷ tempo por venda — totalCost
+// já cobre as unitsPerSale peças do anúncio, então o tempo tem que ser o
+// mesmo (saleTimeH), não o tempo de uma peça só.
 function profitPerHourAt(c, channelName, price, prod){
-  if(!(c.unitTimeH>0) || !(price>0)) return null;
-  return (price - channelFeeAt(channelName, price, prod) - c.totalCost) / c.unitTimeH;
+  if(!(c.saleTimeH>0) || !(price>0)) return null;
+  return (price - channelFeeAt(channelName, price, prod) - c.totalCost) / c.saleTimeH;
 }
 // Preço mínimo pra bater a meta de R$/hora configurada, já com frete embutido.
 // Reaproveita suggestedPriceForPlatform (mesma iteração que o resto do app já
 // usa pra taxa em faixas + subsídio de frete da Shopee por preço).
 function minPriceForTarget(c, channelName, prod){
-  if(!(c.unitTimeH>0) || !channelName) return null;
+  if(!(c.saleTimeH>0) || !channelName) return null;
   const target = state.settings.targetHourlyProfit!=null ? state.settings.targetHourlyProfit : 15;
-  const needNet = target*c.unitTimeH + c.totalCost;
+  const needNet = target*c.saleTimeH + c.totalCost;
   const freight = channelName==='Mercado Livre' ? ((prod&&prod.estimatedFreightMl)||0) : channelName==='Shopee' ? ((prod&&prod.estimatedFreightShopee)||0) : 0;
   if(channelName==='Mercado Livre' && prod && prod.mlRealFeePct!=null){
     const pct = Math.min(0.95, prod.mlRealFeePct/100);
@@ -791,22 +804,34 @@ function minPriceForTarget(c, channelName, prod){
   }
   return suggestedPriceForPlatform(needNet, channelName, freight);
 }
-// Dado um preço de referência (mercado da categoria ou exceção do produto),
-// quanto tempo de impressão POR UNIDADE ainda bate a meta de R$/hora — pode
-// sair negativo (nem a preço de mercado dá pra bater a meta em tempo nenhum).
+// Dado um preço de referência (mercado da categoria ou exceção do produto, já
+// escalado pra unitsPerSale — ver effectiveMarketPrice), quanto tempo de
+// impressão AINDA BATE a meta de R$/hora pra essa venda inteira — pode sair
+// negativo (nem a preço de mercado dá pra bater a meta em tempo nenhum).
 function maxTimeAtMarketPrice(c, channelName, marketPrice, prod){
   const target = state.settings.targetHourlyProfit!=null ? state.settings.targetHourlyProfit : 15;
   if(marketPrice==null || !(target>0)) return null;
   return (marketPrice - channelFeeAt(channelName, marketPrice, prod) - c.totalCost) / target;
 }
-// Preço de mercado efetivo do produto: exceção da peça, senão média da
-// categoria. min/max sempre vêm da categoria (uma exceção pontual não tem
-// faixa própria) — usados só pros alertas de "acima/abaixo do mercado".
+// Preço de mercado efetivo do produto: exceção da peça (já no valor da VENDA
+// dessa peça, sem conversão — é override manual), senão a faixa da categoria
+// escalada de "por unidade" ou "por kit de N" pra unitsPerSale deste produto.
+// Comparar preço de kit com faixa cadastrada por unidade (ou vice-versa) sem
+// escalar induz erro — ver ponto 5 do pedido que motivou isso.
 function effectiveMarketPrice(prod){
   const g = (state.settings.marketByGroup||{})[prod.category||''] || {};
-  const value = prod.marketPriceOverride>0 ? prod.marketPriceOverride : (g.avg>0 ? g.avg : null);
-  const source = prod.marketPriceOverride>0 ? 'override' : (g.avg>0 ? 'category' : 'none');
-  return { value, source, min:g.min||0, max:g.max||0, avg:g.avg||0 };
+  const saleUnits = Math.max(1, prod.unitsPerSale||1);
+  const basisUnits = g.unitBasis==='kit' ? Math.max(1, g.kitSize||1) : 1;
+  const scale = saleUnits/basisUnits;
+  const hasOverride = prod.marketPriceOverride>0;
+  const value = hasOverride ? prod.marketPriceOverride : (g.avg>0 ? g.avg*scale : null);
+  const source = hasOverride ? 'override' : (g.avg>0 ? 'category' : 'none');
+  return {
+    value, source,
+    min: g.min>0 ? g.min*scale : 0, max: g.max>0 ? g.max*scale : 0, avg: g.avg>0 ? g.avg*scale : 0,
+    unitBasis: g.unitBasis==='kit' ? 'kit' : 'unidade', kitSize: g.kitSize||1,
+    rawMin: g.min||0, rawAvg: g.avg||0, rawMax: g.max||0, scale,
+  };
 }
 // Preço de tabela (por unidade, com desconto por faixa) pra Personalizados —
 // faixa sem "até" cadastrado cobre tudo dali pra cima. null = sem tabela
@@ -1105,7 +1130,7 @@ function switchTab(t){
       const allCats = Array.from(new Set([...productCategorySuggestions(), ...Object.keys(s.marketByGroup||{})])).sort((a,b)=>a.localeCompare(b,'pt-BR'));
       editingMarketGroups = allCats.map(cat=>{
         const g = (s.marketByGroup||{})[cat] || {};
-        return { category:cat, min:g.min||0, avg:g.avg||0, max:g.max||0, checkedAt:g.checkedAt||'', note:g.note||'' };
+        return { category:cat, min:g.min||0, avg:g.avg||0, max:g.max||0, checkedAt:g.checkedAt||'', note:g.note||'', unitBasis:g.unitBasis==='kit'?'kit':'unidade', kitSize:g.kitSize||1 };
       });
       editingCustomOrderPriceTable = {
         chaveiro: JSON.parse(JSON.stringify((s.customOrderPriceTable||{}).chaveiro||[])),
@@ -2536,7 +2561,7 @@ function confirmPrintJob(){
     // qty é número de IMPRESSÕES (levas), não de unidades, então desfaz a
     // divisão (×units) antes de multiplicar pelas levas rodadas.
     const cFail = calcProduct(prod);
-    energyCost = cFail.energyCost*cFail.units*qty*(pctComplete/100);
+    energyCost = cFail.energyCost*cFail.printUnits*qty*(pctComplete/100);
     totalLoss = materialCost+energyCost;
   }
   const machines = state.settings.machines||[];
@@ -2697,17 +2722,17 @@ function updateCalculoExample(){
   const c = calcProduct(prod);
   box.innerHTML = `
     <div class="helper-block" style="margin-top:12px;">
-      ${c.units>1 ? `<div class="field hint" style="margin:0 0 8px;">Valores por unidade — essa leva rende ${c.units} un. (${num(totalWeight(prod),0)}g / ${fmtHm(prod.timeH)} no total).</div>` : ''}
-      <div class="calc-line"><span>Material (${(prod.filaments||[]).map(f=>`${f.materialName} ${num((f.weightG||0)/c.units,1)}g`).join(' + ')})</span><span>${brl(c.materialCost)}</span></div>
+      ${c.printUnits>1 ? `<div class="field hint" style="margin:0 0 4px;">Valores por peça — essa leva rende ${c.printUnits} un. (${num(totalWeight(prod),0)}g / ${fmtHm(prod.timeH)} no total).</div>` : ''}
+      <div class="calc-line"><span>Material (${(prod.filaments||[]).map(f=>`${f.materialName} ${num((f.weightG||0)/c.printUnits,1)}g`).join(' + ')})</span><span>${brl(c.materialCost)}</span></div>
       <div class="calc-line"><span>Energia (${fmtHm(c.unitTimeH)} × ${brl(c.machine?machineEnergyCostPerHour(c.machine):0)}/h em ${c.machine?c.machine.name:'—'})</span><span>${brl(c.energyCost)}</span></div>
-      <div class="calc-line"><span>Embalagem (caixa + plástico bolha + fita)</span><span>${brl(c.embalagemCost)}</span></div>
       <div class="calc-line"><span>Depreciação (${fmtHm(c.unitTimeH)} × ${brl(c.machine?machineDeprCostPerHour(c.machine):0)}/h em ${c.machine?c.machine.name:'—'})</span><span>${brl(c.depreciation)}</span></div>
       <div class="calc-line"><span>Manutenção (${fmtHm(c.unitTimeH)} × ${brl(c.machine?machineMaintenanceCostPerHour(c.machine):0)}/h)</span><span>${brl(c.maintenance)}</span></div>
       <div class="calc-line"><span>Mão de obra (${(prod.laborActions||[]).length ? (prod.laborActions||[]).map(a=>`${a.action||'(sem nome)'} ${a.minutes}min`).join(' + ') : 'nenhuma ação cadastrada'} × ${brl(state.settings.laborHourlyRate||0)}/h)</span><span>${brl(c.laborCost)}</span></div>
       ${(prod.toolsUsed||[]).length ? `<div class="calc-line"><span>Ferramentas (${(prod.toolsUsed||[]).map(t=>{ const tool=state.materials.find(x=>x.id===t.toolId); return `${tool?tool.name:'?'} ${t.uses}x`; }).join(' + ')})</span><span>${brl(c.toolsCost)}</span></div>` : ''}
       <div class="calc-line"><span>Custo de falha (${num(prod.failureMarginPct*100,0)}% sobre material+energia+depreciação+50% da mão de obra)</span><span>${brl(c.failureCost)}</span></div>
-      <div class="calc-line total"><span>Custo total</span><span>${brl(c.totalCost)}</span></div>
-      <div class="calc-line total"><span>Preço sugerido — venda própria (margem de ${num(c.desiredMarginPct,0)}%)</span><span>${brl(c.suggestedPrice)}</span></div>
+      <div class="calc-line"><span>Embalagem por venda (caixa + plástico bolha + fita — uma vez, não por peça)</span><span>${brl(c.embalagemCost)}</span></div>
+      <div class="calc-line total"><span>Custo total${c.saleUnits>1?` — venda de ${c.saleUnits} un`:''}</span><span>${brl(c.totalCost)}</span></div>
+      <div class="calc-line total"><span>Preço sugerido${c.saleUnits>1?` — venda de ${c.saleUnits} un`:' — venda própria'} (margem de ${num(c.desiredMarginPct,0)}%)</span><span>${brl(c.suggestedPrice)}</span></div>
       ${platformBreakdownHtml('Mercado Livre', c.suggestedPriceMl, c.mlFeeAmount, c.mlFeePct, prod.mlRealFeePct!=null?'real':'estimada', c.effectiveFreightMl, 'Frete estimado', c.netReceiptMl)}
       ${platformBreakdownHtml('Shopee', c.suggestedPriceShopee, c.shopeeFeeAmount, c.shopeeFeePct, 'estimada', c.effectiveFreightShopee, 'Frete acima do subsídio (sai do seu bolso)', c.netReceiptShopee, c.estimatedShopeeFreightCap!=null ? `Shopee subsidia o frete até ${brl(c.estimatedShopeeFreightCap)} nessa faixa de preço — você só paga o que passar disso.` : null)}
       ${extraListingPlatforms().map(plat=>`<div class="calc-line" style="color:var(--text-faint);"><span>↳ ${plat.name} (já com a taxa)</span><span>${brl(c.suggestedPriceExtra[plat.id])}</span></div>`).join('')}
@@ -2839,9 +2864,12 @@ function deleteSale(id){
   const prod = state.products.find(p=>p.id===s.productId);
   if(prod){
     prod.stock += s.qty;
+    // packagingRecipe é por VENDA (uma caixa por venda, não por peça) — desfaz
+    // na mesma proporção que confirmSale() descontou (ver saleUnits ali).
+    const saleUnits = calcProduct(prod).saleUnits;
     packagingRecipe(prod).forEach(r=>{
       const mat = materialByName(r.materialName);
-      if(mat) mat.stock += r.qty * s.qty;
+      if(mat) mat.stock += r.qty * (s.qty/saleUnits);
     });
   }
   const touchedReserves = reverseSaleReserveAllocations(s);
@@ -3035,7 +3063,10 @@ function updateSalePreview(){
     const itemFee = totalFee*share;
     const itemShipping = totalShipping*share;
     const calc = calcProduct(prod);
-    const cost = calc.totalCost*item.qty;
+    // calc.totalCost cobre unitsPerSale peças (a venda inteira, embalagem
+    // inclusa uma vez) — item.qty é peças vendidas, então divide por
+    // saleUnits antes de multiplicar, senão o custo é inflado pra kits.
+    const cost = calc.totalCost*(item.qty/calc.saleUnits);
     const net = itemGross-itemFee;
     const profit = net-cost-itemShipping;
     totalCost += cost; totalProfit += profit;
@@ -3103,7 +3134,10 @@ function confirmSale(){
     const itemShipping = totalShipping*share;
     const itemCoupon = totalCoupon*share;
     const calc = calcProduct(prod);
-    const cost = calc.totalCost*item.qty;
+    // calc.totalCost cobre unitsPerSale peças (a venda inteira, embalagem
+    // inclusa uma vez) — item.qty é peças vendidas, então divide por
+    // saleUnits antes de multiplicar, senão o custo é inflado pra kits.
+    const cost = calc.totalCost*(item.qty/calc.saleUnits);
     const net = itemGross-itemFee;
     const profit = net-cost-itemShipping;
     const allocations = computeSaleReserveAllocations(calc, item.qty, profit);
@@ -3114,9 +3148,11 @@ function confirmSale(){
       reserveAllocations:allocations, machineId: calc.machine?calc.machine.id:null, hoursUsed:(prod.timeH||0)*item.qty, customerId, trackingCode, linkedOrderId,
     });
     prod.stock -= item.qty;
+    // packagingRecipe é por VENDA — uma venda de 4 peças no mesmo kit gasta
+    // uma caixa, não quatro (ver saleUnits em calcProduct/cost acima).
     packagingRecipe(prod).forEach(r=>{
       const mat = materialByName(r.materialName);
-      if(mat){ mat.stock -= r.qty*item.qty; if(mat.stock<0) boxNegativeWarn = true; }
+      if(mat){ mat.stock -= r.qty*(item.qty/calc.saleUnits); if(mat.stock<0) boxNegativeWarn = true; }
     });
     applySaleReserveAllocations(allocations);
     if(Object.keys(allocations).length){ settingsTouched = true; totalAllocated += Object.values(allocations).reduce((a,v)=>a+v,0); }
@@ -3282,7 +3318,7 @@ function renderKitItemsList(){
     const c = calcProduct(p);
     return `<div style="display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:center;padding:5px 0;">
       <input type="checkbox" style="width:auto;" ${checked?'checked':''} onchange="toggleKitItem('${p.id}', this.checked)">
-      <div style="font-size:13px;">${p.name} <span style="color:var(--text-faint);font-size:11.5px;">(${brl(c.totalCost)} custo unit.)</span></div>
+      <div style="font-size:13px;">${p.name} <span style="color:var(--text-faint);font-size:11.5px;">(${brl(c.totalCost/c.saleUnits)} custo unit.)</span></div>
       <input type="number" min="1" value="${checked?editingKitItems[p.id]:1}" style="width:60px;" ${checked?'':'disabled'} oninput="updateKitItemQty('${p.id}', this.value)">
     </div>`;
   }).join('');
@@ -3410,9 +3446,9 @@ function renderProdutos(){
       <th>Impressora</th>
       <th class="right" style="cursor:pointer;" onclick="toggleProductSort('weight')">Peso/un${sortArrow(produtosFilter,'weight')}</th>
       <th class="right" style="cursor:pointer;" onclick="toggleProductSort('time')">Tempo/un${sortArrow(produtosFilter,'time')}</th>
-      <th class="right" style="cursor:pointer;" onclick="toggleProductSort('cost')">Custo total${sortArrow(produtosFilter,'cost')}</th>
-      <th class="right" style="cursor:pointer;" onclick="toggleProductSort('suggested')">Preço sugerido${sortArrow(produtosFilter,'suggested')}</th>
-      <th class="right" style="cursor:pointer;" onclick="toggleProductSort('practiced')">Preço praticado${sortArrow(produtosFilter,'practiced')}</th>
+      <th class="right" style="cursor:pointer;" onclick="toggleProductSort('cost')">Custo/venda${sortArrow(produtosFilter,'cost')}</th>
+      <th class="right" style="cursor:pointer;" onclick="toggleProductSort('suggested')">Preço sugerido/venda${sortArrow(produtosFilter,'suggested')}</th>
+      <th class="right" style="cursor:pointer;" onclick="toggleProductSort('practiced')">Preço praticado/venda${sortArrow(produtosFilter,'practiced')}</th>
       <th class="right" style="cursor:pointer;" onclick="toggleProductSort('margin')">Margem${sortArrow(produtosFilter,'margin')}</th>
       <th class="right" style="cursor:pointer;" onclick="toggleProductSort('stock')">Estoque${sortArrow(produtosFilter,'stock')}</th>
       <th></th>
@@ -3424,11 +3460,11 @@ function renderProdutos(){
       <td data-label="Produto">${p.name}${p.kitComponents && p.kitComponents.length ? `<div style="font-size:11px;font-style:italic;color:var(--text-faint);margin-top:2px;">${p.kitComponents.map(kc=>`${kc.qty>1?kc.qty+'x ':''}${kc.productName}`).join(' + ')}</div>` : ''}${(!p.laborActions || !p.laborActions.length) ? `<div style="margin-top:3px;"><span class="badge warn" title="Nenhuma ação de mão de obra cadastrada — o custo de mão de obra desse produto está zerado, o que deixa a margem otimista demais">sem mão de obra</span></div>` : ''}${(p.modelOrigin==='terceiro' && !p.modelLicense) ? `<div style="margin-top:3px;"><span class="badge bad" title="Modelo de terceiro sem licença registrada — confira se pode vender antes de anunciar em ML/Shopee">sem licença do modelo</span></div>` : ''}</td>
       <td title="${filSummary}" data-label="Filamentos">${filSummary}</td>
       <td data-label="Impressora">${c.machine ? c.machine.name : '<span class="badge bad">nenhuma</span>'}</td>
-      <td class="right num" data-label="Peso/un">${num(c.unitWeightG,1)}g${c.units>1?`<div style="font-size:10px;font-weight:400;color:var(--text-faint);white-space:nowrap;">leva: ${num(totalWeight(p),0)}g / ${c.units}un</div>`:''}</td>
-      <td class="right num" data-label="Tempo/un">${fmtHm(c.unitTimeH)}${c.units>1?`<div style="font-size:10px;font-weight:400;color:var(--text-faint);white-space:nowrap;">leva: ${num(p.timeH,1)}h</div>`:''}</td>
-      <td class="right num" data-label="Custo total">${brl(c.totalCost)}</td>
-      <td class="right num" data-label="Preço sugerido">${brl(c.suggestedPrice)}</td>
-      <td class="right num" data-label="Preço praticado">${brl(c.practicedPrice)}<div style="font-size:10px;font-weight:400;color:var(--text-faint);white-space:nowrap;">ML ${brl(c.practicedPriceMl)} · Shopee ${brl(c.practicedPriceShopee)}${extraListingPlatforms().map(plat=>` · ${plat.name} ${brl(c.practicedPriceExtra[plat.id])}`).join('')}</div></td>
+      <td class="right num" data-label="Peso/un">${num(c.unitWeightG,1)}g${c.printUnits>1?`<div style="font-size:10px;font-weight:400;color:var(--text-faint);white-space:nowrap;">leva: ${num(totalWeight(p),0)}g / ${c.printUnits}un</div>`:''}</td>
+      <td class="right num" data-label="Tempo/un">${fmtHm(c.unitTimeH)}${c.printUnits>1?`<div style="font-size:10px;font-weight:400;color:var(--text-faint);white-space:nowrap;">leva: ${num(p.timeH,1)}h</div>`:''}</td>
+      <td class="right num" data-label="Custo/venda">${brl(c.totalCost)}${c.saleUnits>1?`<div style="font-size:10px;font-weight:400;color:var(--text-faint);white-space:nowrap;">venda de ${c.saleUnits}un</div>`:''}</td>
+      <td class="right num" data-label="Preço sugerido/venda">${brl(c.suggestedPrice)}</td>
+      <td class="right num" data-label="Preço praticado/venda">${brl(c.practicedPrice)}<div style="font-size:10px;font-weight:400;color:var(--text-faint);white-space:nowrap;">ML ${brl(c.practicedPriceMl)} · Shopee ${brl(c.practicedPriceShopee)}${extraListingPlatforms().map(plat=>` · ${plat.name} ${brl(c.practicedPriceExtra[plat.id])}`).join('')}</div></td>
       <td class="right num" data-label="Margem" style="color:${c.marginValue<0?'var(--red)':'var(--green)'}">${pct(c.marginPct)}<div style="font-size:10px;font-weight:400;white-space:nowrap;">ML <span style="color:${c.marginMlPct<(state.settings.minMarginPct!=null?state.settings.minMarginPct:25)?'var(--red)':'var(--text-faint)'}">${pct(c.marginMlPct)}</span> · Shopee <span style="color:${c.marginShopeePct<(state.settings.minMarginPct!=null?state.settings.minMarginPct:25)?'var(--red)':'var(--text-faint)'}">${pct(c.marginShopeePct)}</span></div></td>
       <td class="right num" data-label="Estoque">${p.stock<=0?`<span class="badge mut">0</span>`:num(p.stock,0)}</td>
       <td class="right"><button class="btn ghost sm" onclick="openProductModal('${p.id}')">Editar</button> <button class="btn ghost sm" onclick="duplicateProduct('${p.id}')">Duplicar</button> <button class="btn ghost sm" onclick="deleteProduct('${p.id}')">Excluir</button></td>
@@ -4220,7 +4256,7 @@ function openProductModal(id){
     toast('Cadastre ao menos uma impressora em Caixa → Configurar → Impressoras antes de criar ou editar produtos', 'err');
     return;
   }
-  const p = editing ? state.products.find(x=>x.id===id) : { name:'', filaments:[{materialName:filamentOpts[0].name,weightG:100}], timeH:3, bubbleWrapM:0.5, tapeM:0.5, boxType:boxOpts[0].name, failureMarginPct:0.10, practicedPrice:0, stock:0, machineId:machineOpts[0].id, unitsPerPrint:1, marketPriceOverride:null };
+  const p = editing ? state.products.find(x=>x.id===id) : { name:'', filaments:[{materialName:filamentOpts[0].name,weightG:100}], timeH:3, bubbleWrapM:0.5, tapeM:0.5, boxType:boxOpts[0].name, failureMarginPct:0.10, practicedPrice:0, stock:0, machineId:machineOpts[0].id, unitsPerPrint:1, unitsPerSale:1, marketPriceOverride:null };
   editingFilaments = JSON.parse(JSON.stringify(p.filaments && p.filaments.length ? p.filaments : [{materialName:filamentOpts[0].name,weightG:100}]));
   editingLaborActions = JSON.parse(JSON.stringify(p.laborActions||[]));
   editingToolsUsed = JSON.parse(JSON.stringify(p.toolsUsed||[]));
@@ -4307,8 +4343,9 @@ function openProductModal(id){
     </div>
     <div class="row2">
       <div class="field"><label>Unidades por impressão</label><input type="number" id="pUnitsPerPrint" value="${p.unitsPerPrint||1}" min="1" step="1" oninput="updateProductPreview()"></div>
-      <div class="field hint" style="padding-top:9px;">Peso e tempo acima são da leva inteira — o app divide pelo número de unidades pra calcular o custo de cada peça.</div>
+      <div class="field"><label>Unidades por venda</label><input type="number" id="pUnitsPerSale" value="${p.unitsPerSale||1}" min="1" step="1" oninput="updateMarketHint(); updateProductPreview()"></div>
     </div>
+    <div class="field hint" style="margin-top:-8px;">Por impressão = quantas peças saem de uma leva (ex: 4). Por venda = quantas vão em um anúncio/caixa/pedido (ex: 1 se vende avulso, 4 se anuncia como kit) — são conceitos diferentes e o preço abaixo passa a ser sempre da venda inteira.</div>
     <div class="row2">
       <div class="field"><label>Fita adesiva usada (m)</label><input type="number" id="pTape" value="${p.tapeM||0}" step="0.1" oninput="updateProductPreview()"></div>
       <div class="field"><label>Margem de falha (%)</label><input type="number" id="pFail" value="${(p.failureMarginPct*100)}" step="1" oninput="updateProductPreview()"></div>
@@ -4330,14 +4367,14 @@ function openProductModal(id){
 
     <div class="row2">
       <div class="field"><label>Preço de mercado — exceção deste produto (R$)</label><input type="number" id="pMarketOverride" value="${p.marketPriceOverride||''}" step="0.01" placeholder="deixe em branco = herdar da categoria" oninput="updateMarketHint()"></div>
-      <div class="field"><label>Preço praticado — Venda própria (R$)</label><input type="number" id="pPrice" value="${p.practicedPrice||''}" step="0.01" placeholder="deixe em branco = preço sugerido" oninput="this.dataset.touched='1'"></div>
+      <div class="field"><label id="pPriceLabel">Preço praticado — Venda própria</label><input type="number" id="pPrice" value="${p.practicedPrice||''}" step="0.01" placeholder="deixe em branco = preço sugerido" oninput="this.dataset.touched='1'"></div>
     </div>
     <div class="field hint" id="pMarketHint" style="margin-top:-8px;"></div>
     <div class="row2">
-      <div class="field"><label>Preço praticado — Mercado Livre (R$)</label><input type="number" id="pPriceMl" value="${p.practicedPriceMl||''}" step="0.01" placeholder="deixe em branco = preço sugerido" oninput="this.dataset.touched='1'"></div>
-      <div class="field"><label>Preço praticado — Shopee (R$)</label><input type="number" id="pPriceShopee" value="${p.practicedPriceShopee||''}" step="0.01" placeholder="deixe em branco = preço sugerido" oninput="this.dataset.touched='1'"></div>
+      <div class="field"><label id="pPriceMlLabel">Preço praticado — Mercado Livre</label><input type="number" id="pPriceMl" value="${p.practicedPriceMl||''}" step="0.01" placeholder="deixe em branco = preço sugerido" oninput="this.dataset.touched='1'"></div>
+      <div class="field"><label id="pPriceShopeeLabel">Preço praticado — Shopee</label><input type="number" id="pPriceShopee" value="${p.practicedPriceShopee||''}" step="0.01" placeholder="deixe em branco = preço sugerido" oninput="this.dataset.touched='1'"></div>
     </div>
-    ${extraListingPlatforms().map(plat=>`<div class="field"><label>Preço praticado — ${plat.name} (R$)</label><input type="number" id="pPriceExtra_${plat.id}" value="${(p.practicedPriceExtra||{})[plat.id]||''}" step="0.01" placeholder="deixe em branco = preço sugerido" oninput="this.dataset.touched='1'"></div>`).join('')}
+    ${extraListingPlatforms().map(plat=>`<div class="field"><label id="pPriceExtraLabel_${plat.id}">Preço praticado — ${plat.name}</label><input type="number" id="pPriceExtra_${plat.id}" value="${(p.practicedPriceExtra||{})[plat.id]||''}" step="0.01" placeholder="deixe em branco = preço sugerido" oninput="this.dataset.touched='1'"></div>`).join('')}
     <div class="field"><label>Estoque inicial (un)</label><input type="number" id="pStock" value="${p.stock}" step="1"></div>
     <div class="helper-block" id="productPreview"></div>
     <div class="modal-actions">
@@ -4519,13 +4556,6 @@ function toggleNewCategoryInput(val){
   if(el){ el.style.display = val==='__new__' ? 'block' : 'none'; if(val!=='__new__') el.value=''; }
   updateMarketHint();
 }
-// Preço de mercado é uma característica da CATEGORIA (state.settings.marketByGroup),
-// não de cada produto — evita pesquisar a mesma faixa de preço várias vezes pra
-// produtos parecidos. marketPriceOverride no produto é só a exceção da peça que foge do padrão.
-function categoryMarketPrice(category){
-  const g = (state.settings.marketByGroup||{})[category||''];
-  return (g && g.avg>0) ? g.avg : null;
-}
 function updateMarketHint(){
   const hintEl = document.getElementById('pMarketHint');
   const catEl = document.getElementById('pCategory');
@@ -4534,10 +4564,14 @@ function updateMarketHint(){
   const category = catSel==='__new__' ? (document.getElementById('pCategoryNew')||{}).value.trim() : catSel;
   const overrideEl = document.getElementById('pMarketOverride');
   if(overrideEl && overrideEl.value){ hintEl.innerHTML = ''; return; }
-  const avg = categoryMarketPrice(category);
-  hintEl.innerHTML = avg!=null
-    ? `Herdando da categoria: <strong>${brl(avg)}</strong>`
-    : `<span style="color:var(--text-faint);">Preço de mercado não pesquisado — cadastre em Configurações</span>`;
+  const saleUnitsEl = document.getElementById('pUnitsPerSale');
+  const saleUnits = saleUnitsEl ? Math.max(1, parseFloat(saleUnitsEl.value)||1) : 1;
+  const marketInfo = effectiveMarketPrice({ category, unitsPerSale: saleUnits, marketPriceOverride: null });
+  if(marketInfo.value==null){ hintEl.innerHTML = `<span style="color:var(--text-faint);">Preço de mercado não pesquisado — cadastre em Configurações</span>`; return; }
+  const basisNote = marketInfo.unitBasis==='kit'
+    ? (marketInfo.kitSize===saleUnits ? `kit de ${marketInfo.kitSize} — mesmo tamanho da sua venda` : `kit de ${marketInfo.kitSize}, escalado pra sua venda de ${saleUnits}`)
+    : (saleUnits>1 ? `por unidade, escalado pra sua venda de ${saleUnits}` : 'por unidade');
+  hintEl.innerHTML = `Herdando da categoria: <strong>${brl(marketInfo.value)}</strong> <span style="color:var(--text-faint);">(faixa ${basisNote})</span>`;
 }
 function toggleModelLicenseFields(val){
   const el = document.getElementById('pModelLicenseBlock');
@@ -4558,6 +4592,7 @@ function readProductForm(){
     laborActions: editingLaborActions,
     toolsUsed: editingToolsUsed,
     unitsPerPrint: Math.max(1, parseFloat(document.getElementById('pUnitsPerPrint').value)||1),
+    unitsPerSale: Math.max(1, parseFloat(document.getElementById('pUnitsPerSale').value)||1),
     marketPriceOverride: parseFloat(document.getElementById('pMarketOverride').value) || null,
     lengthCm: parseFloat(document.getElementById('pLengthCm').value)||0,
     widthCm: parseFloat(document.getElementById('pWidthCm').value)||0,
@@ -4642,21 +4677,51 @@ function updateProductPreview(){
   if(form.mlRealFeePct===undefined) form.mlRealFeePct = editingProductMlFee;
   const c = calcProduct(form);
   const marketInfo = effectiveMarketPrice(form);
+  const marketBasisNote = marketInfo.source==='category'
+    ? (marketInfo.unitBasis==='kit'
+        ? `faixa por kit de ${marketInfo.kitSize}${marketInfo.kitSize!==c.saleUnits?`, escalada pra sua venda de ${c.saleUnits}`:''}`
+        : `faixa por unidade${c.saleUnits>1?`, escalada pra sua venda de ${c.saleUnits}`:''}`)
+    : null;
   const marketRangeLine = marketInfo.source==='none'
     ? `<div class="calc-line"><span>Preço de mercado${form.category?` (${form.category})`:''}</span><span class="badge mut">Não pesquisado</span></div>`
-    : `<div class="calc-line"><span>Mercado${form.category?` (${form.category})`:''}${marketInfo.source==='override'?' — exceção':''}</span><span>${marketInfo.min>0?brl(marketInfo.min):'—'} / ${marketInfo.avg>0?brl(marketInfo.avg):'—'} / ${marketInfo.max>0?brl(marketInfo.max):'—'}</span></div>`;
+    : `<div class="calc-line"><span>Mercado${form.category?` (${form.category})`:''}${marketInfo.source==='override'?' — exceção':''}</span><span>${marketInfo.min>0?brl(marketInfo.min):'—'} / ${marketInfo.avg>0?brl(marketInfo.avg):'—'} / ${marketInfo.max>0?brl(marketInfo.max):'—'}</span></div>
+       ${marketBasisNote?`<div class="field hint" style="margin:-4px 0 0;">${marketBasisNote}</div>`:''}`;
+  // "(por venda de N un)" quando a peça é vendida em kit, "(por unidade)"
+  // quando é avulsa — evita a ambiguidade de não saber se o preço cobre 1
+  // peça ou o anúncio inteiro.
+  const saleQualifier = c.saleUnits>1 ? `(por venda de ${c.saleUnits} un)` : '(por unidade)';
+  const priceLabelEl = document.getElementById('pPriceLabel');
+  if(priceLabelEl) priceLabelEl.textContent = `Preço praticado — Venda própria ${saleQualifier}`;
+  const priceMlLabelEl = document.getElementById('pPriceMlLabel');
+  if(priceMlLabelEl) priceMlLabelEl.textContent = `Preço praticado — Mercado Livre ${saleQualifier}`;
+  const priceShopeeLabelEl = document.getElementById('pPriceShopeeLabel');
+  if(priceShopeeLabelEl) priceShopeeLabelEl.textContent = `Preço praticado — Shopee ${saleQualifier}`;
+  extraListingPlatforms().forEach(plat=>{
+    const labelEl = document.getElementById(`pPriceExtraLabel_${plat.id}`);
+    if(labelEl) labelEl.textContent = `Preço praticado — ${plat.name} ${saleQualifier}`;
+  });
+
+  const saleSummary = `
+    <div style="border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:12px;background:var(--panel-2);">
+      <div style="font-weight:600;font-size:11.5px;margin-bottom:8px;color:var(--text-dim);letter-spacing:.02em;">O ANÚNCIO</div>
+      <div class="calc-line"><span>Vende</span><span style="font-weight:600;">${c.saleUnits} unidade${c.saleUnits>1?'s':''} por venda${c.printUnits>1?` <span style="font-weight:400;color:var(--text-faint);font-size:11px;">(leva rende ${c.printUnits})</span>`:''}</span></div>
+      <div class="calc-line"><span>Tempo por venda</span><span style="font-weight:600;">${fmtHm(c.saleTimeH)}</span></div>
+      <div class="calc-line"><span>Custo por venda</span><span style="font-weight:600;">${brl(c.totalCost)}</span></div>
+      <div class="calc-line"><span>Preço</span><span style="font-weight:600;">${c.practicedPrice>0?brl(c.practicedPrice):'—'}</span></div>
+    </div>`;
   document.getElementById('productPreview').innerHTML = `
-    <div class="calc-line"><span>Peso por unidade</span><span>${num(c.unitWeightG,1)}g${c.units>1?` <span style="color:var(--text-faint);font-size:11px;">(leva: ${num(totalWeight(form),0)}g / ${c.units} un)</span>`:''}</span></div>
-    <div class="calc-line"><span>Tempo por unidade</span><span>${fmtHm(c.unitTimeH)}${c.units>1?` <span style="color:var(--text-faint);font-size:11px;">(leva: ${num(form.timeH,1)}h)</span>`:''}</span></div>
-    <div class="calc-line"><span>Custo material</span><span>${brl(c.materialCost)}</span></div>
-    <div class="calc-line"><span>Custo energia</span><span>${brl(c.energyCost)}</span></div>
-    <div class="calc-line"><span>Embalagem (caixa + bolha + fita)</span><span>${brl(c.embalagemCost)}</span></div>
-    <div class="calc-line"><span>Depreciação (${c.machine?c.machine.name:'sem impressora'})</span><span>${brl(c.depreciation)}</span></div>
-    <div class="calc-line"><span>Manutenção</span><span>${brl(c.maintenance)}</span></div>
-    <div class="calc-line"><span>Mão de obra</span><span>${brl(c.laborCost)}</span></div>
-    ${c.toolsCost>0 ? `<div class="calc-line"><span>Ferramentas</span><span>${brl(c.toolsCost)}</span></div>` : ''}
-    <div class="calc-line"><span>Custo de falha</span><span>${brl(c.failureCost)}</span></div>
-    <div class="calc-line total"><span>Custo total — por unidade</span><span>${brl(c.totalCost)}</span></div>
+    ${saleSummary}
+    <div class="calc-line"><span>Peso por peça</span><span>${num(c.unitWeightG,1)}g${c.printUnits>1?` <span style="color:var(--text-faint);font-size:11px;">(leva: ${num(totalWeight(form),0)}g / ${c.printUnits} un)</span>`:''}</span></div>
+    <div class="calc-line"><span>Tempo por peça</span><span>${fmtHm(c.unitTimeH)}${c.printUnits>1?` <span style="color:var(--text-faint);font-size:11px;">(leva: ${num(form.timeH,1)}h)</span>`:''}</span></div>
+    <div class="calc-line"><span>Custo material (por peça)</span><span>${brl(c.materialCost)}</span></div>
+    <div class="calc-line"><span>Custo energia (por peça)</span><span>${brl(c.energyCost)}</span></div>
+    <div class="calc-line"><span>Embalagem (caixa + bolha + fita — por venda)</span><span>${brl(c.embalagemCost)}</span></div>
+    <div class="calc-line"><span>Depreciação (por peça, ${c.machine?c.machine.name:'sem impressora'})</span><span>${brl(c.depreciation)}</span></div>
+    <div class="calc-line"><span>Manutenção (por peça)</span><span>${brl(c.maintenance)}</span></div>
+    <div class="calc-line"><span>Mão de obra (por peça)</span><span>${brl(c.laborCost)}</span></div>
+    ${c.toolsCost>0 ? `<div class="calc-line"><span>Ferramentas (por peça)</span><span>${brl(c.toolsCost)}</span></div>` : ''}
+    <div class="calc-line"><span>Custo de falha (por peça)</span><span>${brl(c.failureCost)}</span></div>
+    <div class="calc-line total"><span>Custo total — por venda${c.saleUnits>1?` de ${c.saleUnits} un`:''}</span><span>${brl(c.totalCost)}</span></div>
     ${marketRangeLine}
     ${pricingChannelBlockHtml('Mercado Livre', 'Mercado Livre', c.practicedPriceMl, c, marketInfo, form)}
     ${pricingChannelBlockHtml('Shopee', 'Shopee', c.practicedPriceShopee, c, marketInfo, form)}
@@ -5557,16 +5622,19 @@ function renderFinishedStock(){
   if(state.products.length===0) return `<div class="card">${emptyState('Nenhum produto cadastrado')}</div>`;
   const rows = state.products.map(p=>{
     const c = calcProduct(p);
+    // totalCost é da VENDA (unitsPerSale peças) — estoque conta PEÇAS, então
+    // divide por saleUnits pra ter o custo de uma peça só.
+    const unitCost = c.totalCost/c.saleUnits;
     return `<tr>
       <td data-label="Produto">${p.name}</td>
       <td class="right num" data-label="Estoque">${num(p.stock,0)} un</td>
-      <td class="right num" data-label="Custo unitário">${brl(c.totalCost)}</td>
-      <td class="right num" data-label="Valor em estoque">${brl(p.stock*c.totalCost)}</td>
+      <td class="right num" data-label="Custo unitário">${brl(unitCost)}</td>
+      <td class="right num" data-label="Valor em estoque">${brl(p.stock*unitCost)}</td>
       <td class="right" data-label="Status">${p.stock<=0?`<span class="badge bad">Sem estoque</span>`:p.stock<=3?`<span class="badge warn">Baixo</span>`:`<span class="badge ok">Ok</span>`}</td>
       <td class="right"><button class="btn ghost sm" onclick="openPrintJobModal('${p.id}')">Produzir</button></td>
     </tr>`;
   }).join('');
-  const totalValue = state.products.reduce((a,p)=>a+p.stock*calcProduct(p).totalCost,0);
+  const totalValue = state.products.reduce((a,p)=>{ const c=calcProduct(p); return a+p.stock*(c.totalCost/c.saleUnits); },0);
   return `<div class="card">
     <div class="card-title">Produtos prontos<span class="sub">valor total em estoque: ${brl(totalValue)}</span></div>
     <div class="tbl-wrap tbl-responsive"><table>
@@ -6179,6 +6247,15 @@ function renderMarketGroupRows(){
         <div class="field"><label>Máximo (R$)</label><input type="number" step="0.01" value="${g.max||''}" placeholder="0" oninput="editingMarketGroups[${i}].max=parseFloat(this.value)||0"></div>
       </div>
       <div class="row2">
+        <div class="field"><label>Essa faixa é por</label>
+          <select onchange="editingMarketGroups[${i}].unitBasis=this.value; renderMarketGroupRows();">
+            <option value="unidade" ${g.unitBasis!=='kit'?'selected':''}>Unidade (peça avulsa)</option>
+            <option value="kit" ${g.unitBasis==='kit'?'selected':''}>Kit de N unidades</option>
+          </select>
+        </div>
+        ${g.unitBasis==='kit' ? `<div class="field"><label>Tamanho do kit pesquisado (un)</label><input type="number" min="1" step="1" value="${g.kitSize||1}" oninput="editingMarketGroups[${i}].kitSize=Math.max(1,parseInt(this.value)||1)"></div>` : `<div class="field hint" style="padding-top:9px;">Comparar preço de kit com faixa por unidade (ou vice-versa) sem indicar isso induz erro — por isso essa faixa.</div>`}
+      </div>
+      <div class="row2">
         <div class="field"><label>Pesquisado em</label><input type="date" value="${g.checkedAt||''}" oninput="editingMarketGroups[${i}].checkedAt=this.value"></div>
         <div class="field"><label>Nota (opcional)</label><input value="${g.note||''}" placeholder="Ex: 5 anúncios ML, 28/07" oninput="editingMarketGroups[${i}].note=this.value"></div>
       </div>
@@ -6394,7 +6471,7 @@ function confirmConfiguracoes(){
   s.goodHourlyProfit = parseFloat(document.getElementById('cfgGoodHourlyProfit').value)||20;
   s.minProfitPerSale = parseFloat(document.getElementById('cfgMinProfitPerSale').value)||8;
   s.marketByGroup = {};
-  editingMarketGroups.forEach(g=>{ s.marketByGroup[g.category] = { min:g.min||0, avg:g.avg||0, max:g.max||0, checkedAt:g.checkedAt||'', note:g.note||'' }; });
+  editingMarketGroups.forEach(g=>{ s.marketByGroup[g.category] = { min:g.min||0, avg:g.avg||0, max:g.max||0, checkedAt:g.checkedAt||'', note:g.note||'', unitBasis:g.unitBasis==='kit'?'kit':'unidade', kitSize:g.kitSize||1 }; });
   s.customOrderPriceTable = {
     chaveiro: editingCustomOrderPriceTable.chaveiro.filter(t=>t.unitPrice>0),
     lembrancinha: editingCustomOrderPriceTable.lembrancinha.filter(t=>t.unitPrice>0),
