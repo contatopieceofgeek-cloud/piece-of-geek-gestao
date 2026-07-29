@@ -744,6 +744,98 @@ function feeAtPrice(platformName, price){
   return plat.tiers ? computeTieredFee(plat.tiers, price).fee : price*(plat.pct/100)+(plat.fixed||0);
 }
 
+/* ===== Modelo de precificação por R$/hora-máquina (blocos 4-6) =====
+   O recurso escasso é hora de impressora, não grama de filamento — o preço
+   vem do mercado (input), o R$/hora é o resultado e o critério de aceite.
+   channelName null/undefined = "Direto" (venda própria — sem taxa de plataforma,
+   feeAtPrice já devolve 0 pra uma plataforma que não existe em settings.platforms). */
+function channelFeeAt(channelName, price){
+  return channelName ? feeAtPrice(channelName, price) : 0;
+}
+// (preço − taxa do canal − custo unitário) ÷ tempo por unidade
+function profitPerHourAt(c, channelName, price){
+  if(!(c.unitTimeH>0) || price==null) return null;
+  return (price - channelFeeAt(channelName, price) - c.totalCost) / c.unitTimeH;
+}
+// Preço mínimo pra bater a meta de R$/hora configurada. Taxa fixa+%: fórmula
+// fechada. Taxa em faixas (Shopee): aproximações sucessivas, mesmo padrão de
+// suggestedPriceForPlatform, já que a faixa muda com o próprio preço.
+function minPriceForTarget(c, channelName){
+  if(!(c.unitTimeH>0)) return null;
+  const target = state.settings.targetHourlyProfit!=null ? state.settings.targetHourlyProfit : 15;
+  const needNet = target*c.unitTimeH + c.totalCost;
+  if(!channelName) return needNet;
+  const plat = (state.settings.platforms||[]).find(pl=>pl.name===channelName);
+  if(!plat) return needNet;
+  if(plat.tiers){
+    let price = needNet, prev = 0;
+    for(let i=0;i<30 && Math.abs(price-prev)>0.005;i++){ prev=price; price = needNet + computeTieredFee(plat.tiers, price).fee; }
+    return price;
+  }
+  const pct = (plat.pct||0)/100;
+  return pct<1 ? (needNet+(plat.fixed||0))/(1-pct) : needNet+(plat.fixed||0);
+}
+// Dado um preço de referência (mercado da categoria ou exceção do produto),
+// quanto tempo de impressão POR UNIDADE ainda bate a meta de R$/hora — pode
+// sair negativo (nem a preço de mercado dá pra bater a meta em tempo nenhum).
+function maxTimeAtMarketPrice(c, channelName, marketPrice){
+  const target = state.settings.targetHourlyProfit!=null ? state.settings.targetHourlyProfit : 15;
+  if(marketPrice==null || !(target>0)) return null;
+  return (marketPrice - channelFeeAt(channelName, marketPrice) - c.totalCost) / target;
+}
+// Preço de mercado efetivo do produto: exceção da peça, senão média da
+// categoria. min/max sempre vêm da categoria (uma exceção pontual não tem
+// faixa própria) — usados só pros alertas de "acima/abaixo do mercado".
+function effectiveMarketPrice(prod){
+  const g = (state.settings.marketByGroup||{})[prod.category||''] || {};
+  const value = prod.marketPriceOverride>0 ? prod.marketPriceOverride : (g.avg>0 ? g.avg : null);
+  const source = prod.marketPriceOverride>0 ? 'override' : (g.avg>0 ? 'category' : 'none');
+  return { value, source, min:g.min||0, max:g.max||0, avg:g.avg||0 };
+}
+function hourlyVerdict(hourlyProfit){
+  if(hourlyProfit==null) return { label:'—', cls:'mut' };
+  const target = state.settings.targetHourlyProfit!=null ? state.settings.targetHourlyProfit : 15;
+  const good = state.settings.goodHourlyProfit!=null ? state.settings.goodHourlyProfit : 20;
+  if(hourlyProfit>=good) return { label:'Bom produto', cls:'ok' };
+  if(hourlyProfit>=target) return { label:'Aceitável', cls:'info' };
+  if(hourlyProfit>=target*0.6) return { label:'Revisar tempo ou preço', cls:'warn' };
+  return { label:'Não compensa imprimir', cls:'bad' };
+}
+// Alerta de preço praticado vs. faixa de mercado da categoria — não bloqueia
+// nada, só sinaliza (categoria sem faixa cadastrada = sem alerta, não erro).
+function marketAlertFor(marketInfo, price){
+  if(!marketInfo || marketInfo.source==='none' || price==null) return null;
+  if(marketInfo.max>0 && price>marketInfo.max) return { label:'Acima de todos os concorrentes — risco alto de não vender', cls:'bad' };
+  if(marketInfo.avg>0 && price>marketInfo.avg) return { label:`Acima da média do mercado em ${pct(((price-marketInfo.avg)/marketInfo.avg)*100)}`, cls:'warn' };
+  if(marketInfo.min>0 && price<marketInfo.min) return { label:'Abaixo de todos os concorrentes — dá pra subir o preço', cls:'info' };
+  return null;
+}
+// Painel de preço por canal (Direto/ML/Shopee/extras) — piso pra bater a
+// meta, R$/hora no preço praticado com veredito, tempo máximo viável ao
+// preço de mercado, e margem só como consequência (fonte menor, sem destaque).
+function pricingChannelBlockHtml(label, channelName, price, c, marketInfo){
+  const floor = minPriceForTarget(c, channelName);
+  const hourly = profitPerHourAt(c, channelName, price);
+  const verdict = hourlyVerdict(hourly);
+  const maxTime = marketInfo.value!=null ? maxTimeAtMarketPrice(c, channelName, marketInfo.value) : null;
+  const marginPctAt = (price>0) ? ((price - channelFeeAt(channelName,price) - c.totalCost)/price)*100 : null;
+  const alert = marketAlertFor(marketInfo, price);
+  const target = state.settings.targetHourlyProfit!=null ? state.settings.targetHourlyProfit : 15;
+  return `
+    <div style="margin-top:10px;padding:10px 12px;background:var(--bg-alt);border-radius:8px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+        <span style="font-weight:600;font-size:12.5px;">${label}</span>
+        <span class="badge ${verdict.cls}">${verdict.label}</span>
+      </div>
+      <div class="calc-line" style="font-size:11.5px;color:var(--text-faint);"><span>Piso p/ meta de ${brl(target)}/h</span><span>${floor!=null?brl(floor):'—'}</span></div>
+      <div class="calc-line" style="font-size:12.5px;"><span>No preço praticado (${price>0?brl(price):'—'})</span><span style="font-weight:600;">${hourly!=null?brl(hourly)+'/h':'—'}</span></div>
+      <div class="calc-line" style="font-size:11.5px;color:var(--text-faint);"><span>Tempo máximo viável${marketInfo.value!=null?` a ${brl(marketInfo.value)}`:''}</span><span>${marketInfo.value==null?'sem preço de mercado':(maxTime==null?'—':(maxTime<=0?'inviável a qualquer tempo':fmtHm(maxTime)))}</span></div>
+      <div class="calc-line" style="font-size:11px;color:var(--text-faint);"><span>Margem resultante</span><span>${marginPctAt!=null?pct(marginPctAt):'—'}</span></div>
+      ${alert ? `<div style="margin-top:4px;"><span class="badge ${alert.cls}">${alert.label}</span></div>` : ''}
+    </div>
+  `;
+}
+
 function salesInMonth(ym){ return state.sales.filter(s=>s.date && s.date.slice(0,7)===ym); }
 
 function blocoA(ym){
@@ -1010,7 +1102,7 @@ function renderTopbarActions(){
   if(currentTab==='pedidos') el.innerHTML = `<button class="btn ghost" onclick="exportOrdersExcel()">Exportar</button> <button class="btn primary" onclick="openOrderModal()">+ Nova encomenda</button>`;
   else if(currentTab==='vendas') el.innerHTML = `<button class="btn ghost" onclick="switchTab('taxas')">Taxas das plataformas</button> <button class="btn ghost" onclick="exportSalesExcel()">Exportar</button> <button class="btn primary" onclick="openSaleModal()">+ Nova venda</button>`;
   else if(currentTab==='clientes') el.innerHTML = `<button class="btn ghost" onclick="exportCustomersExcel()">Exportar</button> <button class="btn primary" onclick="openCustomerModal()">+ Novo cliente</button>`;
-  else if(currentTab==='produtos') el.innerHTML = `<button class="btn ghost" onclick="openQuickQuoteModal()">Orçamento rápido</button> <button class="btn ghost" onclick="openKitModal()">Criar kit</button> <button class="btn ghost" onclick="exportCatalogImage()">Catálogo (imagem)</button> <button class="btn ghost" onclick="exportCatalogPDF()">Catálogo (PDF, 1 pág./produto)</button> <button class="btn primary" onclick="openProductModal()">+ Novo produto</button>`;
+  else if(currentTab==='produtos') el.innerHTML = `<button class="btn ghost" onclick="produtosView=(produtosView==='diagnostico'?'lista':'diagnostico'); renderContent(); renderTopbarActions();">${produtosView==='diagnostico'?'Voltar à lista':'Diagnóstico'}</button> <button class="btn ghost" onclick="openQuickQuoteModal()">Orçamento rápido</button> <button class="btn ghost" onclick="openKitModal()">Criar kit</button> <button class="btn ghost" onclick="exportCatalogImage()">Catálogo (imagem)</button> <button class="btn ghost" onclick="exportCatalogPDF()">Catálogo (PDF, 1 pág./produto)</button> <button class="btn primary" onclick="openProductModal()">+ Novo produto</button>`;
   else if(currentTab==='personalizados') el.innerHTML = `<button class="btn primary" onclick="openQuickCustomOrderModal()">+ Nova encomenda personalizada</button>`;
   else if(currentTab==='anuncios') el.innerHTML = '';
   else if(currentTab==='estoque') el.innerHTML = stockTab==='materiais' ? `<button class="btn primary" onclick="openMaterialModal()">+ Nova matéria-prima</button>` : `<button class="btn primary" onclick="switchTab('impressao')">Ir pra Fila de Impressão</button>`;
@@ -1028,7 +1120,7 @@ function renderContent(){
   else if(currentTab==='impressao') c.innerHTML = renderImpressao();
   else if(currentTab==='vendas') c.innerHTML = renderVendas();
   else if(currentTab==='clientes') c.innerHTML = renderClientes();
-  else if(currentTab==='produtos') c.innerHTML = renderProdutos();
+  else if(currentTab==='produtos') c.innerHTML = produtosView==='diagnostico' ? renderProdutosDiagnostico() : renderProdutos();
   else if(currentTab==='personalizados') c.innerHTML = renderPersonalizados();
   else if(currentTab==='anuncios') c.innerHTML = renderAnuncios();
   else if(currentTab==='estoque') c.innerHTML = renderEstoque();
@@ -3236,6 +3328,7 @@ function confirmKit(){
 
 /* ===================== PRODUTOS ===================== */
 let produtosFilter = { search:'', machineId:'', sortKey:'name', sortDir:1 };
+let produtosView = 'lista';
 function toggleProductSort(key){
   if(produtosFilter.sortKey===key){ produtosFilter.sortDir*=-1; }
   else { produtosFilter.sortKey=key; produtosFilter.sortDir=1; }
@@ -3323,6 +3416,61 @@ function renderProdutos(){
   if(groups['Sem categoria']) catKeys.push('Sem categoria');
   const sections = catKeys.map(cat=>`<div class="section-title">${cat}</div><div class="card"><div class="tbl-wrap tbl-responsive tbl-compact-mobile"><table>${theadHtml}<tbody>${groups[cat].map(rowHtml).join('')}</tbody></table></div></div>`).join('');
   return filterBar + sections;
+}
+// Diagnóstico do catálogo — ordena pelo recurso escasso (R$/hora-máquina), não
+// por lucro total: um produto lento pode dar mais lucro por venda e ainda
+// assim ser pior escolha, porque ocupa a impressora por muito mais tempo.
+function renderProdutosDiagnostico(){
+  if(state.products.length===0) return `<div class="card">${emptyState('Nenhum produto cadastrado ainda.')}</div>`;
+  const target = state.settings.targetHourlyProfit!=null ? state.settings.targetHourlyProfit : 15;
+  const list = state.products.map(p=>{
+    const c = calcProduct(p);
+    const hourly = profitPerHourAt(c, null, c.practicedPrice);
+    const profit = c.practicedPrice - c.totalCost;
+    const verdict = hourlyVerdict(hourly);
+    return { p, c, hourly, profit, verdict };
+  });
+  const sorted = list.slice().sort((a,b)=>{
+    if(a.hourly==null) return 1;
+    if(b.hourly==null) return -1;
+    return b.hourly - a.hourly;
+  });
+  const withHourly = list.filter(x=>x.hourly!=null);
+  const totalHours = withHourly.reduce((a,x)=>a+x.c.unitTimeH,0);
+  const totalProfitOverHours = withHourly.reduce((a,x)=>a+x.hourly*x.c.unitTimeH,0);
+  const weightedAvg = totalHours>0 ? totalProfitOverHours/totalHours : null;
+  const belowTarget = withHourly.filter(x=>x.hourly<target);
+  // Horas de impressora já "presas" em estoque de produtos que não compensam —
+  // proxy direto e sem depender de histórico de vendas: estoque atual × tempo/un.
+  const belowTargetStockHours = belowTarget.reduce((a,x)=>a+(x.p.stock>0?x.p.stock*x.c.unitTimeH:0),0);
+  // "Sem categoria" não é um grupo de verdade (é falta de dado, não nicho de
+  // mercado) — incluir aqui só gera ruído, então fica de fora do aviso.
+  const byCatBelow = {};
+  belowTarget.forEach(x=>{ const cat=(x.p.category||'').trim(); if(cat) (byCatBelow[cat]=byCatBelow[cat]||[]).push(x); });
+  const canibalizacao = Object.entries(byCatBelow).filter(([,items])=>items.length>=2)
+    .map(([cat,items])=>`${items.length} produtos em ${cat} — eles dividem o mesmo comprador em vez de somar vendas`);
+  const summary = `
+    <div class="card" style="margin-bottom:14px;">
+      <div class="row3">
+        <div><div class="field hint" style="margin:0;">Média ponderada do catálogo</div><div style="font-family:var(--font-mono);font-size:18px;font-weight:700;color:${weightedAvg!=null&&weightedAvg<target?'var(--red)':'var(--green)'};">${weightedAvg!=null?brl(weightedAvg)+'/h':'—'}</div></div>
+        <div><div class="field hint" style="margin:0;">Abaixo da meta (${brl(target)}/h)</div><div style="font-family:var(--font-mono);font-size:18px;font-weight:700;">${belowTarget.length} de ${withHourly.length}</div></div>
+        <div><div class="field hint" style="margin:0;">Horas de impressora em estoque abaixo da meta</div><div style="font-family:var(--font-mono);font-size:18px;font-weight:700;">${fmtHm(belowTargetStockHours)}</div></div>
+      </div>
+      ${canibalizacao.length ? `<div style="margin-top:10px;">${canibalizacao.map(w=>`<div class="calc-line" style="font-size:12.5px;"><span class="badge warn">Canibalização</span> <span style="margin-left:6px;">${w}</span></div>`).join('')}</div>` : ''}
+    </div>`;
+  const rows = sorted.map(({p,c,hourly,profit,verdict})=>`<tr>
+    <td data-label="Produto">${p.name}${p.category?`<div style="font-size:11px;color:var(--text-faint);">${p.category}</div>`:''}</td>
+    <td class="right num" data-label="Peso/un">${num(c.unitWeightG,1)}g</td>
+    <td class="right num" data-label="Tempo/un">${fmtHm(c.unitTimeH)}</td>
+    <td class="right num" data-label="Preço praticado">${brl(c.practicedPrice)}</td>
+    <td class="right num" data-label="Lucro">${brl(profit)}</td>
+    <td class="right num" data-label="R$/hora" style="font-weight:600;">${hourly!=null?brl(hourly)+'/h':'—'}</td>
+    <td data-label="Veredito"><span class="badge ${verdict.cls}">${verdict.label}</span></td>
+  </tr>`).join('');
+  return summary + `<div class="card"><div class="tbl-wrap tbl-responsive tbl-compact-mobile"><table>
+    <thead><tr><th>Produto</th><th class="right">Peso/un</th><th class="right">Tempo/un</th><th class="right">Preço praticado</th><th class="right">Lucro</th><th class="right">R$/hora</th><th>Veredito</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div></div>`;
 }
 function duplicateProduct(id){
   const p = state.products.find(x=>x.id===id);
@@ -4349,6 +4497,20 @@ function readProductForm(){
     modelLicense: document.getElementById('pModelLicense').value.trim(),
     modelSourceUrl: document.getElementById('pModelSourceUrl').value.trim(),
   };
+  // Preço praticado por canal — só pra a pré-visualização calcular o R$/hora no
+  // que está sendo DIGITADO, não no preço sugerido (confirmProduct lê os campos
+  // de novo, direto do DOM, na hora de salvar — isso aqui não afeta o que é salvo).
+  const priceRaw = document.getElementById('pPrice').value;
+  form.practicedPrice = priceRaw ? parseFloat(priceRaw) : undefined;
+  const priceMlRaw = document.getElementById('pPriceMl').value;
+  form.practicedPriceMl = priceMlRaw ? parseFloat(priceMlRaw) : undefined;
+  const priceShopeeRaw = document.getElementById('pPriceShopee').value;
+  form.practicedPriceShopee = priceShopeeRaw ? parseFloat(priceShopeeRaw) : undefined;
+  form.practicedPriceExtra = {};
+  extraListingPlatforms().forEach(plat=>{
+    const raw = (document.getElementById(`pPriceExtra_${plat.id}`)||{}).value;
+    if(raw) form.practicedPriceExtra[plat.id] = parseFloat(raw);
+  });
   const mlCatIdEl = document.getElementById('pMlCategoryId');
   if(mlCatIdEl){
     form.mlCategoryId = mlCatIdEl.value.trim();
@@ -4408,6 +4570,10 @@ function updateProductPreview(){
   const form = readProductForm();
   if(form.mlRealFeePct===undefined) form.mlRealFeePct = editingProductMlFee;
   const c = calcProduct(form);
+  const marketInfo = effectiveMarketPrice(form);
+  const marketRangeLine = marketInfo.source==='none'
+    ? `<div class="calc-line"><span>Preço de mercado${form.category?` (${form.category})`:''}</span><span class="badge mut">Não pesquisado</span></div>`
+    : `<div class="calc-line"><span>Mercado${form.category?` (${form.category})`:''}${marketInfo.source==='override'?' — exceção':''}</span><span>${marketInfo.min>0?brl(marketInfo.min):'—'} / ${marketInfo.avg>0?brl(marketInfo.avg):'—'} / ${marketInfo.max>0?brl(marketInfo.max):'—'}</span></div>`;
   document.getElementById('productPreview').innerHTML = `
     <div class="calc-line"><span>Peso por unidade</span><span>${num(c.unitWeightG,1)}g${c.units>1?` <span style="color:var(--text-faint);font-size:11px;">(leva: ${num(totalWeight(form),0)}g / ${c.units} un)</span>`:''}</span></div>
     <div class="calc-line"><span>Tempo por unidade</span><span>${fmtHm(c.unitTimeH)}${c.units>1?` <span style="color:var(--text-faint);font-size:11px;">(leva: ${num(form.timeH,1)}h)</span>`:''}</span></div>
@@ -4420,10 +4586,11 @@ function updateProductPreview(){
     ${c.toolsCost>0 ? `<div class="calc-line"><span>Ferramentas</span><span>${brl(c.toolsCost)}</span></div>` : ''}
     <div class="calc-line"><span>Custo de falha</span><span>${brl(c.failureCost)}</span></div>
     <div class="calc-line total"><span>Custo total — por unidade</span><span>${brl(c.totalCost)}</span></div>
-    <div class="calc-line total"><span>Preço sugerido — venda própria (margem de ${num(c.desiredMarginPct,0)}%)</span><span>${brl(c.suggestedPrice)}</span></div>
-    ${platformBreakdownHtml('Mercado Livre', c.suggestedPriceMl, c.mlFeeAmount, c.mlFeePct, editingProductMlFee!=null?'real':'estimada', c.effectiveFreightMl, 'Frete estimado', c.netReceiptMl)}
-    ${platformBreakdownHtml('Shopee', c.suggestedPriceShopee, c.shopeeFeeAmount, c.shopeeFeePct, 'estimada', c.effectiveFreightShopee, 'Frete acima do subsídio (sai do seu bolso)', c.netReceiptShopee, c.estimatedShopeeFreightCap!=null ? `Shopee subsidia o frete até ${brl(c.estimatedShopeeFreightCap)} nessa faixa de preço — você só paga o que passar disso.` : null)}
-    ${extraListingPlatforms().map(plat=>`<div class="calc-line" style="color:var(--text-faint);"><span>↳ ${plat.name} (já com a taxa)</span><span>${brl(c.suggestedPriceExtra[plat.id])}</span></div>`).join('')}
+    ${marketRangeLine}
+    ${pricingChannelBlockHtml('Direto (venda própria)', null, c.practicedPrice, c, marketInfo)}
+    ${pricingChannelBlockHtml('Mercado Livre', 'Mercado Livre', c.practicedPriceMl, c, marketInfo)}
+    ${pricingChannelBlockHtml('Shopee', 'Shopee', c.practicedPriceShopee, c, marketInfo)}
+    ${extraListingPlatforms().map(plat=>pricingChannelBlockHtml(plat.name, plat.name, c.practicedPriceExtra[plat.id], c, marketInfo)).join('')}
   `;
   const priceInput = document.getElementById('pPrice');
   if(priceInput && !priceInput.dataset.touched && document.activeElement!==priceInput){
