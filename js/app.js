@@ -6233,7 +6233,10 @@ function renderMarketGroupRows(){
   if(!editingMarketGroups.length){ el.innerHTML = `<div class="empty" style="padding:10px;">Nenhuma categoria de produto cadastrada ainda — crie categorias em Produtos primeiro.</div>`; return; }
   el.innerHTML = editingMarketGroups.map((g,i)=>`
     <div class="card" style="margin-bottom:10px;padding:12px 14px;">
-      <div style="font-weight:600;font-size:13px;margin-bottom:8px;">${g.category}</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <div style="font-weight:600;font-size:13px;">${g.category}</div>
+        <button class="btn ghost sm" title="Remover" onclick="removeMarketGroupRow(${i})">Remover</button>
+      </div>
       <div class="row3">
         <div class="field"><label>Mínimo (R$)</label><input type="number" step="0.01" value="${g.min||''}" placeholder="0" oninput="editingMarketGroups[${i}].min=parseFloat(this.value)||0"></div>
         <div class="field"><label>Médio (R$)</label><input type="number" step="0.01" value="${g.avg||''}" placeholder="0" oninput="editingMarketGroups[${i}].avg=parseFloat(this.value)||0"></div>
@@ -6254,6 +6257,16 @@ function renderMarketGroupRows(){
       </div>
     </div>
   `).join('');
+}
+// A linha reaparece (vazia) da próxima vez se algum produto ainda usar essa
+// categoria — a lista é sempre a união de categorias em uso + faixas salvas
+// (ver switchTab). Remover aqui só limpa a faixa de preço, não a categoria.
+function removeMarketGroupRow(i){
+  const g = editingMarketGroups[i];
+  const stillInUse = productCategorySuggestions().includes(g.category);
+  if(stillInUse && !confirm(`"${g.category}" ainda é usada por algum produto — remover só apaga a faixa de preço cadastrada (a categoria continua existindo, e essa linha volta vazia se você reabrir Configurações). Continuar?`)) return;
+  editingMarketGroups.splice(i,1);
+  renderMarketGroupRows();
 }
 function renderCustomOrderPriceTierRows(type){
   const el = document.getElementById(`priceTierRows_${type}`);
