@@ -3034,11 +3034,11 @@ function renderCartItemsList(){
     const qtyLabel = saleUnits>1 ? `Qtd (kits de ${saleUnits})` : 'Qtd (un)';
     return `<div style="margin-bottom:4px;">
     <div style="display:grid;grid-template-columns:minmax(0,1fr) 76px 76px 28px;gap:6px;align-items:end;">
-      <div style="min-width:0;"><label style="font-size:10.5px;">Produto</label><select style="min-width:0;" onchange="updateCartItem('${item.rowId}','productId',this.value)">
+      <div style="min-width:0;"><label style="font-size:10.5px;display:block;">Produto</label><select style="width:100%;min-width:0;box-sizing:border-box;" onchange="updateCartItem('${item.rowId}','productId',this.value)">
         ${state.products.map(p=>`<option value="${p.id}" ${p.id===item.productId?'selected':''}>${p.name}</option>`).join('')}
       </select></div>
-      <div style="min-width:0;"><label style="font-size:10.5px;">${qtyLabel}</label><input type="number" min="1" value="${item.qty}" style="min-width:0;padding:8px 4px;" oninput="updateCartItem('${item.rowId}','qty',this.value)"></div>
-      <div style="min-width:0;"><label style="font-size:10.5px;">Preço/venda</label><input type="number" step="0.01" value="${item.unitPrice.toFixed(2)}" style="min-width:0;padding:8px 4px;" oninput="updateCartItem('${item.rowId}','unitPrice',this.value)"></div>
+      <div style="min-width:0;"><label style="font-size:10.5px;display:block;white-space:normal;">${qtyLabel}</label><input type="number" min="1" value="${item.qty}" style="width:100%;min-width:0;box-sizing:border-box;padding:8px 4px;" oninput="updateCartItem('${item.rowId}','qty',this.value)"></div>
+      <div style="min-width:0;"><label style="font-size:10.5px;display:block;">Preço/venda</label><input type="number" step="0.01" value="${item.unitPrice.toFixed(2)}" style="width:100%;min-width:0;box-sizing:border-box;padding:8px 4px;" oninput="updateCartItem('${item.rowId}','unitPrice',this.value)"></div>
       <button class="btn ghost sm" title="Remover item" style="padding:6px 8px;" onclick="removeCartItem('${item.rowId}')">×</button>
     </div>
     ${cartItemDerivationHtml(item)}
