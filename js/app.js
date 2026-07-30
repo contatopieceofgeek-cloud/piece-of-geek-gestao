@@ -2507,8 +2507,9 @@ function updatePrintJobPreview(){
       <span><input type="number" id="pjFil_${i}" value="${(need||0).toFixed(1)}" step="0.1" style="width:80px;padding:4px 6px;text-align:right;"> ${mat?mat.unit:'g'}</span>
     </div>`;
   }).join('');
+  const printUnits = Math.max(1,prod.unitsPerPrint||1);
   const stockLine = outcome==='success'
-    ? `<div class="calc-line total"><span>Estoque de "${prod.name}" após produção</span><span>${num(prod.stock,0)} → ${num(prod.stock+qty,0)}</span></div>`
+    ? `<div class="calc-line total"><span>Estoque de "${prod.name}" após produção</span><span>${num(prod.stock,0)} → ${num(prod.stock+qty*printUnits,0)}</span></div>${printUnits>1?`<div class="field hint" style="margin-top:-6px;">${qty} impressão${qty>1?'ões':''} × ${printUnits} peças/leva = ${qty*printUnits} peças</div>`:''}`
     : `<div class="field hint" style="margin-top:6px;">${outcome==='test'?'Teste não soma no estoque disponível pra venda.':'Falha não soma no estoque.'}</div>`;
   document.getElementById('pjPreview').innerHTML = `<div class="field hint" style="margin:0 0 6px;">Quantidade de filamento — já calculada pela receita do produto, edite se o valor real foi diferente:</div>` + lines + stockLine;
   printJobFirstRender = false;
@@ -2523,7 +2524,8 @@ function reversePrintJobEffects(j){
     const mat = materialByName(u.materialName);
     if(mat) mat.stock += u.qty;
   });
-  if(j.outcome==='success') prod.stock = Math.max(0, prod.stock - (j.qty||1));
+  // stock é sempre em peças — uma impressão (qty=leva) rende unitsPerPrint peças cada.
+  if(j.outcome==='success') prod.stock = Math.max(0, prod.stock - (j.qty||1)*Math.max(1,prod.unitsPerPrint||1));
   const machines = state.settings.machines||[];
   const machine = machines.find(m=>m.id===prod.machineId) || machines[0];
   if(machine) machine.hoursUsed = Math.max(0, (machine.hoursUsed||0) - (j.qty||1)*(prod.timeH||0)*(j.pctComplete/100));
@@ -2554,7 +2556,8 @@ function confirmPrintJob(){
   });
 
   let totalLoss = 0, materialCost = 0, energyCost = 0;
-  if(outcome==='success') prod.stock += qty;
+  // stock é sempre em peças — uma impressão (qty=leva) rende unitsPerPrint peças cada.
+  if(outcome==='success') prod.stock += qty*Math.max(1,prod.unitsPerPrint||1);
   if(outcome==='failure'){
     materialCost = filamentUsage.reduce((sum,u)=>sum+u.qty*filamentCost(u.materialName),0);
     // energyCost de calcProduct() agora é POR UNIDADE (ver unitsPerPrint) — aqui
@@ -2863,13 +2866,16 @@ function deleteSale(id){
   if(!confirm(msg)) return;
   const prod = state.products.find(p=>p.id===s.productId);
   if(prod){
-    prod.stock += s.qty;
-    // packagingRecipe é por VENDA (uma caixa por venda, não por peça) — desfaz
-    // na mesma proporção que confirmSale() descontou (ver saleUnits ali).
-    const saleUnits = calcProduct(prod).saleUnits;
+    // Usa o snapshot GRAVADO na venda, nunca calcProduct(prod) ao vivo — se o
+    // produto mudou de kit de 3 pra 6 depois dessa venda, desfazer tem que
+    // devolver os 3 de então, não 6. Vendas antigas sem snapshot (antes dessa
+    // mudança) caem no fallback 1:1 peça-venda, que era o comportamento de antes.
+    const saleUnits = s.unitsPerSaleSnapshot||1;
+    prod.stock += s.qty*saleUnits;
+    // packagingRecipe é por VENDA — s.qty já é número de vendas/kits.
     packagingRecipe(prod).forEach(r=>{
       const mat = materialByName(r.materialName);
-      if(mat) mat.stock += r.qty * (s.qty/saleUnits);
+      if(mat) mat.stock += r.qty * s.qty;
     });
   }
   const touchedReserves = reverseSaleReserveAllocations(s);
@@ -2916,7 +2922,13 @@ function newCartItem(productId, qty, platformName){
 }
 function openSaleModal(presetProductId, presetQty, presetOrderId){
   if(state.products.length===0){ toast('Cadastre um produto antes de registrar vendas','err'); return; }
-  cartItems = [ newCartItem(presetProductId || state.products[0].id, presetQty||1, state.settings.platforms[0].name) ];
+  // presetQty vem de Pedidos em PEÇAS (o.qty) — o carrinho agora conta em
+  // VENDAS/kits, então converte pelo unitsPerSale do produto antes de usar.
+  const presetId = presetProductId || state.products[0].id;
+  const presetProd = state.products.find(p=>p.id===presetId);
+  const presetSaleUnits = presetProd ? Math.max(1, presetProd.unitsPerSale||1) : 1;
+  const initialQty = presetQty ? Math.max(1, Math.round(presetQty/presetSaleUnits)) : 1;
+  cartItems = [ newCartItem(presetId, initialQty, state.settings.platforms[0].name) ];
   cartOrderLinks = {};
   if(presetOrderId){ cartOrderLinks[cartItems[0].productId] = presetOrderId; }
   showModal('Nova venda', `
@@ -2935,9 +2947,9 @@ function openSaleModal(presetProductId, presetQty, presetOrderId){
         ${state.settings.platforms.map(p=>`<option value="${p.name}">${p.name} (${num(p.pct,0)}%${p.fixed?' + '+brl(p.fixed):''})</option>`).join('')}
       </select></div>
       <div class="field"><label>Taxa nessa venda (%)</label><input type="number" id="sFeePct" step="0.01" oninput="this.dataset.touched='1'; updateSalePreview()"></div>
-      <div class="field"><label>Taxa fixa nessa venda (R$)</label><input type="number" id="sFeeFixed" step="0.01" oninput="this.dataset.touched='1'; updateSalePreview()"></div>
+      <div class="field"><label>Taxa fixa por unidade vendida (R$)</label><input type="number" id="sFeeFixed" step="0.01" oninput="this.dataset.touched='1'; updateSalePreview()"></div>
     </div>
-    <div class="field hint" style="margin-top:-8px;margin-bottom:12px;">Vem preenchido com a taxa cadastrada da plataforma, mas edite se o Mercado Livre/Shopee cobrou diferente (aplica sobre o total da venda).</div>
+    <div class="field hint" style="margin-top:-8px;margin-bottom:12px;">Vem preenchido com a taxa cadastrada da plataforma, mas edite se o Mercado Livre/Shopee cobrou diferente. A % aplica sobre o total da venda; a taxa fixa é cobrada por unidade vendida (2 kits = 2x o valor fixo).</div>
     <div id="sTierNote"></div>
     <div class="row2">
       <div class="field"><label>Frete pago por você (R$, total da venda)</label><input type="number" id="sShipping" step="0.01" value="0" placeholder="Ex: frete grátis que você bancou" oninput="updateSalePreview()"></div>
@@ -2981,6 +2993,7 @@ function updateCartItem(rowId, field, val){
     renderCartItemsList();
   } else if(field==='qty'){
     item.qty = Math.max(1, parseInt(val)||1);
+    refreshCartItemDerivation(rowId);
   } else if(field==='unitPrice'){
     item.unitPrice = parseFloat(val)||0;
     item.priceTouched = true;
@@ -2994,36 +3007,65 @@ function onSalePlatformChange(){
   updateFeeDefaults();
   updateSalePreview();
 }
+// "Quantidade" no carrinho é número de VENDAS/kits, não de peças físicas —
+// deixa isso explícito no rótulo e mostra a conta ao vivo (peças reais que
+// saem do estoque + tempo de impressora), já que os dois números divergem
+// sempre que unitsPerSale > 1.
+function cartItemDerivationHtml(item){
+  const prod = state.products.find(p=>p.id===item.productId);
+  if(!prod) return '';
+  const c = calcProduct(prod);
+  const pieces = item.qty*c.saleUnits;
+  const qtyLabel = c.saleUnits>1 ? `${item.qty} kit${item.qty>1?'s':''} de ${c.saleUnits} un` : `${item.qty} unidade${item.qty>1?'s':''}`;
+  const stockAfter = prod.stock - pieces;
+  return `<div class="field hint" id="cartDerivation_${item.rowId}" style="margin:2px 0 8px;color:${stockAfter<0?'var(--red)':'var(--text-faint)'};">${qtyLabel} = ${pieces} peça${pieces>1?'s':''} · baixa ${pieces} do estoque (tem ${num(prod.stock,0)}) · ${fmtHm(c.saleTimeH*item.qty)} de impressora</div>`;
+}
+function refreshCartItemDerivation(rowId){
+  const item = cartItems.find(it=>it.rowId===rowId);
+  const el = document.getElementById(`cartDerivation_${rowId}`);
+  if(item && el) el.outerHTML = cartItemDerivationHtml(item);
+}
 function renderCartItemsList(){
   const el = document.getElementById('cartItemsList');
   if(!el) return;
   el.innerHTML = cartItems.map(item=>{
     const prod = state.products.find(p=>p.id===item.productId);
-    return `<div style="display:grid;grid-template-columns:minmax(0,1fr) 52px 76px 28px;gap:6px;align-items:center;margin-bottom:8px;">
-      <select style="min-width:0;" onchange="updateCartItem('${item.rowId}','productId',this.value)">
+    const saleUnits = prod ? Math.max(1, prod.unitsPerSale||1) : 1;
+    const qtyLabel = saleUnits>1 ? `Qtd (kits de ${saleUnits})` : 'Qtd (un)';
+    return `<div style="margin-bottom:4px;">
+    <div style="display:grid;grid-template-columns:minmax(0,1fr) 76px 76px 28px;gap:6px;align-items:end;">
+      <div style="min-width:0;"><label style="font-size:10.5px;">Produto</label><select style="min-width:0;" onchange="updateCartItem('${item.rowId}','productId',this.value)">
         ${state.products.map(p=>`<option value="${p.id}" ${p.id===item.productId?'selected':''}>${p.name}</option>`).join('')}
-      </select>
-      <input type="number" min="1" value="${item.qty}" title="Quantidade" style="min-width:0;padding:8px 4px;" oninput="updateCartItem('${item.rowId}','qty',this.value)">
-      <input type="number" step="0.01" value="${item.unitPrice.toFixed(2)}" title="Preço unitário" style="min-width:0;padding:8px 4px;" oninput="updateCartItem('${item.rowId}','unitPrice',this.value)">
+      </select></div>
+      <div style="min-width:0;"><label style="font-size:10.5px;">${qtyLabel}</label><input type="number" min="1" value="${item.qty}" style="min-width:0;padding:8px 4px;" oninput="updateCartItem('${item.rowId}','qty',this.value)"></div>
+      <div style="min-width:0;"><label style="font-size:10.5px;">Preço/venda</label><input type="number" step="0.01" value="${item.unitPrice.toFixed(2)}" style="min-width:0;padding:8px 4px;" oninput="updateCartItem('${item.rowId}','unitPrice',this.value)"></div>
       <button class="btn ghost sm" title="Remover item" style="padding:6px 8px;" onclick="removeCartItem('${item.rowId}')">×</button>
+    </div>
+    ${cartItemDerivationHtml(item)}
     </div>`;
   }).join('');
 }
-function computeTieredFee(tiers, amount){
+// units (default 1) = quantas vezes o componente FIXO da taxa se aplica — o
+// custo fixo do ML/Shopee é por unidade vendida do anúncio, não por pedido
+// (vender 2 kits cobra o fixo 2x). Chamadas fora de Vendas (painel de preço
+// de Produtos, já avaliando UMA venda) continuam corretas com o default 1.
+function computeTieredFee(tiers, amount, units){
   const tier = tiers.find(t => amount <= t.max) || tiers[tiers.length-1];
-  return { fee: amount*(tier.pct/100) + tier.fixed, tier };
+  const u = units!=null ? units : 1;
+  return { fee: amount*(tier.pct/100) + tier.fixed*u, tier };
 }
-function saleFeeFromForm(gross){
+function saleFeeFromForm(gross, totalUnits){
   if(gross<=0) return 0;
+  const units = totalUnits!=null ? totalUnits : 1;
   const pctEl = document.getElementById('sFeePct'), fixedEl = document.getElementById('sFeeFixed');
   const touched = (pctEl && pctEl.dataset.touched) || (fixedEl && fixedEl.dataset.touched);
   const plat = state.settings.platforms.find(p=>p.name===document.getElementById('sPlat').value);
   if(!touched && plat && plat.tiers){
-    return computeTieredFee(plat.tiers, gross).fee;
+    return computeTieredFee(plat.tiers, gross, units).fee;
   }
   const pct = parseFloat(pctEl.value)||0;
   const fixed = parseFloat(fixedEl.value)||0;
-  return gross*(pct/100) + fixed;
+  return gross*(pct/100) + fixed*units;
 }
 function updateFeeDefaults(){
   const plat = document.getElementById('sPlat').value;
@@ -3040,19 +3082,22 @@ function onOrderMatchChange(productId, val){
 }
 function updateSalePreview(){
   const totalGross = cartItems.reduce((a,it)=>a+it.qty*it.unitPrice,0);
+  // Total de VENDAS/kits no carrinho — a taxa fixa do ML/Shopee é por
+  // unidade vendida do anúncio, não uma vez por pedido (ver saleFeeFromForm).
+  const totalUnits = cartItems.reduce((a,it)=>a+it.qty,0);
   const pctEl = document.getElementById('sFeePct'), fixedEl = document.getElementById('sFeeFixed');
   const touched = (pctEl && pctEl.dataset.touched) || (fixedEl && fixedEl.dataset.touched);
   const plat = state.settings.platforms.find(p=>p.name===document.getElementById('sPlat').value);
   let tierNote = '';
   if(!touched && plat && plat.tiers && totalGross>0){
-    const { tier } = computeTieredFee(plat.tiers, totalGross);
+    const { tier } = computeTieredFee(plat.tiers, totalGross, totalUnits);
     pctEl.value = tier.pct;
     fixedEl.value = tier.fixed;
-    tierNote = `<div class="field hint" style="margin-top:-8px;margin-bottom:12px;color:var(--teal);">Faixa aplicada automaticamente: até ${(tier.max==null||!isFinite(tier.max))?'qualquer valor':brl(tier.max)} → ${tier.pct}%${tier.fixed?' + '+brl(tier.fixed):''} (tabela oficial Shopee 2026)</div>`;
+    tierNote = `<div class="field hint" style="margin-top:-8px;margin-bottom:12px;color:var(--teal);">Faixa aplicada automaticamente: até ${(tier.max==null||!isFinite(tier.max))?'qualquer valor':brl(tier.max)} → ${tier.pct}%${tier.fixed?' + '+brl(tier.fixed)+'/un':''} (tabela oficial Shopee 2026)</div>`;
   }
   const tierNoteEl = document.getElementById('sTierNote');
   if(tierNoteEl) tierNoteEl.innerHTML = tierNote;
-  const totalFee = saleFeeFromForm(totalGross);
+  const totalFee = saleFeeFromForm(totalGross, totalUnits);
   const totalShipping = parseFloat(document.getElementById('sShipping').value)||0;
 
   let totalCost = 0, totalProfit = 0, allAllocations = {};
@@ -3063,16 +3108,16 @@ function updateSalePreview(){
     const itemFee = totalFee*share;
     const itemShipping = totalShipping*share;
     const calc = calcProduct(prod);
-    // calc.totalCost cobre unitsPerSale peças (a venda inteira, embalagem
-    // inclusa uma vez) — item.qty é peças vendidas, então divide por
-    // saleUnits antes de multiplicar, senão o custo é inflado pra kits.
-    const cost = calc.totalCost*(item.qty/calc.saleUnits);
+    // calc.totalCost já é o custo de UMA venda (kit inteiro, embalagem
+    // inclusa uma vez) e item.qty agora é número de vendas — multiplica direto.
+    const cost = calc.totalCost*item.qty;
     const net = itemGross-itemFee;
     const profit = net-cost-itemShipping;
     totalCost += cost; totalProfit += profit;
     const allocations = computeSaleReserveAllocations(calc, item.qty, profit);
     Object.entries(allocations).forEach(([gid,amt])=>{ allAllocations[gid]=(allAllocations[gid]||0)+amt; });
-    const stockAfter = prod.stock - item.qty;
+    const piecesNeeded = item.qty*calc.saleUnits;
+    const stockAfter = prod.stock - piecesNeeded;
     let matchBlock = '';
     const matches = matchingOrdersForProduct(prod.id);
     if(matches.length){
@@ -3086,7 +3131,7 @@ function updateSalePreview(){
       </div>`;
     }
     return `<div class="calc-line"><span>${item.qty}x ${prod.name}</span><span>${brl(itemGross)}</span></div>
-      <div style="font-size:11px;color:${stockAfter<0?'var(--red)':'var(--text-faint)'};margin:-2px 0 4px;">Estoque após venda: ${num(stockAfter,0)} un${stockAfter<0?' (ficará negativo)':''}</div>
+      <div style="font-size:11px;color:${stockAfter<0?'var(--red)':'var(--text-faint)'};margin:-2px 0 4px;">Estoque após venda: ${num(stockAfter,0)} peças${stockAfter<0?` (faltam ${num(-stockAfter,0)} — venda será bloqueada)`:''}</div>
       ${matchBlock}`;
   }).join('');
 
@@ -3111,10 +3156,23 @@ function confirmSale(){
   const totalGross = cartItems.reduce((a,it)=>a+it.qty*it.unitPrice,0);
   if(cartItems.length===0 || totalGross<=0){ toast('Verifique os itens e valores da venda','err'); return; }
   if(cartItems.some(it=>it.qty<=0 || it.unitPrice<0)){ toast('Quantidade deve ser maior que zero e preço não pode ser negativo','err'); return; }
+  // Estoque é sempre em peças — bloqueia ANTES de mexer em qualquer coisa se
+  // alguma venda do carrinho não cabe no estoque físico disponível.
+  for(const item of cartItems){
+    const prod = state.products.find(p=>p.id===item.productId);
+    if(!prod) continue;
+    const saleUnits = Math.max(1, prod.unitsPerSale||1);
+    const needed = item.qty*saleUnits;
+    if(prod.stock < needed){
+      toast(`Estoque insuficiente: ${num(prod.stock,0)} peças, a venda de "${prod.name}" precisa de ${needed}`,'err');
+      return;
+    }
+  }
   const date = document.getElementById('sDate').value || todayStr();
   const plat = document.getElementById('sPlat').value;
   const customerId = document.getElementById('sCustomer').value || null;
-  const totalFee = saleFeeFromForm(totalGross);
+  const totalUnits = cartItems.reduce((a,it)=>a+it.qty,0);
+  const totalFee = saleFeeFromForm(totalGross, totalUnits);
   const totalShipping = parseFloat(document.getElementById('sShipping').value)||0;
   const totalCoupon = parseFloat(document.getElementById('sCoupon').value)||0;
   const trackingCode = document.getElementById('sTracking').value.trim() || null;
@@ -3134,10 +3192,9 @@ function confirmSale(){
     const itemShipping = totalShipping*share;
     const itemCoupon = totalCoupon*share;
     const calc = calcProduct(prod);
-    // calc.totalCost cobre unitsPerSale peças (a venda inteira, embalagem
-    // inclusa uma vez) — item.qty é peças vendidas, então divide por
-    // saleUnits antes de multiplicar, senão o custo é inflado pra kits.
-    const cost = calc.totalCost*(item.qty/calc.saleUnits);
+    // calc.totalCost já é o custo de UMA venda (kit inteiro) — item.qty é
+    // número de vendas, multiplica direto (nada de dividir por saleUnits).
+    const cost = calc.totalCost*item.qty;
     const net = itemGross-itemFee;
     const profit = net-cost-itemShipping;
     const allocations = computeSaleReserveAllocations(calc, item.qty, profit);
@@ -3145,14 +3202,19 @@ function confirmSale(){
     state.sales.push({
       id:uid(), groupId, date, productId:prod.id, productName:prod.name, qty:item.qty, platform:plat,
       grossPrice:itemGross, feeTotal:itemFee, netReceipt:net, productionCost:cost, shippingCost:itemShipping, couponDiscount:itemCoupon, profit,
-      reserveAllocations:allocations, machineId: calc.machine?calc.machine.id:null, hoursUsed:(prod.timeH||0)*item.qty, customerId, trackingCode, linkedOrderId,
+      // Snapshot no momento da venda — se o cadastro do produto mudar depois
+      // (kit de 3 virar kit de 6, preço mudar), essa venda não pode ser
+      // relida com os valores novos. Ver pegadinha #8 do CLAUDE.md.
+      unitsPerSaleSnapshot: calc.saleUnits, unitPriceSnapshot: item.unitPrice, timePerUnitSnapshot: calc.saleTimeH,
+      reserveAllocations:allocations, machineId: calc.machine?calc.machine.id:null, hoursUsed:calc.saleTimeH*item.qty, customerId, trackingCode, linkedOrderId,
     });
-    prod.stock -= item.qty;
-    // packagingRecipe é por VENDA — uma venda de 4 peças no mesmo kit gasta
-    // uma caixa, não quatro (ver saleUnits em calcProduct/cost acima).
+    // stock em peças: qty (vendas/kits) × unitsPerSale = peças físicas.
+    prod.stock -= item.qty*calc.saleUnits;
+    // packagingRecipe é por VENDA (uma caixa por kit) — item.qty já é
+    // número de vendas, sem precisar dividir por saleUnits.
     packagingRecipe(prod).forEach(r=>{
       const mat = materialByName(r.materialName);
-      if(mat){ mat.stock -= r.qty*(item.qty/calc.saleUnits); if(mat.stock<0) boxNegativeWarn = true; }
+      if(mat){ mat.stock -= r.qty*item.qty; if(mat.stock<0) boxNegativeWarn = true; }
     });
     applySaleReserveAllocations(allocations);
     if(Object.keys(allocations).length){ settingsTouched = true; totalAllocated += Object.values(allocations).reduce((a,v)=>a+v,0); }
@@ -5611,6 +5673,18 @@ function materialCard(m){
     </div>
   </div>`;
 }
+// Média de VENDAS (kits) por mês com base no histórico real — "vendas
+// disponíveis" só é útil pra decidir se precisa produzir quando comparado
+// com quanto realmente sai por mês, não com um limiar fixo de peças. Uma
+// peça de 1g com estoque de 40 parece muito, mas se cada venda leva 10
+// peças (kit) e vende 2x/mês, são só 4 vendas — pouco mais de 2 meses.
+function avgMonthlySalesKits(productId){
+  const sales = state.sales.filter(s=>s.productId===productId);
+  if(!sales.length) return null;
+  const months = new Set(sales.map(s=>s.date.slice(0,7)));
+  const totalKits = sales.reduce((a,s)=>a+(s.qty||0),0);
+  return totalKits / Math.max(1, months.size);
+}
 function renderFinishedStock(){
   if(state.products.length===0) return `<div class="card">${emptyState('Nenhum produto cadastrado')}</div>`;
   const rows = state.products.map(p=>{
@@ -5618,12 +5692,18 @@ function renderFinishedStock(){
     // totalCost é da VENDA (unitsPerSale peças) — estoque conta PEÇAS, então
     // divide por saleUnits pra ter o custo de uma peça só.
     const unitCost = c.totalCost/c.saleUnits;
+    const vendasDisp = Math.floor(p.stock/c.saleUnits);
+    const avgMonthly = avgMonthlySalesKits(p.id);
+    let status;
+    if(p.stock<=0) status = `<span class="badge bad">Sem estoque</span>`;
+    else if(avgMonthly!=null) status = vendasDisp<avgMonthly ? `<span class="badge warn" title="Média de ${num(avgMonthly,1)} venda(s)/mês">Baixo p/ demanda</span>` : `<span class="badge ok">Ok</span>`;
+    else status = vendasDisp<=3 ? `<span class="badge warn">Baixo</span>` : `<span class="badge ok">Ok</span>`;
     return `<tr>
       <td data-label="Produto">${p.name}</td>
-      <td class="right num" data-label="Estoque">${num(p.stock,0)} un</td>
+      <td class="right num" data-label="Estoque">${num(p.stock,0)} peças${c.saleUnits>1?`<div style="font-size:10px;font-weight:400;color:var(--text-faint);white-space:nowrap;">${vendasDisp} venda${vendasDisp!==1?'s':''} disponíve${vendasDisp!==1?'is':'l'}${avgMonthly!=null?` (média ${num(avgMonthly,1)}/mês)`:''}</div>`:''}</td>
       <td class="right num" data-label="Custo unitário">${brl(unitCost)}</td>
       <td class="right num" data-label="Valor em estoque">${brl(p.stock*unitCost)}</td>
-      <td class="right" data-label="Status">${p.stock<=0?`<span class="badge bad">Sem estoque</span>`:p.stock<=3?`<span class="badge warn">Baixo</span>`:`<span class="badge ok">Ok</span>`}</td>
+      <td class="right" data-label="Status">${status}</td>
       <td class="right"><button class="btn ghost sm" onclick="openPrintJobModal('${p.id}')">Produzir</button></td>
     </tr>`;
   }).join('');
