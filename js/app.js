@@ -2949,7 +2949,8 @@ function openSaleModal(presetProductId, presetQty, presetOrderId){
       <div class="field"><label>Taxa nessa venda (%)</label><input type="number" id="sFeePct" step="0.01" oninput="this.dataset.touched='1'; updateSalePreview()"></div>
       <div class="field"><label>Taxa fixa por unidade vendida (R$)</label><input type="number" id="sFeeFixed" step="0.01" oninput="this.dataset.touched='1'; updateSalePreview()"></div>
     </div>
-    <div class="field hint" style="margin-top:-8px;margin-bottom:12px;">Vem preenchido com a taxa cadastrada da plataforma, mas edite se o Mercado Livre/Shopee cobrou diferente. A % aplica sobre o total da venda; a taxa fixa é cobrada por unidade vendida (2 kits = 2x o valor fixo).</div>
+    <div class="field hint" style="margin-top:-8px;margin-bottom:12px;">Vem preenchido com a taxa cadastrada da plataforma (ou a taxa real do produto, se já buscada — ver abaixo), mas edite se o Mercado Livre/Shopee cobrou diferente. A % aplica sobre o total da venda; a taxa fixa é cobrada por unidade vendida (2 kits = 2x o valor fixo).</div>
+    <div id="sFeeRealNote"></div>
     <div id="sTierNote"></div>
     <div class="row2">
       <div class="field"><label>Frete pago por você (R$, total da venda)</label><input type="number" id="sShipping" step="0.01" value="0" placeholder="Ex: frete grátis que você bancou" oninput="updateSalePreview()"></div>
@@ -2975,12 +2976,14 @@ function currentSalePlatform(){
 function addCartItem(){
   cartItems.push(newCartItem(state.products[0].id, 1, currentSalePlatform()));
   renderCartItemsList();
+  updateFeeDefaults();
   updateSalePreview();
 }
 function removeCartItem(rowId){
   if(cartItems.length<=1){ toast('A venda precisa de ao menos um item','err'); return; }
   cartItems = cartItems.filter(it=>it.rowId!==rowId);
   renderCartItemsList();
+  updateFeeDefaults();
   updateSalePreview();
 }
 function updateCartItem(rowId, field, val){
@@ -2991,6 +2994,7 @@ function updateCartItem(rowId, field, val){
     item.unitPrice = cartItemDefaultPrice(val, currentSalePlatform());
     item.priceTouched = false;
     renderCartItemsList();
+    updateFeeDefaults();
   } else if(field==='qty'){
     item.qty = Math.max(1, parseInt(val)||1);
     refreshCartItemDerivation(rowId);
@@ -3067,12 +3071,35 @@ function saleFeeFromForm(gross, totalUnits){
   const fixed = parseFloat(fixedEl.value)||0;
   return gross*(pct/100) + fixed*units;
 }
+// Se o produto já teve a taxa REAL do ML buscada (mlRealFeePct, via
+// "Atualizar taxa real" no cadastro — API oficial), usa ela em vez do
+// percentual genérico de Configurações/Taxas, igual calcProduct() já faz
+// no painel de Produtos. mlRealFeePct é uma % já completa (o custo
+// operacional por peso já vem embutido nela) — não soma taxa fixa em cima.
 function updateFeeDefaults(){
-  const plat = document.getElementById('sPlat').value;
-  const p = state.settings.platforms.find(x=>x.name===plat);
+  const platName = document.getElementById('sPlat').value;
+  const plat = state.settings.platforms.find(x=>x.name===platName);
   const pctEl = document.getElementById('sFeePct'), fixedEl = document.getElementById('sFeeFixed');
-  if(pctEl && !pctEl.dataset.touched) pctEl.value = p ? p.pct : 0;
-  if(fixedEl && !fixedEl.dataset.touched) fixedEl.value = p ? p.fixed : 0;
+  const noteEl = document.getElementById('sFeeRealNote');
+  let pctValue = plat ? plat.pct : 0;
+  let fixedValue = plat ? plat.fixed : 0;
+  let note = '';
+  if(/mercado ?livre/i.test(platName||'') && cartItems.length){
+    const realFees = cartItems.map(it=>{
+      const prod = state.products.find(p=>p.id===it.productId);
+      return (prod && prod.mlRealFeePct!=null) ? prod.mlRealFeePct : null;
+    });
+    const known = realFees.filter(f=>f!=null);
+    if(known.length===cartItems.length && known.every(f=>f===known[0])){
+      pctValue = known[0]; fixedValue = 0;
+      note = `<div class="field hint" style="margin-top:-8px;margin-bottom:12px;color:var(--teal);">Usando a taxa real já buscada ${cartItems.length>1?'pra esses produtos':'pra esse produto'}: ${num(pctValue,1)}%.</div>`;
+    } else if(known.length>0){
+      note = `<div class="field hint" style="margin-top:-8px;margin-bottom:12px;color:var(--amber);">O carrinho mistura produtos com e sem taxa real buscada (ou com taxas diferentes) — confira o percentual manualmente.</div>`;
+    }
+  }
+  if(pctEl && !pctEl.dataset.touched) pctEl.value = pctValue;
+  if(fixedEl && !fixedEl.dataset.touched) fixedEl.value = fixedValue;
+  if(noteEl) noteEl.innerHTML = note;
 }
 function matchingOrdersForProduct(productId){
   return state.orders.filter(o=>o.productId===productId && o.status!=='Enviado').sort((a,b)=>(a.dueDate||'9999').localeCompare(b.dueDate||'9999'));
