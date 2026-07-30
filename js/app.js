@@ -123,6 +123,7 @@ function seedData(){
     monthlySnapshots:{},
     lastActiveMonth: todayStr().slice(0,7),
     laborHourlyRate:25,
+    operationsStartMonth:'',
   };
   return { materials, products, sales:[], orders:[], customers:[], printFailures:[], listings:[], customOrders:[], settings };
 }
@@ -336,6 +337,7 @@ function migrateSettings(settings){
     if(g.unitBasis!=='kit') g.unitBasis = 'unidade';
     if(g.kitSize==null || g.kitSize<1) g.kitSize = 1;
   });
+  if(settings.operationsStartMonth==null) settings.operationsStartMonth = '';
   if(settings.targetHourlyProfit==null) settings.targetHourlyProfit = 15.00;
   if(settings.goodHourlyProfit==null) settings.goodHourlyProfit = 20.00;
   if(settings.minProfitPerSale==null) settings.minProfitPerSale = 8.00;
@@ -899,6 +901,9 @@ function pricingChannelBlockHtml(label, channelName, price, c, marketInfo, prod)
 function salesInMonth(ym){ return state.sales.filter(s=>s.date && s.date.slice(0,7)===ym); }
 
 function blocoA(ym){
+  if(state.settings.operationsStartMonth && ym < state.settings.operationsStartMonth){
+    return { faturamento:0, taxas:0, receitaLiquida:0, custoProducao:0, frete:0, despesas:0, lucroBruto:0, mei:0, lucroOperacional:0, qtdVendas:0 };
+  }
   const sales = salesInMonth(ym);
   const faturamento = sales.reduce((a,s)=>a+s.grossPrice,0);
   const taxas = sales.reduce((a,s)=>a+s.feeTotal,0);
@@ -6215,6 +6220,12 @@ function renderConfiguracoes(){
       <div class="field hint" style="margin-top:8px;">Aparece na barra lateral, no catálogo exportado, no recibo de venda e no app instalado no celular. Deixe em branco pra usar o padrão.</div>
     </div>
 
+    <div class="section-title">Início das operações</div>
+    <div class="card">
+      <div class="field"><label>Mês/ano de início</label><input type="month" id="cfgOpsStart" value="${s.operationsStartMonth||''}"></div>
+      <div class="field hint" style="margin-top:-8px;">Meses anteriores a essa data saem zerados do Caixa e do export Anual — evita contar despesas fixas e impostos de antes do negócio começar a operar. Deixe em branco pra não aplicar nenhum corte.</div>
+    </div>
+
     <div class="section-title">Despesas operacionais mensais</div>
     <div class="card">
       <div class="field hint" style="margin-top:0;margin-bottom:10px;">Cada item que você paga todo mês pra manter o negócio rodando: assinaturas, anúncios, ferramentas etc.</div>
@@ -6569,6 +6580,7 @@ function confirmConfiguracoes(){
   const s = state.settings;
   s.businessName = document.getElementById('cfgBusinessName').value.trim();
   s.businessLogo = editingBusinessLogo;
+  s.operationsStartMonth = document.getElementById('cfgOpsStart').value || '';
   s.expenses = editingExpenses.filter(e=>e.name && e.name.trim());
   s.taxes = editingTaxes.filter(t=>t.name && t.name.trim());
   s.pixKey = document.getElementById('cfgPixKey').value.trim();
