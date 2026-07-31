@@ -2002,6 +2002,7 @@ function openInvestmentModal(){
         <option value="Filamento">Filamento</option>
         <option value="Embalagem">Caixas / embalagem</option>
         <option value="Ferramentas">Ferramentas</option>
+        <option value="Componentes">Componentes</option>
         <option value="Outros">Outros</option>
       </select></div>
       <div class="field"><label>Valor total (R$)</label><input type="number" id="invValue" step="0.01"></div>
@@ -2043,7 +2044,7 @@ function updateInvestmentFormVisibility(){
   const payType = document.getElementById('invPayType').value;
   document.getElementById('invParceladoBlock').style.display = payType==='parcelado' ? 'block' : 'none';
   document.getElementById('invMachineSyncBlock').style.display = (cat==='Impressora' && payType==='parcelado') ? 'block' : 'none';
-  const isStockCategory = cat==='Filamento' || cat==='Embalagem' || cat==='Ferramentas';
+  const isStockCategory = cat==='Filamento' || cat==='Embalagem' || cat==='Ferramentas' || cat==='Componentes';
   document.getElementById('invStockBlock').style.display = isStockCategory ? 'block' : 'none';
   if(isStockCategory){
     const matSelect = document.getElementById('invMaterial');
@@ -2080,7 +2081,7 @@ function confirmInvestment(){
     });
     extras.push('cadastrada como nova impressora no Bloco B');
   }
-  if((category==='Filamento'||category==='Embalagem'||category==='Ferramentas') && document.getElementById('invAddStock') && document.getElementById('invAddStock').checked){
+  if((category==='Filamento'||category==='Embalagem'||category==='Ferramentas'||category==='Componentes') && document.getElementById('invAddStock') && document.getElementById('invAddStock').checked){
     const matId = document.getElementById('invMaterial').value;
     const qty = parseFloat(document.getElementById('invQty').value)||0;
     const mat = state.materials.find(m=>m.id===matId);
@@ -6021,6 +6022,7 @@ function openMaterialModal(id){
       <div class="field"><label>Estoque atual</label><input type="number" id="mStock" value="${m.stock}" step="0.01"></div>
       <div class="field"><label>Estoque mínimo (alerta)</label><input type="number" id="mLow" value="${m.lowStock}" step="0.01"></div>
     </div>
+    ${!editing ? `<label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-dim);margin:-6px 0 12px;"><input type="checkbox" id="mAddInvestment" style="width:auto;" checked> Registrar essa compra como investimento em Anual</label>` : ''}
     <div class="modal-actions">
       <button class="btn ghost" onclick="closeModal()">Cancelar</button>
       <button class="btn primary" onclick="confirmMaterial(${editing?`'${id}'`:'null'})">${editing?'Salvar':'Criar'}</button>
@@ -6166,6 +6168,7 @@ function confirmMaterial(id){
   }
   let renamedFrom = null;
   let oldCostPerUnit = null;
+  let investMsg = '';
   if(id){
     const existing = state.materials.find(x=>x.id===id);
     if(existing.name !== name) renamedFrom = existing.name;
@@ -6173,6 +6176,15 @@ function confirmMaterial(id){
     Object.assign(existing, data);
   } else {
     state.materials.push({ id:uid(), ...data });
+    // Material novo com preço de compra é uma compra de verdade — se não virar
+    // investimento também, some do Caixa/Anual (mesmo motivo do Reabastecer).
+    const investCk = document.getElementById('mAddInvestment');
+    if(purchasePrice>0 && investCk && investCk.checked){
+      if(!state.settings.investments) state.settings.investments = [];
+      state.settings.investments.push({ id:uid(), name:`Compra inicial: ${name}`, value:purchasePrice, date: todayStr(), paymentType:'avista', category });
+      saveSettings();
+      investMsg = ' — registrado como investimento em Anual';
+    }
   }
   if(renamedFrom){
     let productsTouched = false;
@@ -6192,7 +6204,7 @@ function confirmMaterial(id){
       marginMsg = ` — atenção: ${affected.length} produto(s) ficaram com margem abaixo do desejado (${affected.slice(0,3).map(p=>p.name).join(', ')})`;
     }
   }
-  toast((id?'Matéria-prima atualizada':'Matéria-prima criada') + marginMsg, marginMsg?'err':'');
+  toast((id?'Matéria-prima atualizada':'Matéria-prima criada') + investMsg + marginMsg, marginMsg?'err':'');
   closeModal(); renderContent();
 }
 function openRestockModal(id){
@@ -6201,6 +6213,7 @@ function openRestockModal(id){
     <div class="field"><label>Estoque atual</label><input value="${num(m.stock,1)} ${m.unit}" disabled></div>
     <div class="field"><label>Quantidade a adicionar (${m.unit})</label><input type="number" id="rQty" step="0.01" placeholder="Ex: ${m.purchaseQty}"></div>
     <div class="field"><label>Custo total da compra (opcional — recalcula custo unitário)</label><input type="number" id="rCost" step="0.01" placeholder="Ex: ${m.purchasePrice}"></div>
+    <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-dim);margin:-6px 0 12px;"><input type="checkbox" id="rAddInvestment" style="width:auto;" checked> Também registrar como investimento em Anual (se informar o custo acima)</label>
     <div class="modal-actions">
       <button class="btn ghost" onclick="closeModal()">Cancelar</button>
       <button class="btn primary" onclick="confirmRestock('${id}')">Adicionar ao estoque</button>
@@ -6212,6 +6225,7 @@ function confirmRestock(id){
   const qty = parseFloat(document.getElementById('rQty').value)||0;
   const cost = parseFloat(document.getElementById('rCost').value);
   if(qty<=0){ toast('Informe uma quantidade válida','err'); return; }
+  let investMsg = '';
   if(cost && cost>0){
     /* média ponderada: mistura o valor do estoque já existente com o da compra nova,
        em vez de simplesmente substituir pelo preço do último lote. */
@@ -6219,9 +6233,17 @@ function confirmRestock(id){
     const newTotalStock = m.stock + qty;
     m.costPerUnit = newTotalStock>0 ? (existingValue + cost) / newTotalStock : cost/qty;
     m.purchasePrice = cost; m.purchaseQty = qty;
+    // Reabastecer é uma compra de verdade acontecendo agora — se não virar
+    // investimento também, some do Caixa/Anual (motivo real do pedido).
+    if(document.getElementById('rAddInvestment').checked){
+      if(!state.settings.investments) state.settings.investments = [];
+      state.settings.investments.push({ id:uid(), name:`Reabastecimento: ${m.name}`, value:cost, date: todayStr(), paymentType:'avista', category: m.category });
+      saveSettings();
+      investMsg = ' — registrado como investimento em Anual';
+    }
   }
   m.stock += qty;
-  saveMaterials(); toast('Estoque atualizado'); closeModal(); renderContent();
+  saveMaterials(); toast('Estoque atualizado'+investMsg); closeModal(); renderContent();
 }
 /* ===================== CAIXA ===================== */
 function renderCaixa(){

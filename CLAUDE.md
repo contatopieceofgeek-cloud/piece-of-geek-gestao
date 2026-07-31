@@ -34,7 +34,7 @@ Estado global em `state = { materials, products, sales, orders, customers, print
 - **orders**: fila de produção (Kanban: Aguardando impressão → Imprimindo → Pronto pra envio → Enviado).
 - **customers**: clientes, linkados a `sales` via `customerId`.
 - **printFailures**: registro de falhas de impressão (desperdício real de material/energia), desconta do estoque proporcionalmente.
-- **settings**: tudo configurável — máquinas, taxas de plataforma (Shopee tem `tiers` pra cálculo automático por faixa de preço, ML não), despesas, impostos, metas de reserva, chave PIX, meta de faturamento, DAS, `operationsStartMonth` (mês de início das operações — ver pegadinha #9).
+- **settings**: tudo configurável — máquinas, taxas de plataforma (Shopee tem `tiers` pra cálculo automático por faixa de preço, ML não), despesas, impostos, metas de reserva, chave PIX, meta de faturamento, DAS, `operationsStartMonth` (mês de início das operações — ver pegadinha #9), `investments` (compras avulsas/parceladas que aparecem em Caixa/Anual — ligado a Estoque nos dois sentidos: criar um investimento de categoria Filamento/Embalagem/Ferramentas/Componentes pode já somar ao estoque do material, e criar material novo ou reabastecer com custo em Estoque pode já criar o investimento correspondente, checkbox em cada modal).
 
 ## ⚠️ Pegadinhas já resolvidas (não reintroduzir)
 
