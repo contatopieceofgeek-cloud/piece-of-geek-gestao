@@ -39,6 +39,10 @@ function seedData(){
     {id:uid(),name:'Caixa Pequena',category:'Embalagem',unit:'un',costPerUnit:1.4396,stock:0,lowStock:5,purchasePrice:35.99,purchaseQty:25,purchaseUnit:'un',isBox:true},
     {id:uid(),name:'Caixa Média',category:'Embalagem',unit:'un',costPerUnit:1.9112,stock:0,lowStock:5,purchasePrice:47.78,purchaseQty:25,purchaseUnit:'un',isBox:true},
     {id:uid(),name:'Caixa Grande',category:'Embalagem',unit:'un',costPerUnit:4.94,stock:0,lowStock:3,purchasePrice:49.40,purchaseQty:10,purchaseUnit:'un',isBox:true},
+    {id:uid(),name:'Envelope 12x18',category:'Embalagem',unit:'un',costPerUnit:0,stock:0,lowStock:10,purchasePrice:0,purchaseQty:100,purchaseUnit:'un',isEnvelope:true,lengthCm:18,widthCm:12,heightCm:0},
+    {id:uid(),name:'Envelope 15x20',category:'Embalagem',unit:'un',costPerUnit:0,stock:0,lowStock:10,purchasePrice:0,purchaseQty:100,purchaseUnit:'un',isEnvelope:true,lengthCm:20,widthCm:15,heightCm:0},
+    {id:uid(),name:'Envelope 15x25',category:'Embalagem',unit:'un',costPerUnit:0.1699,stock:0,lowStock:10,purchasePrice:16.99,purchaseQty:100,purchaseUnit:'un',isEnvelope:true,lengthCm:25,widthCm:15,heightCm:0},
+    {id:uid(),name:'Envelope 19x25',category:'Embalagem',unit:'un',costPerUnit:0,stock:0,lowStock:10,purchasePrice:0,purchaseQty:100,purchaseUnit:'un',isEnvelope:true,lengthCm:25,widthCm:19,heightCm:0},
   ];
   const machines = [
     {id:uid(),name:'Bambu Lab A1 Mini',price:2279,residual:0,lifeHours:4000,energyCostPerHour:0.0704,powerConsumptionKw:0.1,maintenanceCostPerHour:0.25,installmentValue:108.523809,installmentsTotal:21,startMonth:'2026-07',maintenanceLog:[]},
@@ -133,6 +137,8 @@ function migrateMaterials(materials){
   let hasBubbleWrap = materials.some(m=>m.isBubbleWrap);
   materials.forEach(m=>{
     if(m.isBox==null) m.isBox = m.category==='Embalagem' && m.name.startsWith('Caixa');
+    if(m.isEnvelope==null) m.isEnvelope = false;
+    if(m.isSaquinho==null) m.isSaquinho = false;
     if(m.isBubbleWrap==null){
       if(!hasBubbleWrap && m.name==='Plástico Bolha'){ m.isBubbleWrap = true; hasBubbleWrap = true; }
       else m.isBubbleWrap = false;
@@ -172,6 +178,7 @@ function migrateProducts(products){
     if(prod.heightCm==null) prod.heightCm = 0;
     if(prod.tapeM==null) prod.tapeM = 0;
     if(!prod.toolsUsed) prod.toolsUsed = [];
+    if(!prod.components) prod.components = [];
     if(prod.estimatedFreightMl==null) prod.estimatedFreightMl = 0;
     if(prod.estimatedFreightShopee==null) prod.estimatedFreightShopee = 0;
     if(!prod.modelOrigin) prod.modelOrigin = 'proprio';
@@ -621,17 +628,30 @@ function bubbleWrapUnitCost(){ const m = bubbleWrapMaterial(); return m ? m.cost
 function tapeMaterial(){ return state.materials.find(m=>m.isTape); }
 function tapeUnitCost(){ const m = tapeMaterial(); return m ? m.costPerUnit : 0; }
 function toolCostPerUse(tool){ return tool ? tool.purchasePrice / (tool.usefulLifeUses||1) : 0; }
+// Envelope/saquinho não tem altura própria (embalagem achatada e flexível) —
+// em vez de comparar 3 eixos como numa caixa rígida, só limita a altura da
+// peça a esse teto fixo e compara comprimento/largura contra a embalagem.
+const FLAT_PACKAGING_MAX_HEIGHT_CM = 3;
 function boxFitsDimensions(box, lengthCm, widthCm, heightCm){
-  if(!box || !box.lengthCm || !box.widthCm || !box.heightCm) return null;
+  if(!box || !box.lengthCm || !box.widthCm) return null;
+  if(box.isEnvelope || box.isSaquinho){
+    if(heightCm > FLAT_PACKAGING_MAX_HEIGHT_CM) return false;
+    const prodDims = [lengthCm, widthCm].sort((a,b)=>b-a);
+    const pkgDims = [box.lengthCm, box.widthCm].sort((a,b)=>b-a);
+    return prodDims[0]<=pkgDims[0] && prodDims[1]<=pkgDims[1];
+  }
+  if(!box.heightCm) return null;
   const prodDims = [lengthCm, widthCm, heightCm].sort((a,b)=>b-a);
   const boxDims = [box.lengthCm, box.widthCm, box.heightCm].sort((a,b)=>b-a);
   return prodDims[0]<=boxDims[0] && prodDims[1]<=boxDims[1] && prodDims[2]<=boxDims[2];
 }
 function bestFittingBox(lengthCm, widthCm, heightCm){
-  const boxes = state.materials.filter(m=>m.category==='Embalagem' && m.isBox && m.lengthCm>0 && m.widthCm>0 && m.heightCm>0);
+  const boxes = state.materials.filter(m=>m.category==='Embalagem' && (m.isBox||m.isEnvelope||m.isSaquinho) && m.lengthCm>0 && m.widthCm>0);
   const fitting = boxes.filter(b=>boxFitsDimensions(b, lengthCm, widthCm, heightCm));
   if(!fitting.length) return null;
-  fitting.sort((a,b)=>(a.lengthCm*a.widthCm*a.heightCm)-(b.lengthCm*b.widthCm*b.heightCm));
+  // Entre as que cabem, prioriza a mais barata — não a menor volume. Um
+  // envelope de R$0,17 que cabe é melhor que uma caixa de R$1,71 que também cabe.
+  fitting.sort((a,b)=>a.costPerUnit-b.costPerUnit);
   return fitting[0];
 }
 
@@ -686,7 +706,16 @@ function calcProduct(prod){
   const saleUnits = Math.max(1, prod.unitsPerSale||1);
   const saleWeightG = unitWeightG * saleUnits;
   const saleTimeH = unitTimeH * saleUnits;
-  const totalCost = (materialCost + energyCost + depreciation + maintenance + failureCost + laborCost + toolsCost) * saleUnits + embalagemCost;
+  // Componentes inclusos no pacote (parafuso, tag, cordão...) — NÃO é material
+  // impresso, então fica de fora do custo por peça, igual embalagem. scope
+  // 'peca' já vem multiplicado por saleUnits aqui dentro; 'venda' é uma vez só.
+  const componentsCost = (prod.components||[]).reduce((a,comp)=>{
+    const mat = state.materials.find(x=>x.id===comp.materialId);
+    if(!mat) return a;
+    const mult = comp.scope==='peca' ? saleUnits : 1;
+    return a + (comp.qty||0)*mat.costPerUnit*mult;
+  }, 0);
+  const totalCost = (materialCost + energyCost + depreciation + maintenance + failureCost + laborCost + toolsCost) * saleUnits + embalagemCost + componentsCost;
   const defaultMargin = 1 - (1/(s.markupMultiplier||2.5));
   const desiredMargin = prod.desiredMarginPct!=null ? Math.min(0.95,Math.max(0,prod.desiredMarginPct/100)) : defaultMargin;
   const suggestedPrice = desiredMargin < 1 ? totalCost / (1 - desiredMargin) : totalCost * (s.markupMultiplier||2.5);
@@ -725,7 +754,7 @@ function calcProduct(prod){
   const marginShopeeValue = netReceiptShopee - totalCost;
   const marginMlPct = practicedPriceMl > 0 ? (marginMlValue/practicedPriceMl)*100 : 0;
   const marginShopeePct = practicedPriceShopee > 0 ? (marginShopeeValue/practicedPriceShopee)*100 : 0;
-  return { printUnits, saleUnits, unitWeightG, unitTimeH, saleWeightG, saleTimeH, materialCost, energyCost, boxCost:bCost, bubbleCost, tapeCost, embalagemCost, depreciation, maintenance, laborCost, totalLaborMinutes, toolsCost, failureCost, totalCost, suggestedPrice, suggestedPriceMl, suggestedPriceShopee, suggestedPriceExtra, practicedPrice, practicedPriceMl, practicedPriceShopee, practicedPriceExtra, estimatedShopeeFreightCap, mlFeeAmount, shopeeFeeAmount, mlFeePct, shopeeFeePct, effectiveFreightMl, effectiveFreightShopee, netReceiptMl, netReceiptShopee, marginValue, marginPct, marginMlValue, marginShopeeValue, marginMlPct, marginShopeePct, desiredMarginPct: desiredMargin*100, machine };
+  return { printUnits, saleUnits, unitWeightG, unitTimeH, saleWeightG, saleTimeH, materialCost, energyCost, boxCost:bCost, bubbleCost, tapeCost, embalagemCost, componentsCost, depreciation, maintenance, laborCost, totalLaborMinutes, toolsCost, failureCost, totalCost, suggestedPrice, suggestedPriceMl, suggestedPriceShopee, suggestedPriceExtra, practicedPrice, practicedPriceMl, practicedPriceShopee, practicedPriceExtra, estimatedShopeeFreightCap, mlFeeAmount, shopeeFeeAmount, mlFeePct, shopeeFeePct, effectiveFreightMl, effectiveFreightShopee, netReceiptMl, netReceiptShopee, marginValue, marginPct, marginMlValue, marginShopeeValue, marginMlPct, marginShopeePct, desiredMarginPct: desiredMargin*100, machine };
 }
 // Teto até onde a Shopee subsidia o frete grátis obrigatório (por faixa de
 // preço, desde mar/2026). O vendedor só paga o que passar desse teto — ver
@@ -1013,11 +1042,18 @@ function lowStockMaterials(){ return state.materials.filter(m=>m.stock <= m.lowS
 
 /* recipe consumption for 1 unit of a product */
 function productRecipe(prod){
+  // Componente 'peca' multiplica pelas peças da venda (2 parafusos por peça,
+  // kit de 3 leva 6); 'venda' é uma vez só, igual embalagem — ver calcProduct.
+  const saleUnits = Math.max(1, prod.unitsPerSale||1);
   return [
     ...(prod.filaments||[]).map(f=>({ materialName: f.materialName, qty: f.weightG })),
     { materialName: prod.boxType, qty: 1 },
     { materialName: (bubbleWrapMaterial()||{}).name || 'Plástico Bolha', qty: prod.bubbleWrapM },
     { materialName: (tapeMaterial()||{}).name || 'Fita Adesiva', qty: prod.tapeM||0 },
+    ...(prod.components||[]).map(comp=>{
+      const mat = state.materials.find(x=>x.id===comp.materialId);
+      return { materialName: mat ? mat.name : null, qty: (comp.qty||0) * (comp.scope==='peca' ? saleUnits : 1) };
+    }),
   ];
 }
 
@@ -1436,7 +1472,7 @@ let quoteFilaments = [];
 let quoteLaborActions = [];
 function openQuickQuoteModal(){
   const filamentOptions = state.materials.filter(m=>m.category==='Filamento');
-  const boxOptions = state.materials.filter(m=>m.category==='Embalagem' && m.isBox);
+  const boxOptions = state.materials.filter(m=>m.category==='Embalagem' && (m.isBox||m.isEnvelope||m.isSaquinho));
   const machines = state.settings.machines||[];
   if(filamentOptions.length===0 || boxOptions.length===0){
     toast('Cadastre ao menos um filamento e uma caixa em Estoque antes de fazer um orçamento','err');
@@ -2411,15 +2447,41 @@ async function exportCatalogImage(){
 }
 
 /* ===================== FILA DE IMPRESSÃO ===================== */
+function componentMaterialNames(prod){
+  return new Set((prod.components||[]).map(comp=>{ const m = state.materials.find(x=>x.id===comp.materialId); return m ? m.name : null; }));
+}
 function printJobRecipe(prod){
   const bw = (bubbleWrapMaterial()||{}).name || 'Plástico Bolha';
   const tp = (tapeMaterial()||{}).name || 'Fita Adesiva';
-  return productRecipe(prod).filter(r=>r.materialName!==prod.boxType && r.materialName!==bw && r.materialName!==tp);
+  const compNames = componentMaterialNames(prod);
+  return productRecipe(prod).filter(r=>r.materialName!==prod.boxType && r.materialName!==bw && r.materialName!==tp && !compNames.has(r.materialName));
 }
 function packagingRecipe(prod){
   const bw = (bubbleWrapMaterial()||{}).name || 'Plástico Bolha';
   const tp = (tapeMaterial()||{}).name || 'Fita Adesiva';
   return productRecipe(prod).filter(r=>r.materialName===prod.boxType || r.materialName===bw || r.materialName===tp);
+}
+// Componentes têm baixa e bloqueio de venda separados de caixa/bolha/fita
+// (essas só avisam se ficar negativo — ver confirmSale) — por isso ficam
+// numa recipe própria em vez de dentro de packagingRecipe.
+function componentsRecipe(prod){
+  const compNames = componentMaterialNames(prod);
+  return productRecipe(prod).filter(r=>compNames.has(r.materialName));
+}
+// Rótulos pro detalhamento de custo — embalagem mostra o tipo escolhido (caixa/
+// envelope/saquinho + bolha/fita se usados), componentes lista cada um com qtd.
+function packagingLabelFor(prod){
+  const extras = [];
+  if((prod.bubbleWrapM||0)>0) extras.push('bolha');
+  if((prod.tapeM||0)>0) extras.push('fita');
+  const base = prod.boxType || 'nenhuma';
+  return extras.length ? `${base} + ${extras.join(' + ')}` : base;
+}
+function componentsLabelFor(prod){
+  return (prod.components||[]).map(comp=>{
+    const mat = state.materials.find(x=>x.id===comp.materialId);
+    return `${num(comp.qty||0,0)}x ${mat?mat.name:'?'}`;
+  }).join(' + ');
 }
 function renderImpressao(){
   const thisMonth = todayStr().slice(0,7);
@@ -2738,7 +2800,8 @@ function updateCalculoExample(){
       <div class="calc-line"><span>Mão de obra (${(prod.laborActions||[]).length ? (prod.laborActions||[]).map(a=>`${a.action||'(sem nome)'} ${a.minutes}min`).join(' + ') : 'nenhuma ação cadastrada'} × ${brl(state.settings.laborHourlyRate||0)}/h)</span><span>${brl(c.laborCost)}</span></div>
       ${(prod.toolsUsed||[]).length ? `<div class="calc-line"><span>Ferramentas (${(prod.toolsUsed||[]).map(t=>{ const tool=state.materials.find(x=>x.id===t.toolId); return `${tool?tool.name:'?'} ${t.uses}x`; }).join(' + ')})</span><span>${brl(c.toolsCost)}</span></div>` : ''}
       <div class="calc-line"><span>Custo de falha (${num(prod.failureMarginPct*100,0)}% sobre material+energia+depreciação+50% da mão de obra)</span><span>${brl(c.failureCost)}</span></div>
-      <div class="calc-line"><span>Embalagem por venda (caixa + plástico bolha + fita — uma vez, não por peça)</span><span>${brl(c.embalagemCost)}</span></div>
+      <div class="calc-line"><span>Embalagem por venda (${packagingLabelFor(prod)} — uma vez, não por peça)</span><span>${brl(c.embalagemCost)}</span></div>
+      ${c.componentsCost>0 ? `<div class="calc-line"><span>Componentes por venda (${componentsLabelFor(prod)})</span><span>${brl(c.componentsCost)}</span></div>` : ''}
       <div class="calc-line total"><span>Custo total${c.saleUnits>1?` — venda de ${c.saleUnits} un`:''}</span><span>${brl(c.totalCost)}</span></div>
       <div class="calc-line total"><span>Preço sugerido${c.saleUnits>1?` — venda de ${c.saleUnits} un`:' — venda própria'} (margem de ${num(c.desiredMarginPct,0)}%)</span><span>${brl(c.suggestedPrice)}</span></div>
       ${platformBreakdownHtml('Mercado Livre', c.suggestedPriceMl, c.mlFeeAmount, c.mlFeePct, prod.mlRealFeePct!=null?'real':'estimada', c.effectiveFreightMl, 'Frete estimado', c.netReceiptMl)}
@@ -2879,6 +2942,10 @@ function deleteSale(id){
     prod.stock += s.qty*saleUnits;
     // packagingRecipe é por VENDA — s.qty já é número de vendas/kits.
     packagingRecipe(prod).forEach(r=>{
+      const mat = materialByName(r.materialName);
+      if(mat) mat.stock += r.qty * s.qty;
+    });
+    componentsRecipe(prod).forEach(r=>{
       const mat = materialByName(r.materialName);
       if(mat) mat.stock += r.qty * s.qty;
     });
@@ -3200,6 +3267,25 @@ function confirmSale(){
       return;
     }
   }
+  // Componentes (parafuso, tag...) também bloqueiam a venda se faltar —
+  // agregado por material, já que dois itens do carrinho podem usar o mesmo.
+  const neededComponents = {};
+  cartItems.forEach(item=>{
+    const prod = state.products.find(p=>p.id===item.productId);
+    if(!prod) return;
+    componentsRecipe(prod).forEach(r=>{
+      if(!r.materialName) return;
+      neededComponents[r.materialName] = (neededComponents[r.materialName]||0) + r.qty*item.qty;
+    });
+  });
+  for(const [matName, needed] of Object.entries(neededComponents)){
+    const mat = materialByName(matName);
+    const avail = mat ? mat.stock : 0;
+    if(avail < needed){
+      toast(`Sem ${matName} em estoque: precisa de ${num(needed,0)}, há ${num(avail,0)}`,'err');
+      return;
+    }
+  }
   const date = document.getElementById('sDate').value || todayStr();
   const plat = document.getElementById('sPlat').value;
   const customerId = document.getElementById('sCustomer').value || null;
@@ -3247,6 +3333,11 @@ function confirmSale(){
     packagingRecipe(prod).forEach(r=>{
       const mat = materialByName(r.materialName);
       if(mat){ mat.stock -= r.qty*item.qty; if(mat.stock<0) boxNegativeWarn = true; }
+    });
+    // Componentes já foram checados no pré-voo acima — só desconta.
+    componentsRecipe(prod).forEach(r=>{
+      const mat = materialByName(r.materialName);
+      if(mat) mat.stock -= r.qty*item.qty;
     });
     applySaleReserveAllocations(allocations);
     if(Object.keys(allocations).length){ settingsTouched = true; totalAllocated += Object.values(allocations).reduce((a,v)=>a+v,0); }
@@ -3372,7 +3463,7 @@ function deleteCustomer(id){
 let editingKitItems = {};
 function openKitModal(){
   if(state.products.length<2){ toast('Cadastre pelo menos 2 produtos antes de criar um kit','err'); return; }
-  const boxOpts = state.materials.filter(m=>m.category==='Embalagem' && m.isBox);
+  const boxOpts = state.materials.filter(m=>m.category==='Embalagem' && (m.isBox||m.isEnvelope||m.isSaquinho));
   const machineOpts = state.settings.machines||[];
   if(boxOpts.length===0 || machineOpts.length===0){ toast('Cadastre ao menos uma caixa e uma impressora antes de criar um kit','err'); return; }
   editingKitItems = {};
@@ -3538,6 +3629,7 @@ function renderProdutos(){
       <th style="cursor:pointer;" onclick="toggleProductSort('name')">Produto${sortArrow(produtosFilter,'name')}</th>
       <th>Filamentos</th>
       <th>Impressora</th>
+      <th>Embalagem</th>
       <th class="right" style="cursor:pointer;" onclick="toggleProductSort('weight')">Peso/un${sortArrow(produtosFilter,'weight')}</th>
       <th class="right" style="cursor:pointer;" onclick="toggleProductSort('time')">Tempo/un${sortArrow(produtosFilter,'time')}</th>
       <th class="right" style="cursor:pointer;" onclick="toggleProductSort('cost')">Custo/venda${sortArrow(produtosFilter,'cost')}</th>
@@ -3554,6 +3646,7 @@ function renderProdutos(){
       <td data-label="Produto">${p.name}${p.kitComponents && p.kitComponents.length ? `<div style="font-size:11px;font-style:italic;color:var(--text-faint);margin-top:2px;">${p.kitComponents.map(kc=>`${kc.qty>1?kc.qty+'x ':''}${kc.productName}`).join(' + ')}</div>` : ''}${(!p.laborActions || !p.laborActions.length) ? `<div style="margin-top:3px;"><span class="badge warn" title="Nenhuma ação de mão de obra cadastrada — o custo de mão de obra desse produto está zerado, o que deixa a margem otimista demais">sem mão de obra</span></div>` : ''}${(p.modelOrigin==='terceiro' && !p.modelLicense) ? `<div style="margin-top:3px;"><span class="badge bad" title="Modelo de terceiro sem licença registrada — confira se pode vender antes de anunciar em ML/Shopee">sem licença do modelo</span></div>` : ''}</td>
       <td title="${filSummary}" data-label="Filamentos">${filSummary}</td>
       <td data-label="Impressora">${c.machine ? c.machine.name : '<span class="badge bad">nenhuma</span>'}</td>
+      <td data-label="Embalagem">${p.boxType || '<span class="badge mut">nenhuma</span>'}</td>
       <td class="right num" data-label="Peso/un">${num(c.unitWeightG,1)}g${c.printUnits>1?`<div style="font-size:10px;font-weight:400;color:var(--text-faint);white-space:nowrap;">leva: ${num(totalWeight(p),0)}g / ${c.printUnits}un</div>`:''}</td>
       <td class="right num" data-label="Tempo/un">${fmtHm(c.unitTimeH)}${c.printUnits>1?`<div style="font-size:10px;font-weight:400;color:var(--text-faint);white-space:nowrap;">leva: ${num(p.timeH,1)}h</div>`:''}</td>
       <td class="right num" data-label="Custo/venda">${brl(c.totalCost)}${c.saleUnits>1?`<div style="font-size:10px;font-weight:400;color:var(--text-faint);white-space:nowrap;">venda de ${c.saleUnits}un</div>`:''}</td>
@@ -3575,7 +3668,7 @@ function renderProdutos(){
       ${(produtosFilter.search||produtosFilter.machineId) ? `<button class="btn ghost sm" onclick="produtosFilter.search=''; produtosFilter.machineId=''; renderContent();">Limpar filtros</button>` : ''}
     </div>`;
   if(list.length===0){
-    return filterBar + `<div class="card"><div class="tbl-wrap tbl-responsive tbl-compact-mobile"><table>${theadHtml}<tbody><tr><td colspan="12" style="text-align:center;color:var(--text-faint);padding:20px;">Nenhum produto encontrado</td></tr></tbody></table></div></div>`;
+    return filterBar + `<div class="card"><div class="tbl-wrap tbl-responsive tbl-compact-mobile"><table>${theadHtml}<tbody><tr><td colspan="13" style="text-align:center;color:var(--text-faint);padding:20px;">Nenhum produto encontrado</td></tr></tbody></table></div></div>`;
   }
   const groups = {};
   list.forEach(item=>{
@@ -4340,20 +4433,21 @@ function openProductModal(id){
   currentPreviewFn = updateProductPreview;
   const editing = !!id;
   const filamentOpts = state.materials.filter(m=>m.category==='Filamento');
-  const boxOpts = state.materials.filter(m=>m.category==='Embalagem' && m.isBox);
+  const boxOpts = state.materials.filter(m=>m.category==='Embalagem' && (m.isBox||m.isEnvelope||m.isSaquinho));
   const machineOpts = state.settings.machines||[];
   if(filamentOpts.length===0 || boxOpts.length===0){
-    toast('Cadastre ao menos um filamento e uma caixa em Estoque antes de criar ou editar produtos', 'err');
+    toast('Cadastre ao menos um filamento e uma embalagem (caixa, envelope ou saquinho) em Estoque antes de criar ou editar produtos', 'err');
     return;
   }
   if(machineOpts.length===0){
     toast('Cadastre ao menos uma impressora em Caixa → Configurar → Impressoras antes de criar ou editar produtos', 'err');
     return;
   }
-  const p = editing ? state.products.find(x=>x.id===id) : { name:'', filaments:[{materialName:filamentOpts[0].name,weightG:100}], timeH:3, bubbleWrapM:0.5, tapeM:0.5, boxType:boxOpts[0].name, failureMarginPct:0.10, practicedPrice:0, stock:0, machineId:machineOpts[0].id, unitsPerPrint:1, unitsPerSale:1, marketPriceOverride:null };
+  const p = editing ? state.products.find(x=>x.id===id) : { name:'', filaments:[{materialName:filamentOpts[0].name,weightG:100}], timeH:3, bubbleWrapM:0.5, tapeM:0.5, boxType:boxOpts[0].name, failureMarginPct:0.10, practicedPrice:0, stock:0, machineId:machineOpts[0].id, unitsPerPrint:1, unitsPerSale:1, marketPriceOverride:null, components:[] };
   editingFilaments = JSON.parse(JSON.stringify(p.filaments && p.filaments.length ? p.filaments : [{materialName:filamentOpts[0].name,weightG:100}]));
   editingLaborActions = JSON.parse(JSON.stringify(p.laborActions||[]));
   editingToolsUsed = JSON.parse(JSON.stringify(p.toolsUsed||[]));
+  editingComponents = JSON.parse(JSON.stringify(p.components||[]));
   editingPhotoData = p.photo || null;
   editingProductMlFee = p.mlRealFeePct!=null ? p.mlRealFeePct : null;
   editingProductMlFeeUpdatedAt = p.mlRealFeeUpdatedAt || null;
@@ -4419,7 +4513,7 @@ function openProductModal(id){
       <div class="field"><label>Impressora usada</label><select id="pMachine" onchange="updateProductPreview()">
         ${machineOpts.map(m=>`<option value="${m.id}" ${(p.machineId||machineOpts[0].id)===m.id?'selected':''}>${m.name}</option>`).join('')}
       </select></div>
-      <div class="field"><label>Tipo de caixa</label><select id="pBox" onchange="updateBoxFitStatus(); updateProductPreview()">
+      <div class="field"><label>Embalagem</label><select id="pBox" onchange="updateBoxFitStatus(); updateProductPreview()">
         ${boxes.map(b=>`<option value="${b.name}" ${p.boxType===b.name?'selected':''}>${b.name}</option>`).join('')}
       </select></div>
     </div>
@@ -4454,6 +4548,10 @@ function openProductModal(id){
     <div id="toolsUsedRows"></div>
     <button class="btn ghost sm" style="margin-bottom:14px;" onclick="addToolsUsedRow()">+ Adicionar ferramenta</button>
 
+    <div class="field" style="margin-bottom:6px;"><label>Componentes inclusos na venda (parafuso, ímã, tag...)</label></div>
+    <div id="componentRows"></div>
+    <button class="btn ghost sm" style="margin-bottom:14px;" onclick="addComponentRow()">+ Adicionar componente</button>
+
     <div class="row2">
       <div class="field"><label>Frete aproximado — Mercado Livre (R$)</label><input type="number" id="pFreightMl" value="${p.estimatedFreightMl||''}" step="0.01" placeholder="opcional" oninput="updateProductPreview()"></div>
       <div class="field"><label>Frete aproximado — Shopee (R$)</label><input type="number" id="pFreightShopee" value="${p.estimatedFreightShopee||''}" step="0.01" placeholder="opcional" oninput="this.dataset.touched='1'; updateProductPreview()"></div>
@@ -4476,6 +4574,7 @@ function openProductModal(id){
   renderFilamentRows();
   renderLaborActionRows();
   renderToolsUsedRows();
+  renderComponentsRows();
   renderPhotoPreview();
   updateBoxFitStatus();
   updateMarketHint();
@@ -4484,6 +4583,7 @@ function openProductModal(id){
 let editingFilaments = [];
 let editingLaborActions = [];
 let editingToolsUsed = [];
+let editingComponents = [];
 let editingPhotoData = null;
 let editingProductMlFee = null;
 let editingProductMlFeeUpdatedAt = null;
@@ -4631,6 +4731,40 @@ function removeToolsUsedRow(i){
   renderToolsUsedRows();
   refreshCurrentPreview();
 }
+function renderComponentsRows(){
+  const el = document.getElementById('componentRows');
+  if(!el) return;
+  const compOptions = state.materials.filter(m=>m.category==='Componentes');
+  if(compOptions.length===0){
+    el.innerHTML = `<div class="field hint" style="margin-top:0;">Nenhum componente cadastrado ainda — cadastre em Estoque (categoria Componentes) pra poder usar aqui.</div>`;
+    return;
+  }
+  el.innerHTML = editingComponents.map((comp,i)=>`
+    <div style="display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,0.7fr) minmax(0,1.1fr) 28px;gap:8px;align-items:center;margin-bottom:8px;">
+      <select style="min-width:0;" onchange="editingComponents[${i}].materialId=this.value; refreshCurrentPreview();">
+        ${compOptions.map(co=>`<option value="${co.id}" ${comp.materialId===co.id?'selected':''}>${co.name}</option>`).join('')}
+      </select>
+      <input type="number" step="1" value="${comp.qty}" placeholder="qtd" style="min-width:0;" oninput="editingComponents[${i}].qty=parseFloat(this.value)||0; refreshCurrentPreview();">
+      <select style="min-width:0;" onchange="editingComponents[${i}].scope=this.value; refreshCurrentPreview();">
+        <option value="peca" ${comp.scope==='peca'?'selected':''}>Por peça (× un. por venda)</option>
+        <option value="venda" ${comp.scope==='venda'?'selected':''}>Uma vez por venda</option>
+      </select>
+      <button class="btn ghost sm" title="Remover" style="padding:6px 8px;" onclick="removeComponentRow(${i})">×</button>
+    </div>
+  `).join('');
+}
+function addComponentRow(){
+  const compOptions = state.materials.filter(m=>m.category==='Componentes');
+  if(compOptions.length===0){ toast('Cadastre um componente em Estoque primeiro','err'); return; }
+  editingComponents.push({materialId:compOptions[0].id, qty:1, scope:'peca'});
+  renderComponentsRows();
+  refreshCurrentPreview();
+}
+function removeComponentRow(i){
+  editingComponents.splice(i,1);
+  renderComponentsRows();
+  refreshCurrentPreview();
+}
 function productCategorySuggestions(){
   return Array.from(new Set(state.products.map(p=>p.category).filter(Boolean))).sort((a,b)=>a.localeCompare(b,'pt-BR'));
 }
@@ -4682,6 +4816,7 @@ function readProductForm(){
     failureMarginPct: (parseFloat(document.getElementById('pFail').value)||0)/100,
     laborActions: editingLaborActions,
     toolsUsed: editingToolsUsed,
+    components: editingComponents,
     unitsPerPrint: Math.max(1, parseFloat(document.getElementById('pUnitsPerPrint').value)||1),
     unitsPerSale: Math.max(1, parseFloat(document.getElementById('pUnitsPerSale').value)||1),
     marketPriceOverride: parseFloat(document.getElementById('pMarketOverride').value) || null,
@@ -4741,12 +4876,12 @@ function updateBoxFitStatus(){
   const box = materialByName(boxName);
   const fits = boxFitsDimensions(box, lengthCm, widthCm, heightCm);
   if(fits===true){
-    statusEl.innerHTML = `<span style="color:var(--teal);">✓ Cabe na caixa selecionada</span>`;
+    statusEl.innerHTML = `<span style="color:var(--teal);">✓ Cabe na embalagem selecionada</span>`;
   } else if(fits===false){
     const best = bestFittingBox(lengthCm, widthCm, heightCm);
     statusEl.innerHTML = best
-      ? `<span style="color:var(--red);">⚠️ Não cabe nessa caixa — sugerido: ${best.name}</span>`
-      : `<span style="color:var(--red);">⚠️ Nenhuma caixa cadastrada é grande o suficiente — cadastre as medidas de uma caixa maior em Estoque</span>`;
+      ? `<span style="color:var(--red);">⚠️ Não cabe nessa embalagem — sugerido: ${best.name}</span>`
+      : `<span style="color:var(--red);">⚠️ Nenhuma embalagem cadastrada é grande o suficiente — cadastre as medidas de uma embalagem maior em Estoque</span>`;
   } else {
     statusEl.textContent = '';
   }
@@ -4804,11 +4939,12 @@ function updateProductPreview(){
     <div class="calc-line"><span>Tempo por peça</span><span>${fmtHm(c.unitTimeH)}${c.printUnits>1?` <span style="color:var(--text-faint);font-size:11px;">(leva: ${num(form.timeH,1)}h)</span>`:''}</span></div>
     <div class="calc-line"><span>Custo material (por peça)</span><span>${brl(c.materialCost)}</span></div>
     <div class="calc-line"><span>Custo energia (por peça)</span><span>${brl(c.energyCost)}</span></div>
-    <div class="calc-line"><span>Embalagem (caixa + bolha + fita — por venda)</span><span>${brl(c.embalagemCost)}</span></div>
+    <div class="calc-line"><span>Embalagem (${packagingLabelFor(form)}) — por venda</span><span>${brl(c.embalagemCost)}</span></div>
     <div class="calc-line"><span>Depreciação (por peça, ${c.machine?c.machine.name:'sem impressora'})</span><span>${brl(c.depreciation)}</span></div>
     <div class="calc-line"><span>Manutenção (por peça)</span><span>${brl(c.maintenance)}</span></div>
     <div class="calc-line"><span>Mão de obra (por peça)</span><span>${brl(c.laborCost)}</span></div>
     ${c.toolsCost>0 ? `<div class="calc-line"><span>Ferramentas (por peça)</span><span>${brl(c.toolsCost)}</span></div>` : ''}
+    ${c.componentsCost>0 ? `<div class="calc-line"><span>Componentes (${componentsLabelFor(form)}) — por venda</span><span>${brl(c.componentsCost)}</span></div>` : ''}
     <div class="calc-line"><span>Custo de falha (por peça)</span><span>${brl(c.failureCost)}</span></div>
     <div class="calc-line total"><span>Custo total — por venda${c.saleUnits>1?` de ${c.saleUnits} un`:''}</span><span>${brl(c.totalCost)}</span></div>
     ${marketRangeLine}
@@ -4842,7 +4978,7 @@ function confirmProduct(id){
   if(dup){ toast(`Já existe um produto chamado "${dup.name}" — use outro nome`,'err'); return; }
   if(form.lengthCm>0 && form.widthCm>0 && form.heightCm>0){
     const fits = boxFitsDimensions(materialByName(form.boxType), form.lengthCm, form.widthCm, form.heightCm);
-    if(fits===false){ toast('Esse produto não cabe na caixa selecionada — escolha outra caixa ou ajuste as medidas','err'); return; }
+    if(fits===false){ toast('Esse produto não cabe na embalagem selecionada — escolha outra ou ajuste as medidas','err'); return; }
   }
   const priceMlRaw = document.getElementById('pPriceMl').value;
   const priceShopeeRaw = document.getElementById('pPriceShopee').value;
@@ -5184,7 +5320,7 @@ function openCustomOrderModal(id){
   const o = state.customOrders.find(x=>x.id===id);
   if(!o) return;
   const filamentOpts = state.materials.filter(m=>m.category==='Filamento');
-  const boxOpts = state.materials.filter(m=>m.category==='Embalagem' && m.isBox);
+  const boxOpts = state.materials.filter(m=>m.category==='Embalagem' && (m.isBox||m.isEnvelope||m.isSaquinho));
   const machineOpts = state.settings.machines||[];
   editingFilaments = JSON.parse(JSON.stringify(o.filaments||[]));
   editingLaborActions = JSON.parse(JSON.stringify(o.laborActions||[]));
@@ -5473,7 +5609,7 @@ function updateCustomOrderPreview(){
     <div class="calc-line"><span>Peso total</span><span>${num(totalWeight(form),0)}g</span></div>
     <div class="calc-line"><span>Custo material</span><span>${brl(c.materialCost)}</span></div>
     <div class="calc-line"><span>Custo energia</span><span>${brl(c.energyCost)}</span></div>
-    <div class="calc-line"><span>Embalagem (caixa + bolha + fita)</span><span>${brl(c.embalagemCost)}</span></div>
+    <div class="calc-line"><span>Embalagem (${packagingLabelFor(form)})</span><span>${brl(c.embalagemCost)}</span></div>
     <div class="calc-line"><span>Depreciação (${c.machine?c.machine.name:'sem impressora'})</span><span>${brl(c.depreciation)}</span></div>
     <div class="calc-line"><span>Manutenção</span><span>${brl(c.maintenance)}</span></div>
     <div class="calc-line"><span>Mão de obra</span><span>${brl(c.laborCost)}</span></div>
@@ -5695,6 +5831,7 @@ function materialCard(m){
     <div class="progress"><div style="width:${p}%;background:${color};"></div></div>
     <div style="font-size:11px;color:var(--text-faint);margin-top:5px;">Mínimo: ${num(m.lowStock,0)} ${m.unit}</div>
     ${m.isBox && m.lengthCm>0 && m.widthCm>0 && m.heightCm>0 ? `<div style="font-size:11px;color:var(--text-faint);margin-top:2px;">Medidas internas: ${num(m.lengthCm,1)}×${num(m.widthCm,1)}×${num(m.heightCm,1)} cm</div>` : ''}
+    ${(m.isEnvelope||m.isSaquinho) && m.lengthCm>0 && m.widthCm>0 ? `<div style="font-size:11px;color:var(--text-faint);margin-top:2px;">Medidas internas: ${num(m.lengthCm,1)}×${num(m.widthCm,1)} cm (até ${FLAT_PACKAGING_MAX_HEIGHT_CM}cm de altura)</div>` : ''}
     ${(m.isBubbleWrap||m.isTape) && m.widthCm>0 ? `<div style="font-size:11px;color:var(--text-faint);margin-top:2px;">Largura do rolo: ${num(m.widthCm,1)} cm</div>` : ''}
     ${m.category==='Ferramentas' && m.usefulLifeUses>0 ? `<div style="font-size:11px;color:var(--text-faint);margin-top:2px;">Vida útil estimada: ${num(m.usefulLifeUses,0)} usos</div>` : ''}
     ${sugg ? `<div style="font-size:11px;color:var(--amber);margin-top:4px;">Sugestão: comprar ~${num(sugg.suggested,m.unit==='un'?0:1)} ${m.unit}</div>` : ''}
@@ -5780,14 +5917,14 @@ function deleteMaterial(id){
 }
 function openMaterialModal(id){
   const editing = !!id;
-  const m = editing ? state.materials.find(x=>x.id===id) : { name:'', category:'Filamento', unit:'g', costPerUnit:0, stock:0, lowStock:0, purchasePrice:0, purchaseQty:1, purchaseUnit:'g', isBox:false, isBubbleWrap:false, isTape:false, materialType:'', brand:'', color:'#cccccc', colorName:'', isDualColor:false, color2:'#cccccc', colorName2:'', toolType:'', usefulLifeUses:0 };
-  const packagingType = m.isBox ? 'caixa' : m.isBubbleWrap ? 'bolha' : m.isTape ? 'fita' : '';
+  const m = editing ? state.materials.find(x=>x.id===id) : { name:'', category:'Filamento', unit:'g', costPerUnit:0, stock:0, lowStock:0, purchasePrice:0, purchaseQty:1, purchaseUnit:'g', isBox:false, isEnvelope:false, isSaquinho:false, isBubbleWrap:false, isTape:false, materialType:'', brand:'', color:'#cccccc', colorName:'', isDualColor:false, color2:'#cccccc', colorName2:'', toolType:'', usefulLifeUses:0 };
+  const packagingType = m.isBox ? 'caixa' : m.isEnvelope ? 'envelope' : m.isSaquinho ? 'saquinho' : m.isBubbleWrap ? 'bolha' : m.isTape ? 'fita' : '';
   const hideName = m.category==='Filamento' || (m.category==='Embalagem' && packagingType==='caixa');
   showModal(editing?'Editar matéria-prima':'Nova matéria-prima', `
-    <div class="field" id="mNameField" style="display:${hideName?'none':'block'};"><label>Nome</label><input id="mName" value="${m.name}" placeholder="Ex: Fita Adesiva 45mm"></div>
+    <div class="field" id="mNameField" style="display:${hideName?'none':'block'};"><label>Nome</label><input id="mName" value="${m.name}" placeholder="Ex: Envelope 15x25, Parafuso 3,5x40..."></div>
     <div class="row2">
       <div class="field"><label>Categoria</label><select id="mCat" onchange="onMaterialCategoryChange()">
-        ${['Filamento','Embalagem','Ferramentas','Outros'].map(c=>`<option ${m.category===c?'selected':''}>${c}</option>`).join('')}
+        ${['Filamento','Embalagem','Ferramentas','Componentes','Outros'].map(c=>`<option ${m.category===c?'selected':''}>${c}</option>`).join('')}
       </select></div>
       <div class="field"><label>Unidade de estoque</label><select id="mUnit">
         ${['g','kg','un','m'].map(u=>`<option ${m.unit===u?'selected':''}>${u}</option>`).join('')}
@@ -5833,6 +5970,8 @@ function openMaterialModal(id){
       <div class="field"><label>Tipo de embalagem</label><select id="mPackagingType" onchange="onPackagingTypeChange()">
         <option value="">Selecione...</option>
         <option value="caixa" ${packagingType==='caixa'?'selected':''}>Caixa</option>
+        <option value="envelope" ${packagingType==='envelope'?'selected':''}>Envelope de segurança</option>
+        <option value="saquinho" ${packagingType==='saquinho'?'selected':''}>Saquinho</option>
         <option value="bolha" ${packagingType==='bolha'?'selected':''}>Plástico Bolha</option>
         <option value="fita" ${packagingType==='fita'?'selected':''}>Fita Adesiva</option>
       </select></div>
@@ -5846,6 +5985,13 @@ function openMaterialModal(id){
           <div class="field"><label>Largura interna (cm)</label><input type="number" id="mWidthCm" value="${m.widthCm||''}" step="0.1" placeholder="opcional"></div>
           <div class="field"><label>Altura interna (cm)</label><input type="number" id="mHeightCm" value="${m.heightCm||''}" step="0.1" placeholder="opcional"></div>
         </div>
+      </div>
+      <div id="mFlatDimsBlock" style="display:${(packagingType==='envelope'||packagingType==='saquinho')?'block':'none'};margin:0 0 10px;">
+        <div class="row2">
+          <div class="field"><label>Comprimento interno (cm)</label><input type="number" id="mFlatLengthCm" value="${m.lengthCm||''}" step="0.1" placeholder="opcional"></div>
+          <div class="field"><label>Largura interna (cm)</label><input type="number" id="mFlatWidthCm" value="${m.widthCm||''}" step="0.1" placeholder="opcional"></div>
+        </div>
+        <div class="field hint" style="margin-top:-8px;">Sem altura própria — embalagem achatada e flexível. A seleção automática só oferece essa opção pra peças de até ${FLAT_PACKAGING_MAX_HEIGHT_CM}cm de altura.</div>
       </div>
       <div id="mRollWidthBlock" style="display:${(packagingType==='bolha'||packagingType==='fita')?'block':'none'};margin:0 0 10px;">
         <div class="field"><label>Largura do rolo (cm)</label><input type="number" id="mRollWidthCm" value="${m.widthCm||''}" step="0.1" placeholder="opcional"></div>
@@ -5892,6 +6038,7 @@ function onMaterialCategoryChange(){
 function onPackagingTypeChange(){
   const val = document.getElementById('mPackagingType').value;
   document.getElementById('mBoxDimsBlock').style.display = val==='caixa' ? 'block' : 'none';
+  document.getElementById('mFlatDimsBlock').style.display = (val==='envelope'||val==='saquinho') ? 'block' : 'none';
   document.getElementById('mRollWidthBlock').style.display = (val==='bolha'||val==='fita') ? 'block' : 'none';
   updateMaterialNameFieldVisibility();
 }
@@ -5951,7 +6098,7 @@ function confirmMaterial(id){
   const category = document.getElementById('mCat').value;
   let name;
   let materialType='', brand='', color='', colorName='', isDualColor=false, color2='', colorName2='';
-  let isBox=false, isBubbleWrap=false, isTape=false, lengthCm=0, widthCm=0, heightCm=0;
+  let isBox=false, isEnvelope=false, isSaquinho=false, isBubbleWrap=false, isTape=false, lengthCm=0, widthCm=0, heightCm=0;
   let toolType='', usefulLifeUses=0;
 
   if(category==='Filamento'){
@@ -5968,7 +6115,7 @@ function confirmMaterial(id){
     name = computeFilamentName(materialType, colorName, isDualColor, colorName2);
   } else if(category==='Embalagem'){
     const pkg = document.getElementById('mPackagingType').value;
-    isBox = pkg==='caixa'; isBubbleWrap = pkg==='bolha'; isTape = pkg==='fita';
+    isBox = pkg==='caixa'; isEnvelope = pkg==='envelope'; isSaquinho = pkg==='saquinho'; isBubbleWrap = pkg==='bolha'; isTape = pkg==='fita';
     if(isBox){
       const size = document.getElementById('mBoxSize').value;
       if(!size){ toast('Escolha o tamanho da caixa','err'); return; }
@@ -5979,6 +6126,10 @@ function confirmMaterial(id){
     } else {
       name = document.getElementById('mName').value.trim();
       if(!name){ toast('Informe o nome','err'); return; }
+      if(isEnvelope || isSaquinho){
+        lengthCm = parseFloat(document.getElementById('mFlatLengthCm').value)||0;
+        widthCm = parseFloat(document.getElementById('mFlatWidthCm').value)||0;
+      }
       if(isBubbleWrap || isTape){
         widthCm = parseFloat(document.getElementById('mRollWidthCm').value)||0;
       }
@@ -6003,7 +6154,7 @@ function confirmMaterial(id){
     name, category, unit: document.getElementById('mUnit').value,
     purchasePrice, purchaseQty, costPerUnit: purchasePrice/purchaseQty,
     stock, lowStock,
-    isBox, isBubbleWrap, isTape, lengthCm, widthCm, heightCm,
+    isBox, isEnvelope, isSaquinho, isBubbleWrap, isTape, lengthCm, widthCm, heightCm,
     materialType, brand, color, colorName, isDualColor, color2, colorName2,
     toolType, usefulLifeUses,
   };

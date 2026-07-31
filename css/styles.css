@@ -260,11 +260,11 @@ tbody tr:hover{background:rgba(0,0,0,0.025);}
    desktops mais estreitos (não só no celular), pra tabela de Produtos caber
    sem rolar na horizontal — mesmo critério de "secundário" já usado abaixo,
    só que aplicado a th/td por posição, já que no desktop a tabela continua
-   <table> de verdade (sem data-label visível/cards). Colunas 3–8 = Filamentos,
-   Impressora, Peso/un, Tempo/un, Custo/venda, Preço sugerido/venda. */
+   <table> de verdade (sem data-label visível/cards). Colunas 3–9 = Filamentos,
+   Impressora, Embalagem, Peso/un, Tempo/un, Custo/venda, Preço sugerido/venda. */
 @media(min-width:641px) and (max-width:1700px){
-  .tbl-compact-mobile th:nth-child(n+3):nth-child(-n+8),
-  .tbl-compact-mobile td:nth-child(n+3):nth-child(-n+8){display:none;}
+  .tbl-compact-mobile th:nth-child(n+3):nth-child(-n+9),
+  .tbl-compact-mobile td:nth-child(n+3):nth-child(-n+9){display:none;}
 }
 
 /* Tabelas que viram cards em telas de celular, em vez de rolar na horizontal */
@@ -278,6 +278,7 @@ tbody tr:hover{background:rgba(0,0,0,0.025);}
   .tbl-responsive tbody td[data-label]::before{content:attr(data-label);font-size:10.5px;color:var(--text-faint);font-weight:600;text-transform:uppercase;letter-spacing:.03em;text-align:left;margin-right:10px;white-space:nowrap;}
   .tbl-compact-mobile tbody td[data-label="Filamentos"],
   .tbl-compact-mobile tbody td[data-label="Impressora"],
+  .tbl-compact-mobile tbody td[data-label="Embalagem"],
   .tbl-compact-mobile tbody td[data-label="Peso/un"],
   .tbl-compact-mobile tbody td[data-label="Tempo/un"],
   .tbl-compact-mobile tbody td[data-label="Custo/venda"],
