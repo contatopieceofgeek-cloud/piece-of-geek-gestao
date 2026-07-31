@@ -3617,7 +3617,7 @@ function renderProdutos(){
       case 'weight': return c.unitWeightG;
       case 'time': return c.unitTimeH;
       case 'cost': return c.totalCost;
-      case 'suggested': return c.suggestedPrice;
+      case 'floor': return minPriceForTarget(c, 'Mercado Livre', p) || 0;
       case 'practiced': return c.practicedPriceMl;
       case 'margin': return c.marginMlPct;
       case 'stock': return p.stock;
@@ -3634,7 +3634,7 @@ function renderProdutos(){
       <th class="right" style="cursor:pointer;" onclick="toggleProductSort('weight')">Peso/un${sortArrow(produtosFilter,'weight')}</th>
       <th class="right" style="cursor:pointer;" onclick="toggleProductSort('time')">Tempo/un${sortArrow(produtosFilter,'time')}</th>
       <th class="right" style="cursor:pointer;" onclick="toggleProductSort('cost')">Custo/venda${sortArrow(produtosFilter,'cost')}</th>
-      <th class="right" style="cursor:pointer;" onclick="toggleProductSort('suggested')">Preço sugerido/venda${sortArrow(produtosFilter,'suggested')}</th>
+      <th class="right" style="cursor:pointer;" onclick="toggleProductSort('floor')" title="Preço mínimo pra bater a meta de R$/hora-máquina configurada — abaixo disso, a venda não cobre o tempo de impressora.">Piso p/ meta R$/hora${sortArrow(produtosFilter,'floor')}</th>
       <th class="right" style="cursor:pointer;" onclick="toggleProductSort('practiced')">Preço praticado/venda${sortArrow(produtosFilter,'practiced')}</th>
       <th class="right" style="cursor:pointer;" onclick="toggleProductSort('margin')">Margem${sortArrow(produtosFilter,'margin')}</th>
       <th class="right" style="cursor:pointer;" onclick="toggleProductSort('stock')">Estoque${sortArrow(produtosFilter,'stock')}</th>
@@ -3642,6 +3642,8 @@ function renderProdutos(){
     </tr></thead>`;
   const rowHtml = ({p,c}) => {
     const filSummary = (p.filaments||[]).map(f=>`${f.materialName} ${num(f.weightG,0)}g`).join(' + ');
+    const floorMl = minPriceForTarget(c, 'Mercado Livre', p);
+    const floorShopee = minPriceForTarget(c, 'Shopee', p);
     return `<tr>
       <td data-label="Foto">${p.photo ? `<img src="${p.photo}" alt="${p.name}" style="width:36px;height:36px;object-fit:cover;border-radius:6px;">` : `<div style="width:36px;height:36px;border-radius:6px;background:var(--panel-2);"></div>`}</td>
       <td data-label="Produto">${p.name}${p.kitComponents && p.kitComponents.length ? `<div style="font-size:11px;font-style:italic;color:var(--text-faint);margin-top:2px;">${p.kitComponents.map(kc=>`${kc.qty>1?kc.qty+'x ':''}${kc.productName}`).join(' + ')}</div>` : ''}${(!p.laborActions || !p.laborActions.length) ? `<div style="margin-top:3px;"><span class="badge warn" title="Nenhuma ação de mão de obra cadastrada — o custo de mão de obra desse produto está zerado, o que deixa a margem otimista demais">sem mão de obra</span></div>` : ''}${(p.modelOrigin==='terceiro' && !p.modelLicense) ? `<div style="margin-top:3px;"><span class="badge bad" title="Modelo de terceiro sem licença registrada — confira se pode vender antes de anunciar em ML/Shopee">sem licença do modelo</span></div>` : ''}</td>
@@ -3651,7 +3653,7 @@ function renderProdutos(){
       <td class="right num" data-label="Peso/un">${num(c.unitWeightG,1)}g${c.printUnits>1?`<div style="font-size:10px;font-weight:400;color:var(--text-faint);white-space:nowrap;">leva: ${num(totalWeight(p),0)}g / ${c.printUnits}un</div>`:''}</td>
       <td class="right num" data-label="Tempo/un">${fmtHm(c.unitTimeH)}${c.printUnits>1?`<div style="font-size:10px;font-weight:400;color:var(--text-faint);white-space:nowrap;">leva: ${num(p.timeH,1)}h</div>`:''}</td>
       <td class="right num" data-label="Custo/venda">${brl(c.totalCost)}${c.saleUnits>1?`<div style="font-size:10px;font-weight:400;color:var(--text-faint);white-space:nowrap;">venda de ${c.saleUnits}un</div>`:''}</td>
-      <td class="right num" data-label="Preço sugerido/venda">${brl(c.suggestedPrice)}</td>
+      <td class="right num" data-label="Piso p/ meta R$/hora">${floorMl!=null?brl(floorMl):'—'}<div style="font-size:10px;font-weight:400;color:var(--text-faint);white-space:nowrap;">Shopee ${floorShopee!=null?brl(floorShopee):'—'}</div></td>
       <td class="right num" data-label="Preço praticado/venda">${brl(c.practicedPriceMl)}<div style="font-size:10px;font-weight:400;color:var(--text-faint);white-space:nowrap;">Shopee ${brl(c.practicedPriceShopee)}${extraListingPlatforms().map(plat=>` · ${plat.name} ${brl(c.practicedPriceExtra[plat.id])}`).join('')}</div></td>
       <td class="right num" data-label="Margem" style="color:${c.marginMlValue<0?'var(--red)':'var(--green)'}">${pct(c.marginMlPct)}<div style="font-size:10px;font-weight:400;white-space:nowrap;">Shopee <span style="color:${c.marginShopeePct<(state.settings.minMarginPct!=null?state.settings.minMarginPct:25)?'var(--red)':'var(--text-faint)'}">${pct(c.marginShopeePct)}</span></div></td>
       <td class="right num" data-label="Estoque">${p.stock<=0?`<span class="badge mut">0</span>`:num(p.stock,0)}</td>

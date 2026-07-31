@@ -261,7 +261,7 @@ tbody tr:hover{background:rgba(0,0,0,0.025);}
    sem rolar na horizontal — mesmo critério de "secundário" já usado abaixo,
    só que aplicado a th/td por posição, já que no desktop a tabela continua
    <table> de verdade (sem data-label visível/cards). Colunas 3–9 = Filamentos,
-   Impressora, Embalagem, Peso/un, Tempo/un, Custo/venda, Preço sugerido/venda. */
+   Impressora, Embalagem, Peso/un, Tempo/un, Custo/venda, Piso p/ meta R$/hora. */
 @media(min-width:641px) and (max-width:1700px){
   .tbl-compact-mobile th:nth-child(n+3):nth-child(-n+9),
   .tbl-compact-mobile td:nth-child(n+3):nth-child(-n+9){display:none;}
@@ -282,7 +282,7 @@ tbody tr:hover{background:rgba(0,0,0,0.025);}
   .tbl-compact-mobile tbody td[data-label="Peso/un"],
   .tbl-compact-mobile tbody td[data-label="Tempo/un"],
   .tbl-compact-mobile tbody td[data-label="Custo/venda"],
-  .tbl-compact-mobile tbody td[data-label="Preço sugerido/venda"]{display:none;}
+  .tbl-compact-mobile tbody td[data-label="Piso p/ meta R$/hora"]{display:none;}
   .tbl-responsive tbody td:has(button){justify-content:flex-end;padding-top:10px;}
 }
 @media print{
