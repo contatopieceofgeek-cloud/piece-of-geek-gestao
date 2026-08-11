@@ -25,58 +25,39 @@ function addMonths(ym, delta){
 const localDateStr = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 const todayStr = () => localDateStr(new Date());
 currentMonth = todayStr().slice(0,7);
-const bizName = () => (state.settings.businessName && state.settings.businessName.trim()) || 'Piece of Geek 3D';
+// Fallback NEUTRO de propósito: esse texto aparece na sidebar, no catálogo, no
+// recibo e como "marca" no anúncio do ML — pôr o nome de um negócio real aqui
+// carimba esse nome em todo mundo que ainda não preencheu o campo.
+const bizName = () => (state.settings.businessName && state.settings.businessName.trim()) || 'Meu Negócio';
+// Nome de arquivo dos exports, derivado do negócio de quem está usando.
+const bizSlug = () => stripAccents(bizName()).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,40) || 'gestao';
 const bizLogoSrc = () => state.settings.businessLogo || 'img/logo.png';
 
-/* ===================== SEED DATA ===================== */
-function seedData(){
+/* ===================== DADOS INICIAIS =====================
+   defaultData() é o que uma conta NOVA recebe: andaime neutro, sem nenhum
+   dado de negócio real. As matérias-primas vêm cadastradas só pra poupar a
+   parte chata (categoria, flags de embalagem, medidas) — com preço ZERO, pra
+   o usuário preencher o que ele realmente pagou. Nada aqui pode conter nome,
+   contato, produto ou custo de um negócio específico: isso vazaria os dados
+   de um cliente pra todos os outros. Dado de demonstração fica em
+   sampleData(), que só entra se a pessoa pedir. */
+function defaultData(){
   const materials = [
-    {id:uid(),name:'PLA',category:'Filamento',unit:'g',costPerUnit:0.08945,stock:0,lowStock:200,purchasePrice:89.45,purchaseQty:1000,purchaseUnit:'g'},
-    {id:uid(),name:'PLA Branco',category:'Filamento',unit:'g',costPerUnit:0.08937,stock:0,lowStock:200,purchasePrice:178.74,purchaseQty:2000,purchaseUnit:'g'},
-    {id:uid(),name:'PLA Preto',category:'Filamento',unit:'g',costPerUnit:0.0841,stock:0,lowStock:200,purchasePrice:168.20,purchaseQty:2000,purchaseUnit:'g'},
-    {id:uid(),name:'PLA Duo Color',category:'Filamento',unit:'g',costPerUnit:0.12095,stock:0,lowStock:200,purchasePrice:120.95,purchaseQty:1000,purchaseUnit:'g'},
-    {id:uid(),name:'Plástico Bolha',category:'Embalagem',unit:'m',costPerUnit:0.5453,stock:0,lowStock:5,purchasePrice:54.53,purchaseQty:100,purchaseUnit:'m',isBubbleWrap:true},
-    {id:uid(),name:'Caixa Pequena',category:'Embalagem',unit:'un',costPerUnit:1.4396,stock:0,lowStock:5,purchasePrice:35.99,purchaseQty:25,purchaseUnit:'un',isBox:true},
-    {id:uid(),name:'Caixa Média',category:'Embalagem',unit:'un',costPerUnit:1.9112,stock:0,lowStock:5,purchasePrice:47.78,purchaseQty:25,purchaseUnit:'un',isBox:true},
-    {id:uid(),name:'Caixa Grande',category:'Embalagem',unit:'un',costPerUnit:4.94,stock:0,lowStock:3,purchasePrice:49.40,purchaseQty:10,purchaseUnit:'un',isBox:true},
+    {id:uid(),name:'PLA Preto',category:'Filamento',unit:'g',costPerUnit:0,stock:0,lowStock:200,purchasePrice:0,purchaseQty:1000,purchaseUnit:'g',materialType:'PLA',colorName:'Preto',color:'#222222'},
+    {id:uid(),name:'PLA Branco',category:'Filamento',unit:'g',costPerUnit:0,stock:0,lowStock:200,purchasePrice:0,purchaseQty:1000,purchaseUnit:'g',materialType:'PLA',colorName:'Branco',color:'#f2f2f2'},
+    {id:uid(),name:'Plástico Bolha',category:'Embalagem',unit:'m',costPerUnit:0,stock:0,lowStock:5,purchasePrice:0,purchaseQty:100,purchaseUnit:'m',isBubbleWrap:true},
+    {id:uid(),name:'Fita Adesiva',category:'Embalagem',unit:'m',costPerUnit:0,stock:0,lowStock:5,purchasePrice:0,purchaseQty:50,purchaseUnit:'m',isTape:true},
+    {id:uid(),name:'Caixa Pequena',category:'Embalagem',unit:'un',costPerUnit:0,stock:0,lowStock:5,purchasePrice:0,purchaseQty:25,purchaseUnit:'un',isBox:true},
+    {id:uid(),name:'Caixa Média',category:'Embalagem',unit:'un',costPerUnit:0,stock:0,lowStock:5,purchasePrice:0,purchaseQty:25,purchaseUnit:'un',isBox:true},
+    {id:uid(),name:'Caixa Grande',category:'Embalagem',unit:'un',costPerUnit:0,stock:0,lowStock:3,purchasePrice:0,purchaseQty:10,purchaseUnit:'un',isBox:true},
     {id:uid(),name:'Envelope 12x18',category:'Embalagem',unit:'un',costPerUnit:0,stock:0,lowStock:10,purchasePrice:0,purchaseQty:100,purchaseUnit:'un',isEnvelope:true,lengthCm:18,widthCm:12,heightCm:0},
     {id:uid(),name:'Envelope 15x20',category:'Embalagem',unit:'un',costPerUnit:0,stock:0,lowStock:10,purchasePrice:0,purchaseQty:100,purchaseUnit:'un',isEnvelope:true,lengthCm:20,widthCm:15,heightCm:0},
-    {id:uid(),name:'Envelope 15x25',category:'Embalagem',unit:'un',costPerUnit:0.1699,stock:0,lowStock:10,purchasePrice:16.99,purchaseQty:100,purchaseUnit:'un',isEnvelope:true,lengthCm:25,widthCm:15,heightCm:0},
+    {id:uid(),name:'Envelope 15x25',category:'Embalagem',unit:'un',costPerUnit:0,stock:0,lowStock:10,purchasePrice:0,purchaseQty:100,purchaseUnit:'un',isEnvelope:true,lengthCm:25,widthCm:15,heightCm:0},
     {id:uid(),name:'Envelope 19x25',category:'Embalagem',unit:'un',costPerUnit:0,stock:0,lowStock:10,purchasePrice:0,purchaseQty:100,purchaseUnit:'un',isEnvelope:true,lengthCm:25,widthCm:19,heightCm:0},
   ];
-  const machines = [
-    {id:uid(),name:'Bambu Lab A1 Mini',price:2279,residual:0,lifeHours:4000,energyCostPerHour:0.0704,powerConsumptionKw:0.1,maintenanceCostPerHour:0.25,installmentValue:108.523809,installmentsTotal:21,startMonth:'2026-07',maintenanceLog:[]},
-  ];
-  const p = (name,filamentType,weightG,timeH,boxType,practicedPrice) => ({
-    id:uid(),name,filaments:[{materialName:filamentType,weightG}],timeH,bubbleWrapM:0.5,boxType,failureMarginPct:0.10,practicedPrice,stock:0,machineId:machines[0].id
-  });
-  const products = [
-    p('Espaço Cafe','PLA',100,3.48,'Caixa Pequena',35),
-    p('Porta Cha','PLA',134.65,8.72,'Caixa Pequena',50),
-    p('Kit Cantinho do Café','PLA',234.65,12.2,'Caixa Pequena',80),
-    p('Cubo Organizado - Suporte de Headset e Celular','PLA',161.66,7.4,'Caixa Pequena',55),
-    p('Office Pro Kit','PLA',231.78,7.35,'Caixa Pequena',72),
-    p('Kit Escritorio','PLA',393.44,14.75,'Caixa Média',125),
-    p('Skullflame - Headphone Holder','PLA Duo Color',125.36,5.7,'Caixa Pequena',55),
-    p('Caster Grip - Controller Holder','PLA Duo Color',64.23,7.566667,'Caixa Pequena',30),
-    p('Kit Games','PLA Duo Color',189.59,13.266667,'Caixa Média',82),
-    p('Flexi Undead Wyvern','PLA Duo Color',78.59,3.93,'Caixa Pequena',36),
-    p('Flexi Amphiptere','PLA Duo Color',69.18,3.68,'Caixa Pequena',35),
-    p('Kit Dragão Articulado','PLA Duo Color',147.77,7.61,'Caixa Média',65),
-    p('Skeleton Ankylosaurus','PLA',36.05,2.12,'Caixa Pequena',20),
-    p('Skeleton T-Rex','PLA',26,1.58,'Caixa Pequena',20),
-    p('Skeleton Triceratops','PLA',33.33,2,'Caixa Pequena',20),
-    p('Skeleton Velociraptor','PLA',24.59,1.58,'Caixa Pequena',20),
-    p('Skeleton Parasaurolophus','PLA',47.98,2.78,'Caixa Pequena',20),
-    p('Skeleton Stegosaurus','PLA',38.24,2.47,'Caixa Pequena',20),
-    p('Kit Dino','PLA',206.19,12.53,'Caixa Média',75),
-    p('Helix Fidget','PLA Duo Color',100.72,4.9,'Caixa Pequena',45),
-    p('Kit Pintura','PLA',177.29,7.17,'Caixa Pequena',60),
-    p('Office Essential Kit','PLA',92.75,3.13,'Caixa Pequena',35),
-    p('ROYAL Tray and Container','PLA',123.02,4.87,'Caixa Pequena',45),
-  ];
+  const products = [];
   const settings = {
-    businessName:'Piece of Geek 3D',
+    businessName:'',
     businessLogo:null,
     customOrderSeq:0,
     markupMultiplier:2.5,
@@ -87,18 +68,15 @@ function seedData(){
     dasDueDay:20,
     dasEnabled:false,
     pixKey:'',
-    pixMerchantName:'Piece of Geek 3D',
-    pixMerchantCity:'Sao Paulo',
-    whatsapp:'(11) 99296-5296',
-    instagram:'piece.of.geek',
+    pixMerchantName:'',
+    pixMerchantCity:'',
+    whatsapp:'',
+    instagram:'',
     mlClientId:'',
     mlConnected:false,
     printHoursPerDay:8,
-    machines,
-    expenses:[
-      {id:uid(),name:'Assinatura STLFLIX',value:79.9},
-      {id:uid(),name:'Shopee Ads',value:100},
-    ],
+    machines:[],
+    expenses:[],
     taxes:[],
     investments:[],
     platforms:[
@@ -118,18 +96,91 @@ function seedData(){
       {id:uid(),name:'Outro',pct:0,fixed:0},
     ],
     reserveGoals:[
-      {id:uid(),name:'Recompra de Filamento',goal:150,balance:0,autoMode:'pct_profit',autoPct:0},
-      {id:uid(),name:'Fundo de Emergência',goal:30,balance:0,autoMode:'pct_profit',autoPct:0},
+      {id:uid(),name:'Recompra de Filamento',goal:0,balance:0,autoMode:'pct_profit',autoPct:0},
+      {id:uid(),name:'Fundo de Emergência',goal:0,balance:0,autoMode:'pct_profit',autoPct:0},
       {id:uid(),name:'Fundo Nova Máquina (Depreciação)',goal:0,balance:0,autoMode:'cost_depreciation',autoPct:0},
       {id:uid(),name:'Fundo de Expansão (Lucro Retido)',goal:0,balance:0,autoMode:'pct_profit',autoPct:0},
     ],
     monthlyCloses:{},
     monthlySnapshots:{},
     lastActiveMonth: todayStr().slice(0,7),
-    laborHourlyRate:25,
+    laborHourlyRate:0,
     operationsStartMonth:'',
   };
   return { materials, products, sales:[], orders:[], customers:[], printFailures:[], listings:[], customOrders:[], settings };
+}
+
+/* Negócio FICTÍCIO só pra explorar o app com números plausíveis — carregado
+   sob demanda (ver loadSampleData), nunca automaticamente. Os produtos aqui
+   existem pra demonstrar os conceitos que mais confundem: leva que rende
+   várias peças (unitsPerPrint), venda em kit (unitsPerSale) e componente
+   incluso no pacote. Se mudar algo aqui, não é dado de ninguém — é vitrine. */
+function sampleData(){
+  const d = defaultData();
+  const mat = (name, cat, unit, price, qty, extra) => Object.assign(
+    {id:uid(), name, category:cat, unit, costPerUnit: price/qty, stock:0, lowStock:0, purchasePrice:price, purchaseQty:qty, purchaseUnit:unit}, extra||{}
+  );
+  const materials = [
+    mat('PLA Preto','Filamento','g',89.90,1000,{stock:1800,lowStock:500,materialType:'PLA',colorName:'Preto',color:'#222222'}),
+    mat('PLA Branco','Filamento','g',89.90,1000,{stock:900,lowStock:500,materialType:'PLA',colorName:'Branco',color:'#f2f2f2'}),
+    mat('Plástico Bolha','Embalagem','m',54.53,100,{stock:60,lowStock:10,isBubbleWrap:true}),
+    mat('Fita Adesiva','Embalagem','m',12.90,50,{stock:35,lowStock:5,isTape:true}),
+    mat('Caixa Pequena','Embalagem','un',35.99,25,{stock:20,lowStock:5,isBox:true,lengthCm:16,widthCm:11,heightCm:6}),
+    mat('Caixa Média','Embalagem','un',47.78,25,{stock:12,lowStock:5,isBox:true,lengthCm:22,widthCm:16,heightCm:10}),
+    mat('Envelope 15x25','Embalagem','un',16.99,100,{stock:80,lowStock:10,isEnvelope:true,lengthCm:25,widthCm:15,heightCm:0}),
+    mat('Parafuso 3,5x40','Componentes','un',26.81,500,{stock:400,lowStock:100}),
+    mat('Lixa 220','Ferramentas','un',25.06,1,{stock:1,lowStock:0,toolType:'Lixa',usefulLifeUses:40}),
+  ];
+  const machine = {id:uid(),name:'Impressora 3D (exemplo)',price:2200,residual:0,lifeHours:4000,energyCostPerHour:0.0704,powerConsumptionKw:0.1,maintenanceCostPerHour:0.25,installmentValue:0,installmentsTotal:0,startMonth:todayStr().slice(0,7),maintenanceLog:[]};
+  const parafusoId = materials.find(m=>m.name==='Parafuso 3,5x40').id;
+  const lixaId = materials.find(m=>m.name==='Lixa 220').id;
+  const prod = (o) => Object.assign({
+    id:uid(), filaments:[{materialName:'PLA Preto', weightG:60}], timeH:2, unitsPerPrint:1, unitsPerSale:1,
+    bubbleWrapM:0.5, tapeM:0.3, boxType:'Caixa Pequena', failureMarginPct:0.10, stock:0,
+    machineId:machine.id, laborActions:[], toolsUsed:[], components:[], marketPriceOverride:null,
+  }, o);
+  const products = [
+    // Os tempos e preços aqui foram escolhidos pra o Diagnóstico abrir com um
+    // veredito de cada tipo (bom / aceitável / revisar) — é o que mostra pra
+    // que serve a tela, sem parecer que o app achou tudo ruim.
+    prod({ name:'Suporte de Headset', category:'Suportes', filaments:[{materialName:'PLA Preto',weightG:125}], timeH:2.8, stock:6,
+      laborActions:[{action:'Lixar',minutes:8},{action:'Empacotar',minutes:4}], toolsUsed:[{toolId:lixaId,uses:1}], practicedPriceMl:79.90, practicedPriceShopee:74.90 }),
+    prod({ name:'Organizador de Mesa', category:'Organizadores', filaments:[{materialName:'PLA Branco',weightG:210}], timeH:6.5, boxType:'Caixa Média', stock:3,
+      laborActions:[{action:'Empacotar',minutes:5}], practicedPriceMl:119.90, practicedPriceShopee:109.90 }),
+    // Leva de 12 peças vendida em kit de 3, num envelope, com 2 parafusos por
+    // peça — é o caso que mostra unitsPerPrint ≠ unitsPerSale e o scope 'peca'.
+    prod({ name:'Guia para Cabo USB (kit 3)', category:'Organizadores', filaments:[{materialName:'PLA Preto',weightG:36}], timeH:1.6,
+      unitsPerPrint:12, unitsPerSale:3, boxType:'Envelope 15x25', bubbleWrapM:0, tapeM:0, stock:24,
+      components:[{materialId:parafusoId, qty:2, scope:'peca'}], lengthCm:6, widthCm:4, heightCm:1.5,
+      laborActions:[{action:'Empacotar',minutes:3}], practicedPriceMl:34.90, practicedPriceShopee:29.90 }),
+    prod({ name:'Chaveiro Personalizado', category:'Chaveiros', filaments:[{materialName:'PLA Preto',weightG:9}], timeH:0.5,
+      unitsPerPrint:8, unitsPerSale:1, boxType:'Envelope 15x25', bubbleWrapM:0, tapeM:0, stock:16,
+      lengthCm:5, widthCm:3, heightCm:0.8, laborActions:[{action:'Empacotar',minutes:2}],
+      practicedPriceMl:19.90, practicedPriceShopee:17.90 }),
+  ];
+  const ym = todayStr().slice(0,7);
+  const saleOn = (day, prodName, qty, unitPrice, platform) => {
+    const p = products.find(x=>x.name===prodName);
+    const gross = qty*unitPrice;
+    const fee = gross*0.14;
+    return { id:uid(), groupId:null, date:`${ym}-${String(day).padStart(2,'0')}`, productId:p.id, productName:p.name,
+      qty, platform, grossPrice:gross, feeTotal:fee, netReceipt:gross-fee, productionCost:gross*0.35, shippingCost:0,
+      couponDiscount:0, profit:gross-fee-(gross*0.35), unitsPerSaleSnapshot:p.unitsPerSale, unitPriceSnapshot:unitPrice,
+      timePerUnitSnapshot:(p.timeH/p.unitsPerPrint)*p.unitsPerSale, reserveAllocations:{}, machineId:machine.id,
+      hoursUsed:(p.timeH/p.unitsPerPrint)*p.unitsPerSale*qty, customerId:null, trackingCode:null, linkedOrderId:null };
+  };
+  const sales = [
+    saleOn(4,'Suporte de Headset',1,79.90,'Mercado Livre'),
+    saleOn(9,'Guia para Cabo USB (kit 3)',2,34.90,'Shopee'),
+    saleOn(15,'Chaveiro Personalizado',3,19.90,'Shopee'),
+    saleOn(21,'Organizador de Mesa',1,119.90,'Mercado Livre'),
+  ];
+  d.settings.businessName = 'Minha Loja 3D (exemplo)';
+  d.settings.machines = [machine];
+  d.settings.laborHourlyRate = 25;
+  d.settings.operationsStartMonth = ym;
+  d.settings.expenses = [{id:uid(),name:'Assinatura de modelos 3D',value:39.90}];
+  return Object.assign(d, { materials, products, sales });
 }
 
 /* ===================== STORAGE ===================== */
@@ -291,7 +342,10 @@ function migrateSettings(settings){
     });
   }
   if(settings.minMarginPct==null) settings.minMarginPct = 25;
-  if(settings.businessName==null) settings.businessName = 'Piece of Geek 3D';
+  // Campos de identidade/contato nascem VAZIOS — preencher com o dado de um
+  // negócio específico aqui vaza esse dado pra toda conta que ainda não
+  // preencheu o campo. Ver defaultData().
+  if(settings.businessName==null) settings.businessName = '';
   if(settings.businessLogo===undefined) settings.businessLogo = null;
   if(settings.customOrderSeq==null){
     // state.customOrders já foi atribuído antes de migrateSettings rodar (ver
@@ -332,10 +386,11 @@ function migrateSettings(settings){
   if(settings.dasDueDay==null) settings.dasDueDay = 20;
   if(settings.dasEnabled==null) settings.dasEnabled = false;
   if(settings.pixKey==null) settings.pixKey = '';
-  if(settings.pixMerchantName==null) settings.pixMerchantName = 'Piece of Geek 3D';
-  if(settings.pixMerchantCity==null) settings.pixMerchantCity = 'Sao Paulo';
-  if(settings.whatsapp==null) settings.whatsapp = '(11) 99296-5296';
-  if(settings.instagram==null) settings.instagram = 'piece.of.geek';
+  if(settings.pixMerchantName==null) settings.pixMerchantName = '';
+  if(settings.pixMerchantCity==null) settings.pixMerchantCity = '';
+  if(settings.whatsapp==null) settings.whatsapp = '';
+  if(settings.instagram==null) settings.instagram = '';
+  if(settings.brandPromptSeen==null) settings.brandPromptSeen = !!settings.businessName;
   if(settings.mlClientId==null) settings.mlClientId = '';
   if(settings.mlConnected==null) settings.mlConnected = false;
   if(settings.printHoursPerDay==null) settings.printHoursPerDay = 8;
@@ -555,10 +610,10 @@ async function applyLoadedState(){
       storageGet('materials'), storageGet('products'), storageGet('sales'), storageGet('orders'), storageGet('customers'), storageGet('settings'), storageGet('printFailures'), storageGet('listings'), storageGet('customOrders'),
     ]);
     if(!m && !p && !s && !o && !cu && !c && !pf && !li && !co){
-      state = seedData();
+      state = defaultData();
       await saveAll();
     } else {
-      const seed = seedData();
+      const seed = defaultData();
       state.materials = m ? JSON.parse(m) : seed.materials;
       migrateMaterials(state.materials);
       state.sales = s ? JSON.parse(s) : [];
@@ -577,7 +632,7 @@ async function applyLoadedState(){
     }
   }catch(e){
     console.error('storage load error', e);
-    state = seedData();
+    state = defaultData();
   }
 }
 async function loadState(){
@@ -2441,7 +2496,7 @@ async function exportCatalogImage(){
   drawContactIconsCanvas(ctx, margin, footerY+26);
 
   const link = document.createElement('a');
-  link.download = `catalogo-piece-of-geek-3d-${todayStr()}.png`;
+  link.download = `catalogo-${bizSlug()}-${todayStr()}.png`;
   link.href = canvas.toDataURL('image/png');
   link.click();
   toast('Catálogo exportado como imagem');
@@ -3887,9 +3942,17 @@ function stripAccents(s){
     return ch===lower ? plain : plain.toUpperCase();
   }).join('');
 }
+// Prefixo vem das iniciais do negócio de quem está usando — carimbar a sigla
+// de uma loja específica no SKU de todas as outras seria errado. O campo SKU
+// continua editável em cada anúncio.
+function skuPrefix(){
+  const initials = stripAccents(bizName()).toUpperCase().replace(/[^A-Z0-9 ]+/g,' ').trim().split(/\s+/)
+    .map(w=>w[0]).filter(Boolean).join('').slice(0,3);
+  return initials || 'SKU';
+}
 function generateSku(p){
   const slug = stripAccents(p.name).toUpperCase().replace(/[^A-Z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,24);
-  return `POG-${slug}`;
+  return `${skuPrefix()}-${slug}`;
 }
 function defaultListingDraft(p){
   const c = calcProduct(p);
@@ -5827,6 +5890,7 @@ function materialCard(m){
           ${m.name}
         </div>
         <div style="color:var(--text-faint);font-size:11.5px;margin-top:2px;">${brl(m.costPerUnit)}/${m.unit}${m.category==='Filamento' && m.brand ? ` · ${m.brand}` : ''}${m.category==='Ferramentas' && m.toolType ? ` · ${m.toolType}` : ''}</div>
+        ${!(m.costPerUnit>0) ? `<div style="font-size:11px;color:var(--amber);margin-top:3px;" title="Todo produto que usa esse material está com o custo subestimado até você informar quanto pagou">⚠️ Sem preço cadastrado</div>` : ''}
       </div>
       ${stockBadge(m)}
     </div>
@@ -6389,7 +6453,7 @@ function renderConfiguracoes(){
   return `
     <div class="section-title" style="margin-top:0;">Marca do negócio</div>
     <div class="card">
-      <div class="field"><label>Nome do negócio</label><input id="cfgBusinessName" value="${editingBusinessName}" placeholder="Ex: Piece of Geek 3D" oninput="editingBusinessName=this.value"></div>
+      <div class="field"><label>Nome do negócio</label><input id="cfgBusinessName" value="${editingBusinessName}" placeholder="Ex: Minha Loja 3D" oninput="editingBusinessName=this.value"></div>
       <div class="field"><label>Logo</label><input type="file" accept="image/*" id="cfgBusinessLogoInput" onchange="handleBusinessLogoUpload(this)"></div>
       <div id="cfgBusinessLogoPreview">${editingBusinessLogo ? `<img src="${editingBusinessLogo}" alt="Logo atual" style="width:64px;height:64px;object-fit:cover;border-radius:10px;border:1px solid var(--line);margin-top:8px;display:block;">` : ''}</div>
       <div class="field hint" style="margin-top:8px;">Aparece na barra lateral, no catálogo exportado, no recibo de venda e no app instalado no celular. Deixe em branco pra usar o padrão.</div>
@@ -6854,22 +6918,26 @@ function handleOnboardingLogoUpload(input){
     if(el) el.innerHTML = `<img src="${dataUri}" alt="Prévia da logo" style="width:72px;height:72px;object-fit:cover;border-radius:10px;border:1px solid var(--line);margin-top:8px;display:block;">`;
   }).catch(()=>{ toast('Não consegui processar essa imagem — tente outro arquivo','err'); });
 }
+// Pular deixa o nome VAZIO (bizName() cobre a exibição) e marca que já
+// perguntamos — antes isso gravava o nome de um negócio real na conta de quem
+// pulasse, só pra não cair de novo no passo da marca.
 function skipOnboardingBrand(){
-  state.settings.businessName = state.settings.businessName || 'Piece of Geek 3D';
+  state.settings.brandPromptSeen = true;
   saveSettings(); render(); openOnboardingModal();
 }
 function confirmOnboardingBrand(){
   const name = document.getElementById('obBusinessName').value.trim();
-  state.settings.businessName = name || 'Piece of Geek 3D';
+  state.settings.businessName = name;
   state.settings.businessLogo = editingBusinessLogo;
+  state.settings.brandPromptSeen = true;
   saveSettings(); render(); openOnboardingModal();
 }
 function openOnboardingModal(){
-  if(!state.settings.businessName){
+  if(!state.settings.businessName && !state.settings.brandPromptSeen){
     editingBusinessLogo = state.settings.businessLogo || null;
     showModal('Vamos começar', `
       <div class="field hint" style="margin-bottom:16px;">Antes de tudo: como se chama o seu negócio? O nome e a logo aparecem na barra lateral, no catálogo que você manda pro cliente, no recibo de venda e no app instalado no celular — dá pra trocar depois em Configurações.</div>
-      <div class="field"><label>Nome do negócio</label><input id="obBusinessName" placeholder="Ex: Piece of Geek 3D"></div>
+      <div class="field"><label>Nome do negócio</label><input id="obBusinessName" placeholder="Ex: Minha Loja 3D"></div>
       <div class="field"><label>Logo (opcional)</label><input type="file" accept="image/*" id="obLogoInput" onchange="handleOnboardingLogoUpload(this)"></div>
       <div id="obLogoPreview">${editingBusinessLogo ? `<img src="${editingBusinessLogo}" alt="Prévia da logo" style="width:72px;height:72px;object-fit:cover;border-radius:10px;border:1px solid var(--line);margin-top:8px;display:block;">` : ''}</div>
       <div class="modal-actions">
@@ -6889,8 +6957,13 @@ function openOnboardingModal(){
     anuncios: (state.listings||[]).length>0,
   };
   const stepBadge = (done, num, colorClass) => done ? `<span class="badge ok" title="Concluído">✓</span>` : `<span class="badge ${colorClass}">${num}</span>`;
+  const isEmpty = state.products.length===0 && state.sales.length===0;
   showModal('Vamos configurar seu negócio', `
     <div class="field hint" style="margin-bottom:16px;">Essa é a ordem que faz os números baterem desde a primeira venda. Pode seguir na sequência ou fechar e voltar quando quiser — o link fica no rodapé do menu. O ✓ aparece sozinho quando você já fez aquele passo.</div>
+    ${isEmpty ? `<div class="card" style="padding:12px 14px;margin-bottom:12px;background:var(--bg-alt);">
+      <div style="font-size:12.5px;color:var(--text-dim);">Quer ver o app funcionando antes de cadastrar o seu? Dá pra carregar um negócio de exemplo, com produtos, vendas e custos fictícios, só pra explorar as telas.</div>
+      <button class="btn ghost sm" style="margin-top:8px;" onclick="loadSampleData()">Carregar dados de exemplo</button>
+    </div>` : ''}
     <div style="display:flex;flex-direction:column;gap:10px;">
       <div class="card" style="padding:14px 16px;${stepDone.estoque?'border:1px solid var(--green-dim);':''}">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">${stepBadge(stepDone.estoque,1,'info')}<div style="font-weight:600;font-size:13.5px;">Cadastre sua matéria-prima</div></div>
@@ -7224,21 +7297,27 @@ function openResetModal(){
     </div>
   `);
 }
-function blankSettings(){
-  const s = seedData().settings;
-  s.businessName = '';
-  s.businessLogo = null;
-  s.machines = [];
-  s.expenses = [];
-  s.investments = [];
-  s.laborHourlyRate = 0;
-  s.reserveGoals.forEach(g=>{ g.goal = 0; g.balance = 0; });
-  return s;
+// Carrega o negócio fictício de sampleData() por cima do que existe hoje —
+// SEMPRE com backup automático antes, porque substitui tudo.
+async function loadSampleData(){
+  const hasData = state.products.length>0 || state.sales.length>0 || state.materials.some(m=>m.costPerUnit>0);
+  if(hasData && !confirm('Isso substitui os dados atuais pelos dados de exemplo. Um backup do que existe hoje será baixado antes. Continuar?')) return;
+  if(hasData){ exportBackup(true); await new Promise(r=>setTimeout(r,300)); }
+  state = sampleData();
+  migrateMaterials(state.materials);
+  migrateProducts(state.products);
+  await saveAll();
+  closeModal();
+  currentTab = 'dashboard';
+  render();
+  toast('Dados de exemplo carregados — explore à vontade e use "Recomeçar do zero" quando quiser começar pra valer');
 }
 async function confirmReset(){
   exportBackup(true);
   await new Promise(r=>setTimeout(r,300));
-  state = { materials: [], products: [], sales: [], orders: [], customers: [], printFailures: [], listings: [], customOrders: [], settings: blankSettings() };
+  // "Recomeçar do zero" = exatamente o mesmo estado de uma conta nova. Antes
+  // isso tinha um blankSettings() próprio que esquecia de limpar PIX/contato.
+  state = defaultData();
   await saveAll();
   closeModal();
   currentTab = 'dashboard';
@@ -7266,7 +7345,7 @@ function exportSalesExcel(){
   rows.push(['TOTAL', '', '', '', '', totals.gross, totals.fee, totals.net, totals.cost, totals.shipping, totals.coupon, totals.profit]);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), 'Vendas');
-  XLSX.writeFile(wb, `piece-of-geek-vendas-${todayStr()}.xlsx`);
+  XLSX.writeFile(wb, `${bizSlug()}-vendas-${todayStr()}.xlsx`);
   toast('Vendas exportadas');
 }
 function exportCustomersExcel(){
@@ -7279,7 +7358,7 @@ function exportCustomersExcel(){
   });
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), 'Clientes');
-  XLSX.writeFile(wb, `piece-of-geek-clientes-${todayStr()}.xlsx`);
+  XLSX.writeFile(wb, `${bizSlug()}-clientes-${todayStr()}.xlsx`);
   toast('Clientes exportados');
 }
 function exportOrdersExcel(){
@@ -7291,7 +7370,7 @@ function exportOrdersExcel(){
   });
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), 'Pedidos');
-  XLSX.writeFile(wb, `piece-of-geek-pedidos-${todayStr()}.xlsx`);
+  XLSX.writeFile(wb, `${bizSlug()}-pedidos-${todayStr()}.xlsx`);
   toast('Pedidos exportados');
 }
 
@@ -7327,7 +7406,7 @@ function exportAnnualExcel(){
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(monthlyRows), 'Resumo Mensal');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(salesRows), 'Vendas');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(invRows), 'Investimentos');
-  XLSX.writeFile(wb, `piece-of-geek-relatorio-${year}.xlsx`);
+  XLSX.writeFile(wb, `${bizSlug()}-relatorio-${year}.xlsx`);
   toast('Relatório Excel exportado');
 }
 function exportBackup(silent){
@@ -7338,7 +7417,7 @@ function exportBackup(silent){
   const blob = new Blob([JSON.stringify(data,null,2)], {type:'application/json'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = url; a.download = `piece-of-geek-backup-${todayStr()}.json`;
+  a.href = url; a.download = `${bizSlug()}-backup-${todayStr()}.json`;
   document.body.appendChild(a); a.click(); a.remove();
   URL.revokeObjectURL(url);
   try{ localStorage.setItem('pog3d_last_backup', todayStr()); }catch(e){}
@@ -7361,7 +7440,7 @@ function importBackup(file){
       }
       if(!confirm('Isso vai substituir todos os dados atuais (estoque, produtos, vendas, pedidos, configurações) pelos dados desse backup. Continuar?')) return;
       state.materials = migrateMaterials(data.materials);
-      state.settings = Object.assign({}, seedData().settings, migrateSettings(data.settings || {}));
+      state.settings = Object.assign({}, defaultData().settings, migrateSettings(data.settings || {}));
       state.products = migrateProducts(data.products);
       state.sales = data.sales;
       state.orders = Array.isArray(data.orders) ? data.orders : [];

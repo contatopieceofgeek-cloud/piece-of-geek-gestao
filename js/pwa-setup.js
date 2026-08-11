@@ -2,7 +2,10 @@
   var pageUrl = window.location.origin + window.location.pathname;
   var scopeUrl = window.location.origin + window.location.pathname.substring(0, window.location.pathname.lastIndexOf('/')+1);
   var defaultIconUri = scopeUrl + 'img/logo.png';
-  var defaultName = 'Piece of Geek 3D';
+  // Nome do PRODUTO, usado só enquanto o usuário não cadastrou o negócio dele
+  // (aí o manifest passa a usar o nome/logo próprios). Nunca pôr aqui o nome
+  // de um negócio real: vira o rótulo do app instalado de todo mundo.
+  var defaultName = 'Gestão 3D';
 
   // Lê nome/logo do negócio direto do IndexedDB (mesmo banco/chave que o
   // app.js usa pra guardar settings) porque esse script roda ANTES do
