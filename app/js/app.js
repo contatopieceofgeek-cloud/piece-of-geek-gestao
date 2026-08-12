@@ -476,7 +476,20 @@ async function migrateLocalStorageToIdb(){
 /* ---------- Sincronização entre dispositivos (Supabase, opcional) ---------- */
 let sbClient = null;
 let syncStatus = { configured:false, email:null };
+// Credenciais do projeto do PRODUTO (js/config.js) têm prioridade. O que o
+// usuário digitou em Configurações só vale se o config.js estiver em branco —
+// é o modo "traga seu próprio Supabase", que sobrevive pra desenvolvimento e
+// pra quem já usava o app antes de ele virar serviço.
+function appConfig(){ return window.APP_CONFIG || {}; }
+function hasEmbeddedBackend(){
+  const c = appConfig();
+  return !!(c.supabaseUrl && c.supabasePublishableKey);
+}
 function getSyncConfig(){
+  if(hasEmbeddedBackend()){
+    const c = appConfig();
+    return { url: c.supabaseUrl, key: c.supabasePublishableKey };
+  }
   return { url: localStorage.getItem('pog3d_sb_url')||'', key: localStorage.getItem('pog3d_sb_key')||'' };
 }
 function setSyncConfig(url,key){ localStorage.setItem('pog3d_sb_url',url); localStorage.setItem('pog3d_sb_key',key); }
@@ -501,6 +514,54 @@ async function refreshSyncStatus(){
   const cfg = getSyncConfig();
   syncStatus.configured = !!(cfg.url && cfg.key);
   syncStatus.email = syncStatus.configured ? (await getSyncUser())?.email || null : null;
+  await refreshSubscription();
+}
+
+/* ---------- Assinatura ----------
+   O status vem do banco (tabela subscriptions), nunca do navegador: a RLS não
+   deixa o cliente alterar a própria linha, só a Edge Function do webhook
+   escreve ali. O que está aqui é espelho pra interface — quem realmente
+   bloqueia a gravação é a policy do Postgres. Ver supabase/schema-subscriptions.sql.
+
+   Importante: o app funciona 100% offline no IndexedDB. Isto NÃO tranca o app;
+   o que a assinatura protege é a sincronização na nuvem e o que depende de
+   servidor (taxa real do ML). Ver a nota no CLAUDE.md. */
+let subscription = { loaded:false, status:null, trialEndsAt:null, periodEnd:null, writeBlocked:false };
+async function refreshSubscription(){
+  if(!syncStatus.configured || !syncStatus.email){
+    subscription = { loaded:false, status:null, trialEndsAt:null, periodEnd:null, writeBlocked:false };
+    return;
+  }
+  try{
+    const client = initSupabase();
+    const user = await getSyncUser();
+    if(!client || !user) return;
+    const { data, error } = await client.from('subscriptions')
+      .select('status,trial_ends_at,current_period_end').eq('user_id', user.id).maybeSingle();
+    // Tabela ainda não criada no projeto (erro de relação inexistente) não é
+    // motivo pra alarmar o usuário — o app segue como antes da cobrança existir.
+    if(error || !data){ subscription.loaded = false; return; }
+    subscription = {
+      loaded: true,
+      status: data.status,
+      trialEndsAt: data.trial_ends_at,
+      periodEnd: data.current_period_end,
+      writeBlocked: subscription.writeBlocked,
+    };
+  }catch(e){ subscription.loaded = false; }
+}
+// Dias inteiros que faltam pro fim do teste (negativo = já venceu).
+function trialDaysLeft(){
+  if(!subscription.trialEndsAt) return null;
+  return Math.ceil((new Date(subscription.trialEndsAt) - new Date()) / 86400000);
+}
+function subscriptionActive(){
+  if(!subscription.loaded) return true; // sem informação, não atrapalha o uso
+  if(subscription.status === 'active'){
+    return !subscription.periodEnd || new Date(subscription.periodEnd) > new Date();
+  }
+  if(subscription.status === 'trialing') return (trialDaysLeft()||0) > 0;
+  return false;
 }
 
 /* ---------- Atualização em tempo real entre dispositivos (Supabase Realtime) ----------
@@ -594,12 +655,28 @@ async function storageSet(key, value){
       const user = await getSyncUser();
       if(client && user){
         lastLocalSaveAt = Date.now();
-        await client.from('app_data').upsert(
+        const { error } = await client.from('app_data').upsert(
           { user_id:user.id, key, value, updated_at:nowIso },
           { onConflict:'user_id,key' }
         );
+        // O cliente do Supabase devolve o erro no objeto, não lança — antes
+        // isso passava batido e QUALQUER falha virava "sem conexão" silencioso.
+        // Recusa da RLS (42501) aqui significa assinatura vencida: o dado está
+        // salvo localmente, mas parou de subir, e o usuário precisa saber.
+        if(error) throw error;
+        if(subscription.writeBlocked){ subscription.writeBlocked = false; renderSubscriptionBanner(); }
       }
-    }catch(e){ /* sem conexão agora — fica salvo local, sincroniza no próximo save online */ }
+    }catch(e){
+      if(e && (e.code === '42501' || /row-level security/i.test(e.message||''))){
+        if(!subscription.writeBlocked){
+          subscription.writeBlocked = true;
+          renderSubscriptionBanner();
+          toast('Assinatura vencida — salvamos neste aparelho, mas parou de sincronizar na nuvem','err');
+        }
+      }
+      /* qualquer outro erro = provavelmente sem conexão: fica salvo local e
+         sobe no próximo save online, comportamento de sempre */
+    }
   }
   return localOk;
 }
@@ -886,11 +963,61 @@ function render(){
         </div>
         <div id="topbarActions"></div>
       </div>
+      <div id="subscriptionBanner"></div>
       <div class="content" id="content"></div>
     </div>
   `;
   renderTopbarActions();
+  renderSubscriptionBanner();
   renderContent();
+}
+/* Aviso de assinatura no topo do conteúdo. Só aparece quando há algo pra
+   dizer — conta em dia e sem nuvem configurada não mostram nada. */
+function renderSubscriptionBanner(){
+  const el = document.getElementById('subscriptionBanner');
+  if(!el) return;
+  const cfg = appConfig();
+  const cta = cfg.checkoutUrl
+    ? `<a class="btn sm primary" href="${cfg.checkoutUrl}" target="_blank" rel="noopener" style="text-decoration:none;white-space:nowrap;">Assinar ${cfg.precoMensal||''}</a>`
+    : '';
+  const faixa = (cor, texto, acao) => `
+    <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;
+                margin:0 0 14px;padding:11px 16px;border-radius:10px;
+                background:var(--${cor}-dim);border:1px solid var(--${cor});">
+      <div style="font-size:13.5px;color:var(--${cor});font-weight:600;">${texto}</div>
+      <div style="display:flex;gap:8px;align-items:center;">${acao||''}</div>
+    </div>`;
+
+  if(subscription.writeBlocked){
+    el.innerHTML = faixa('red',
+      'Assinatura vencida. Seus dados continuam aqui e você pode exportá-los, mas pararam de sincronizar entre aparelhos.',
+      `${cta}<button class="btn ghost sm" onclick="exportBackup()">Exportar backup</button>`);
+    return;
+  }
+  if(!subscription.loaded){ el.innerHTML = ''; return; }
+
+  if(subscription.status === 'trialing'){
+    const dias = trialDaysLeft();
+    if(dias!=null && dias > 0){
+      el.innerHTML = dias <= 5
+        ? faixa('amber', `Período de teste termina em ${dias} dia${dias>1?'s':''}.`, cta)
+        : '';
+      return;
+    }
+    el.innerHTML = faixa('red', 'Período de teste encerrado. Assine para voltar a sincronizar seus dados.',
+      `${cta}<button class="btn ghost sm" onclick="exportBackup()">Exportar backup</button>`);
+    return;
+  }
+  if(subscription.status === 'past_due'){
+    el.innerHTML = faixa('amber', 'Não conseguimos processar seu último pagamento.', cta);
+    return;
+  }
+  if(subscription.status === 'canceled'){
+    el.innerHTML = faixa('red', 'Assinatura cancelada. Você ainda pode consultar e exportar tudo.',
+      `${cta}<button class="btn ghost sm" onclick="exportBackup()">Exportar backup</button>`);
+    return;
+  }
+  el.innerHTML = '';
 }
 const NAV_ICON_PATHS = {
   dashboard: '<rect x="2.5" y="2.5" width="6" height="6" rx="1.3"></rect><rect x="11.5" y="2.5" width="6" height="6" rx="1.3"></rect><rect x="2.5" y="11.5" width="6" height="6" rx="1.3"></rect><rect x="11.5" y="11.5" width="6" height="6" rx="1.3"></rect>',

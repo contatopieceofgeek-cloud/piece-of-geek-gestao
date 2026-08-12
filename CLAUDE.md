@@ -95,6 +95,22 @@ Ficam de fora, de propósito: `IDB_NAME = 'piece_of_geek_db'` e `app:'piece-of-g
 
 Teste rápido de regressão: `JSON.stringify(defaultData())` e `JSON.stringify(migrateSettings({}))` não podem conter nenhum dado de negócio real.
 
+## Assinatura e cobrança
+
+`app/js/config.js` guarda a URL e a publishable key do projeto Supabase **do produto**. Enquanto estiverem em branco, o app volta ao modo antigo de "traga seu próprio Supabase" (o usuário digita URL e chave em Configurações) — é o que mantém o desenvolvimento local e as contas antigas funcionando. Publishable key no código-fonte é seguro por design: quem protege o dado é a RLS, não o segredo da chave. **service_role key nunca entra aí** — só nos secrets das Edge Functions.
+
+O status vem da tabela `subscriptions` (ver `supabase/schema-subscriptions.sql`) e o navegador **só lê**: não existe policy de insert/update pra usuário autenticado, então apenas a service_role (webhook do gateway) escreve. Se o cliente pudesse mudar o próprio `status` pra `active`, a cobrança seria decorativa.
+
+**Vencer não tranca os dados.** As policies de `app_data` foram separadas: `select` e `delete` só checam dono; `insert` e `update` exigem `has_write_access()`. Ou seja, assinatura vencida continua lendo, exportando e apagando — só não grava coisa nova. Isso é o que os Termos prometem e o que a LGPD espera sobre portabilidade/exclusão; não "endurecer" isso sem mudar os dois documentos junto.
+
+⚠️ **O `schema-subscriptions.sql` tem um bloco 6 que libera os usuários que já existem.** O trigger de trial só dispara em cadastro novo — sem esse backfill, quem já tem conta fica sem linha, `has_write_access()` devolve false e a sincronização para de gravar.
+
+⚠️ **O paywall é intencionalmente permeável.** O app é offline-first: tudo funciona no IndexedDB sem servidor nenhum. A assinatura protege a sincronização entre aparelhos e o que depende de servidor (taxa real do ML), não o uso local. Quem quiser usar de graça num navegador só, consegue — e perde tudo se limpar o navegador. Fechar essa brecha exigiria abrir mão do offline-first, que é o que faz o app funcionar na oficina sem internet. Decisão consciente, não esquecimento.
+
+`storageSet()` distingue recusa da RLS (código `42501`) de falta de conexão. Antes, qualquer erro do upsert virava "sem conexão" silencioso — assinatura vencida parava de sincronizar sem o usuário ficar sabendo.
+
+**Falta pra cobrança funcionar de verdade:** a Edge Function de webhook do gateway, que é quem escreve em `subscriptions`. Depende de escolher o gateway (a verificação de assinatura do webhook e o formato do payload mudam bastante entre eles).
+
 ## Sincronização (Supabase)
 
 Ver `supabase/schema.sql` pra recriar a tabela. Auth é email/senha simples (Supabase Auth). RLS restringe cada usuário à própria `user_id`. Chave pública (`sb_publishable_...` ou `anon` legado) fica no `localStorage` do navegador do usuário — é seguro por design (protegido por RLS, não por segredo da chave).
