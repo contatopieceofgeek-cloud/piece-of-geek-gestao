@@ -5,7 +5,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 
-const calc = require('../js/calc.js');
+const calc = require('../app/js/calc.js');
 
 // --- Estado mínimo controlado ---------------------------------------------
 // calc.js lê a global `state` no momento da chamada; os testes montam a sua.

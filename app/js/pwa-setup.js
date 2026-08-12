@@ -38,15 +38,19 @@
   }
 
   readBusinessBranding().then(function(branding){
-    var name = (branding.name && branding.name.trim()) ? branding.name.trim() : defaultName;
+    var own = (branding.name && branding.name.trim()) ? branding.name.trim() : '';
+    var name = own || defaultName;
+    // Com negócio cadastrado: "Loja do Fulano — Gestão 3D". Sem: só o nome do
+    // produto — antes virava "Gestão 3D — Gestão", com o sufixo duplicado.
+    var fullTitle = own ? (own + ' — ' + defaultName) : defaultName;
     var iconUri = branding.logo || defaultIconUri;
     document.getElementById('pwaAppleIcon').href = iconUri;
     document.getElementById('pwaFavicon').href = iconUri;
-    document.title = name + ' — Gestão';
+    document.title = fullTitle;
     var appleTitleMeta = document.querySelector('meta[name="apple-mobile-web-app-title"]');
     if(appleTitleMeta) appleTitleMeta.setAttribute('content', name);
     var manifest = {
-      name: name + ' — Gestão',
+      name: fullTitle,
       short_name: name,
       start_url: pageUrl,
       scope: scopeUrl,

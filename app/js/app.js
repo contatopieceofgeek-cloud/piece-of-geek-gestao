@@ -828,10 +828,15 @@ function lowStockMaterials(){ return state.materials.filter(m=>m.stock <= m.lowS
 
 
 /* ===================== RENDER SHELL ===================== */
+// Nome do produto (SaaS), diferente do nome do negócio de quem usa. Mantém em
+// sincronia com o defaultName do js/pwa-setup.js.
+const PRODUCT_NAME = 'Gestão 3D';
 function render(){
-  document.title = bizName()+' — Gestão';
+  // Com negócio cadastrado: "Loja do Fulano — Gestão 3D". Sem: só o produto.
+  const own = (state.settings.businessName||'').trim();
+  document.title = own ? `${own} — ${PRODUCT_NAME}` : PRODUCT_NAME;
   const appleTitleMeta = document.querySelector('meta[name="apple-mobile-web-app-title"]');
-  if(appleTitleMeta) appleTitleMeta.setAttribute('content', bizName());
+  if(appleTitleMeta) appleTitleMeta.setAttribute('content', own || PRODUCT_NAME);
   const app = document.getElementById('app');
   app.innerHTML = `
     <div class="sidebar-backdrop" id="sidebarBackdrop" onclick="closeSidebar()"></div>

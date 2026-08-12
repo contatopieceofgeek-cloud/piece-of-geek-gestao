@@ -4,6 +4,21 @@ App de gestão para um negócio MEI de impressão 3D no Brasil (produtos geek: e
 
 **Este arquivo existe pra você (Claude Code) não precisar redescobrir decisões de arquitetura, convenções e pegadinhas que já foram resolvidas.** Leia antes de mexer em qualquer coisa.
 
+## Estrutura de pastas
+
+```
+/index.html         landing (marketing, CSS inline, sem dependência do app)
+/termos.html        Termos de Uso            } rascunhos com [PREENCHER],
+/privacidade.html   Política de Privacidade  } precisam de revisão jurídica
+/app/               o app em si (index.html, js/, css/, img/, sw.js)
+/test/              testes do motor de cálculo
+/supabase/          schema e Edge Functions (não é servido)
+```
+
+A landing na raiz e o app em `/app/` é o que permite divulgar o link principal
+sem cair na tela de dados. Consequência: o `start_url` do PWA é `/app/` — quem
+tinha o app instalado apontando pra raiz precisa reinstalar uma vez.
+
 ## Como rodar localmente
 
 Site estático puro, sem build step. Basta servir a pasta:
@@ -12,7 +27,13 @@ python3 -m http.server 8000
 # ou
 npx serve .
 ```
-Abrir `index.html`. Não precisa de bundler — `index.html` carrega `css/styles.css`, `js/pwa-setup.js`, `js/calc.js` e `js/app.js` via tags normais. **`calc.js` tem que vir antes de `app.js`.**
+A landing abre em `/`, o app em `/app/`. Não precisa de bundler — `app/index.html` carrega `css/styles.css`, `js/pwa-setup.js`, `js/calc.js` e `js/app.js` via tags normais. **`calc.js` tem que vir antes de `app.js`.**
+
+Ao testar mudança em JS no navegador, o service worker + cache de HTTP seguram a versão antiga com teimosia. O jeito mais rápido de furar isso é subir o servidor **numa porta diferente** (origem nova = cache novo).
+
+## Nome do produto ≠ nome do negócio do usuário
+
+`PRODUCT_NAME` (em `app/js/app.js`) e `defaultName` (em `app/js/pwa-setup.js`) são o nome do **produto SaaS**, hoje `'Gestão 3D'` — precisam ser mudados juntos. `bizName()` é o nome do **negócio de quem usa**, que aparece na sidebar, no catálogo e como marca no anúncio. Título/manifest ficam `"<negócio> — <produto>"` quando há negócio cadastrado, e só `"<produto>"` quando não há (antes virava `"Gestão 3D — Gestão"`, com sufixo duplicado).
 
 Testes (sem dependência nenhuma, usa o runner nativo do Node):
 ```
