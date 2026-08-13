@@ -177,7 +177,15 @@ tbody tr:hover{background:rgba(0,0,0,0.025);}
   transition:border-color .12s ease, box-shadow .12s ease;
 }
 .field input:focus,.field select:focus,.field textarea:focus{border-color:var(--nozzle);box-shadow:0 0 0 3px var(--nozzle-dim);}
+/* Duas formas, de propósito:
+   .field .hint  → legenda DENTRO de um campo, abaixo do input. Bem discreta.
+   .field.hint   → bloco de explicação solto (as duas classes no MESMO
+                   elemento). Um pouco maior, porque costuma ser frase inteira.
+   O seletor composto faltava: 87 dos 94 blocos escritos como "field hint"
+   caíam no texto do corpo (14px, quase preto), e só os 7 com cor inline
+   pareciam dica — por isso davam a impressão de caixa escura aleatória. */
 .field .hint{font-size:11px;color:var(--text-faint);}
+.field.hint{font-size:12.5px;color:var(--text-dim);line-height:1.5;}
 .row2{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
 .row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;}
 
