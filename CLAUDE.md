@@ -95,6 +95,17 @@ Ficam de fora, de propósito: `IDB_NAME = 'piece_of_geek_db'` e `app:'piece-of-g
 
 Teste rápido de regressão: `JSON.stringify(defaultData())` e `JSON.stringify(migrateSettings({}))` não podem conter nenhum dado de negócio real.
 
+## Onboarding: bloqueio sem saída é bug
+
+Duas funções carregam isso, e código novo deve usá-las em vez de reinventar:
+
+- **`blockedBy(titulo, explicacao, botaoLabel, botaoOnclick)`** — quando uma ação exige algo que ainda não existe. Substitui o `toast('Cadastre X antes de...')`, que é beco sem saída pra quem não sabe onde as coisas ficam. A explicação diz POR QUE aquilo é obrigatório, não só o que falta.
+- **`emptyState(msg, acaoLabel, acaoOnclick)`** — os dois últimos argumentos são opcionais (as ~26 chamadas antigas seguem válidas). Tela vazia sem botão obriga a adivinhar onde fica a ação.
+
+⚠️ **Mensagem que cita caminho de menu apodrece.** O bloqueio de "cadastre uma impressora" mandava o usuário pra `Caixa → Configurar → Impressoras` — caminho que deixou de existir quando Taxas/Configurações viraram abas próprias, e ninguém percebeu porque só usuário novo bate nele. Preferir botão que navega (`switchTab(...)`) a instrução escrita; se escrever mesmo assim, conferir ao mexer na navegação.
+
+O caminho guiado se forma sozinho por encadeamento: Pedidos vazio → botão → bloqueio "falta produto" → botão → Produtos → bloqueio "falta impressora" → botão → Configurações.
+
 ## ⚠️ Sincronização: instalação nova não pode competir com a nuvem
 
 Perda de dado real, em produção: o dono abriu o app numa aba anônima (sem `localStorage`, logo sem as credenciais do Supabase), o app concluiu "instalação nova", criou o andaime de `defaultData()` **e gravou** — com carimbo de data de agora. Ao conectar a conta em seguida, a comparação de timestamp do `storageGet()` viu o vazio local como "edição mais recente", manteve ele e o **empurrou por cima da nuvem**. 23 produtos, anúncios e configurações viraram `[]`.

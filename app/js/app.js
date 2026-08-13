@@ -1413,7 +1413,7 @@ function openQuickQuoteModal(){
   const boxOptions = state.materials.filter(m=>m.category==='Embalagem' && (m.isBox||m.isEnvelope||m.isSaquinho));
   const machines = state.settings.machines||[];
   if(filamentOptions.length===0 || boxOptions.length===0){
-    toast('Cadastre ao menos um filamento e uma caixa em Estoque antes de fazer um orçamento','err');
+    toast('Cadastre ao menos um filamento e uma embalagem em Estoque antes de fazer um orçamento','err');
     return;
   }
   if(machines.length===0){
@@ -1546,7 +1546,28 @@ function saveQuoteAsProduct(){
   toast('Orçamento salvo como produto novo — já aparece em Produtos');
   closeModal(); renderContent();
 }
-function emptyState(msg){ return `<div class="empty">${msg}</div>`; }
+/* Estado vazio, com uma saída opcional. Tela vazia sem botão obriga quem é
+   novo a adivinhar onde fica a ação — `acaoLabel`+`acaoOnclick` põem o
+   caminho ali. Chamadas antigas com só a mensagem seguem funcionando. */
+function emptyState(msg, acaoLabel, acaoOnclick){
+  const botao = (acaoLabel && acaoOnclick)
+    ? `<div style="margin-top:12px;"><button class="btn primary sm" onclick="${acaoOnclick}">${acaoLabel}</button></div>`
+    : '';
+  return `<div class="empty">${msg}${botao}</div>`;
+}
+/* Bloqueio COM saída. Antes isto era um toast dizendo "vá cadastrar X" —
+   beco sem saída pra quem ainda não sabe onde as coisas ficam, e o texto
+   ainda apontava pra um menu que deixou de existir. Aqui o caminho vira
+   botão, e dá pra explicar POR QUE aquilo é obrigatório. */
+function blockedBy(titulo, explicacao, botaoLabel, botaoOnclick){
+  showModal(titulo, `
+    <div class="field hint" style="margin-top:0;margin-bottom:16px;">${explicacao}</div>
+    <div class="modal-actions">
+      <button class="btn ghost" onclick="closeModal()">Agora não</button>
+      <button class="btn primary" onclick="closeModal(); ${botaoOnclick}">${botaoLabel}</button>
+    </div>
+  `);
+}
 function renderOpenOrdersList(){
   const open = state.orders.filter(o=>o.status!=='Enviado').sort((a,b)=>(a.dueDate||'9999').localeCompare(b.dueDate||'9999')).slice(0,6);
   if(open.length===0) return emptyState('Nenhuma encomenda em aberto');
@@ -1612,7 +1633,9 @@ function drawDashboardCharts(){
 const ORDER_STATUSES = ['Aguardando impressão','Imprimindo','Pronto para envio','Enviado'];
 function renderPedidos(){
   if(state.orders.length===0){
-    return `<div class="card">${emptyState('Nenhuma encomenda registrada. Clique em "Nova encomenda" para começar a organizar sua fila de produção.')}</div>`;
+    return `<div class="card">${emptyState(
+      'Nenhum pedido em aberto.<br><span style="font-size:12.5px;">O quadro acompanha da fila de impressão até o envio, e a venda é registrada sozinha quando você marca como enviado.</span>',
+      '+ Novo pedido', `openOrderModal()`)}</div>`;
   }
   const cols = ORDER_STATUSES.map(status=>{
     const orders = state.orders.filter(o=>o.status===status).sort((a,b)=>(a.dueDate||'9999').localeCompare(b.dueDate||'9999'));
@@ -1734,7 +1757,12 @@ function orderCustomerName(o){
   return o.customerName || '';
 }
 function openOrderModal(){
-  if(state.products.length===0){ toast('Cadastre um produto antes de criar encomendas','err'); return; }
+  if(state.products.length===0){
+    blockedBy('Nenhum produto cadastrado',
+      'A encomenda personalizada parte de um produto já cadastrado, pra reaproveitar peso, tempo e custo em vez de você digitar tudo de novo. Cadastre o primeiro e volte aqui.',
+      'Ir para Produtos', `switchTab('produtos');`);
+    return;
+  }
   showModal('Nova encomenda', `
     <div class="field"><label>Cliente (opcional)</label><select id="oCust">
       <option value="">Avulso / sem cadastro</option>
@@ -1919,7 +1947,7 @@ function renderMeiLimitCard(y, year){
         </div>
         <span class="badge ${status.cls}">${status.text}</span>
       </div>
-      <div class="field hint" style="margin-top:10px;">Limite editável em Caixa → Configurar (ex: se a Receita Federal reajustar o teto do MEI). Ultrapassar em até 20% (${brl(tolerance)}) permite continuar no regime até dezembro pagando DAS complementar; acima disso o desenquadramento retroage ao início do ano.</div>
+      <div class="field hint" style="margin-top:10px;">Limite editável em Configurações (ex: se a Receita Federal reajustar o teto do MEI). Ultrapassar em até 20% (${brl(tolerance)}) permite continuar no regime até dezembro pagando DAS complementar; acima disso o desenquadramento retroage ao início do ano.</div>
     </div>`;
 }
 function drawAnnualChart(){
@@ -2443,7 +2471,12 @@ function renderImpressao(){
 let editingPrintJobId = null;
 let printJobFirstRender = false;
 function openPrintJobModal(productId, presetQty, presetOutcome, editId){
-  if(state.products.length===0){ toast('Cadastre um produto antes de registrar uma impressão','err'); return; }
+  if(state.products.length===0){
+    blockedBy('Nenhum produto cadastrado',
+      'A fila registra levas de um produto — é assim que o estoque de peças prontas sobe e que o desperdício de falha é contabilizado. Cadastre o primeiro e volte aqui.',
+      'Ir para Produtos', `switchTab('produtos');`);
+    return;
+  }
   editingPrintJobId = editId || null;
   printJobFirstRender = !!editingPrintJobId;
   const editing = editingPrintJobId ? state.printFailures.find(x=>x.id===editingPrintJobId) : null;
@@ -2911,7 +2944,12 @@ function newCartItem(productId, qty, platformName){
   return { rowId: uid(), productId: prod.id, qty: qty||1, unitPrice: cartItemDefaultPrice(prod.id, platformName), priceTouched:false };
 }
 function openSaleModal(presetProductId, presetQty, presetOrderId){
-  if(state.products.length===0){ toast('Cadastre um produto antes de registrar vendas','err'); return; }
+  if(state.products.length===0){
+    blockedBy('Nenhum produto cadastrado',
+      'Uma venda precisa de um produto pra saber o que saiu do estoque e quanto custou produzir. Cadastre o primeiro e volte aqui.',
+      'Ir para Produtos', `switchTab('produtos');`);
+    return;
+  }
   // presetQty vem de Pedidos em PEÇAS (o.qty) — o carrinho agora conta em
   // VENDAS/kits, então converte pelo unitsPerSale do produto antes de usar.
   const presetId = presetProductId || state.products[0].id;
@@ -3289,7 +3327,9 @@ function toggleClientSort(key){
   renderContent();
 }
 function renderClientes(){
-  if(state.customers.length===0) return `<div class="card">${emptyState('Nenhum cliente cadastrado. Clique em "Novo cliente" — depois é só escolher o cliente na hora de registrar uma venda.')}</div>`;
+  if(state.customers.length===0) return `<div class="card">${emptyState(
+    'Nenhum cliente cadastrado.<br><span style="font-size:12.5px;">É opcional — dá pra cadastrar na hora da venda. Ter antes só deixa o histórico de compras mais fácil de acompanhar.</span>',
+    '+ Novo cliente', `openCustomerModal()`)}</div>`;
   let list = state.customers.map(cu=>({ cu, st: customerStats(cu.id) }));
   if(clientesFilter.search){
     const q = clientesFilter.search.toLowerCase();
@@ -3378,7 +3418,7 @@ function openKitModal(){
   if(state.products.length<2){ toast('Cadastre pelo menos 2 produtos antes de criar um kit','err'); return; }
   const boxOpts = state.materials.filter(m=>m.category==='Embalagem' && (m.isBox||m.isEnvelope||m.isSaquinho));
   const machineOpts = state.settings.machines||[];
-  if(boxOpts.length===0 || machineOpts.length===0){ toast('Cadastre ao menos uma caixa e uma impressora antes de criar um kit','err'); return; }
+  if(boxOpts.length===0 || machineOpts.length===0){ toast('Cadastre ao menos uma embalagem e uma impressora antes de criar um kit','err'); return; }
   editingKitItems = {};
   showModal('Criar kit', `
     <div class="field hint" style="margin-bottom:10px;">Escolha 2 ou mais produtos já cadastrados. O kit vira um novo produto — com uma caixa só (em vez de uma por item), custo recalculado e preço próprio, pronto pra vender.</div>
@@ -3512,7 +3552,9 @@ function toggleProductSort(key){
 }
 function sortArrow(filterObj,key){ return filterObj.sortKey===key ? (filterObj.sortDir===1?' ▲':' ▼') : ''; }
 function renderProdutos(){
-  if(state.products.length===0) return `<div class="card">${emptyState('Nenhum produto cadastrado. Clique em "Novo produto".')}</div>`;
+  if(state.products.length===0) return `<div class="card">${emptyState(
+    'Nenhum produto cadastrado ainda.<br><span style="font-size:12.5px;">Um produto é uma peça que você vende: peso, tempo de impressão e embalagem. O custo e o R$/hora saem daí.</span>',
+    '+ Novo produto', `openProductModal()`)}</div>`;
   const machines = state.settings.machines||[];
   let list = state.products.map(p=>({ p, c: calcProduct(p) }));
   if(produtosFilter.search){
@@ -3745,7 +3787,7 @@ const LISTING_SHARED_FIELDS = [
   {key:'descricao', label:'Descrição', type:'textarea'},
 ];
 // Plataformas além de ML/Shopee que o usuário habilitou com aba de Anúncios
-// (ver Caixa → Configurar → "Aba de Anúncios pra..."), clonando os campos de
+// (ver Configurações → "Aba de Anúncios pra..."), clonando os campos de
 // uma plataforma já existente (ML, Shopee, ou outra plataforma estendida).
 function platformListingFields(platformId, visited){
   visited = visited || new Set();
@@ -4356,11 +4398,15 @@ function openProductModal(id){
   const boxOpts = state.materials.filter(m=>m.category==='Embalagem' && (m.isBox||m.isEnvelope||m.isSaquinho));
   const machineOpts = state.settings.machines||[];
   if(filamentOpts.length===0 || boxOpts.length===0){
-    toast('Cadastre ao menos um filamento e uma embalagem (caixa, envelope ou saquinho) em Estoque antes de criar ou editar produtos', 'err');
+    blockedBy('Falta matéria-prima',
+      'Todo produto sai de um filamento e vai dentro de uma embalagem — o custo de cada peça é calculado a partir do que você pagou por eles. Cadastre pelo menos um de cada em Estoque.',
+      'Ir para Estoque', `switchTab('estoque');`);
     return;
   }
   if(machineOpts.length===0){
-    toast('Cadastre ao menos uma impressora em Caixa → Configurar → Impressoras antes de criar ou editar produtos', 'err');
+    blockedBy('Falta cadastrar sua impressora',
+      'O custo de uma peça depende da máquina que a imprime: energia, depreciação e manutenção por hora. Sem isso o app não tem como dizer quanto cada anúncio rende por hora de impressora, que é a conta principal daqui.',
+      'Ir para Configurações', `switchTab('configuracoes');`);
     return;
   }
   const p = editing ? state.products.find(x=>x.id===id) : { name:'', filaments:[{materialName:filamentOpts[0].name,weightG:100}], timeH:3, bubbleWrapM:0.5, tapeM:0.5, boxType:boxOpts[0].name, failureMarginPct:0.10, practicedPrice:0, stock:0, machineId:machineOpts[0].id, unitsPerPrint:1, unitsPerSale:1, marketPriceOverride:null, components:[] };
@@ -5700,7 +5746,9 @@ function restockSuggestion(material){
 }
 let materialsFilter = { search:'' };
 function renderMaterialsStock(){
-  if(state.materials.length===0) return `<div class="card">${emptyState('Nenhuma matéria-prima cadastrada')}</div>`;
+  if(state.materials.length===0) return `<div class="card">${emptyState(
+    'Nenhuma matéria-prima cadastrada.<br><span style="font-size:12.5px;">Filamento, embalagem, ferramenta e componente — com o preço que você realmente pagou. É a base de todo cálculo de custo.</span>',
+    '+ Nova matéria-prima', `openMaterialModal()`)}</div>`;
   const suggestions = state.materials.map(m=>({m, s:restockSuggestion(m)})).filter(x=>x.s).sort((a,b)=>b.s.cost-a.s.cost);
   const suggestionPanel = suggestions.length ? `
     <div class="card" style="margin-bottom:20px;">
