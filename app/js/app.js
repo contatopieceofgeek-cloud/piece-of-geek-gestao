@@ -6975,7 +6975,12 @@ alter publication supabase_realtime add table app_data;</textarea>
       <div class="field"><label>Senha</label><input type="password" id="syncPassword"></div>
       <div class="field hint" id="syncAuthMsg" style="color:var(--red);"></div>
       <div class="modal-actions" style="justify-content:space-between;">
-        <button class="btn ghost" onclick="disconnectSync()">Desconectar</button>
+        ${hasEmbeddedBackend()
+          // Com backend do produto embutido não há o que "desconectar": o
+          // getSyncConfig ignora o localStorage e o app reconectaria sozinho
+          // no render seguinte, fazendo o botão fingir que funcionou.
+          ? `<button class="btn ghost" onclick="closeModal()">Cancelar</button>`
+          : `<button class="btn ghost" onclick="disconnectSync()">Desconectar</button>`}
         <div style="display:flex;gap:8px;">
           <button class="btn" onclick="doSyncAuth('signUp')">Criar conta</button>
           <button class="btn primary" onclick="doSyncAuth('signIn')">Entrar</button>
@@ -6984,12 +6989,19 @@ alter publication supabase_realtime add table app_data;</textarea>
     `);
     return;
   }
+  // Com o backend do produto embutido, o usuário não administra projeto
+  // nenhum: nada de SQL de Realtime nem de "esquecer credenciais". Sobra o
+  // que faz sentido pra quem assina — de qual conta está logado e como sair.
+  const embutido = hasEmbeddedBackend();
   showModal('Sincronização', `
     <div class="field">Conectado como <strong>${syncStatus.email}</strong>. Os dados são compartilhados entre todos os dispositivos onde você fizer login com essa conta.</div>
+    ${embutido ? '' : `
     <div class="field hint" style="margin-top:-4px;">Se você conectou esse projeto antes desta versão, as mudanças de outro dispositivo só aparecem depois de recarregar a página. Pra ativar a atualização automática, rode uma vez no <strong>SQL Editor</strong> do seu projeto Supabase:</div>
-    <textarea readonly style="width:100%;height:32px;font-family:var(--font-mono);font-size:10px;margin:0 0 12px;resize:vertical;" onclick="this.select()">alter publication supabase_realtime add table app_data;</textarea>
+    <textarea readonly style="width:100%;height:32px;font-family:var(--font-mono);font-size:10px;margin:0 0 12px;resize:vertical;" onclick="this.select()">alter publication supabase_realtime add table app_data;</textarea>`}
     <div class="modal-actions" style="justify-content:space-between;">
-      <button class="btn ghost" onclick="disconnectSync()">Esquecer neste dispositivo</button>
+      ${embutido
+        ? `<button class="btn ghost" onclick="closeModal()">Fechar</button>`
+        : `<button class="btn ghost" onclick="disconnectSync()">Esquecer neste dispositivo</button>`}
       <button class="btn" onclick="doSyncSignOut()">Sair da conta</button>
     </div>
   `);

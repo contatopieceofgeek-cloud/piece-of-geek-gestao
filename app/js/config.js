@@ -14,10 +14,10 @@
    Se os campos ficarem em branco, o app volta ao comportamento antigo de
    "traga seu próprio Supabase" (útil pra rodar local ou pra quem já usava). */
 window.APP_CONFIG = {
-  // Ex: 'https://xxxxxxxxxxxx.supabase.co'
-  supabaseUrl: '',
-  // Ex: 'sb_publishable_...' (ou a anon key legada). NUNCA a service_role.
-  supabasePublishableKey: '',
+  supabaseUrl: 'https://plskerczkhjvqahpyucd.supabase.co',
+  // Publishable key: pública por natureza, vai no navegador de todo usuário.
+  // NUNCA trocar pela service_role — aquela ignora a RLS.
+  supabasePublishableKey: 'sb_publishable_5LVn3HsjCBxvbngoJABEgA_a0FVlmkf',
 
   // Link do checkout do gateway, usado nos avisos de assinatura.
   // Preencher na Fase 3 quando o gateway estiver escolhido.
