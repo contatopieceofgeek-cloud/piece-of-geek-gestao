@@ -81,7 +81,14 @@ grant  execute on function public.has_write_access(uuid) to authenticated;
 -- A policy antiga era "for all" (leitura e escrita juntas). Trocamos por
 -- quatro políticas separadas pra poder liberar leitura e travar só a escrita.
 
-drop policy if exists "own data" on public.app_data;
+-- Os drops abaixo deixam este arquivo seguro pra rodar mais de uma vez:
+-- "create policy" não aceita "if not exists", então sem eles a segunda
+-- execução morre com 'policy ... already exists' no meio do script.
+drop policy if exists "own data"                on public.app_data;
+drop policy if exists "app_data select own"     on public.app_data;
+drop policy if exists "app_data delete own"     on public.app_data;
+drop policy if exists "app_data insert own paid" on public.app_data;
+drop policy if exists "app_data update own paid" on public.app_data;
 
 -- Ler sempre pode: é o que garante export de backup e consulta do histórico
 -- mesmo com a assinatura vencida.
