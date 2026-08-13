@@ -612,6 +612,20 @@ async function getLocalWithTimestamp(key){
   }catch(e){ /* segue pro fallback localStorage */ }
   return { value: localStorage.getItem(STORAGE_PREFIX+key), updatedAt: localStorage.getItem(STORAGE_PREFIX+key+'__updatedAt') };
 }
+// Ligado só durante a puxada pós-login (afterSyncLogin), pra o storageGet
+// pular a comparação de timestamp e aceitar a nuvem.
+let preferRemoteOnPull = false;
+// Este aparelho já tem dado salvo de verdade? Instalação nova não tem
+// timestamp nenhum (applyLoadedState não persiste o andaime), e é isso que
+// separa "nunca usei aqui" de "tenho edição local que pode ser mais nova".
+async function hasLocalData(){
+  const keys = ['materials','products','sales','orders','customers','printFailures','listings','customOrders','settings'];
+  for(const k of keys){
+    const local = await getLocalWithTimestamp(k);
+    if(local.value && local.updatedAt) return true;
+  }
+  return false;
+}
 async function storageGet(key){
   if(hasCloudStorage()){
     try{ const r = await window.storage.get(key); return r ? r.value : null; }catch(e){ return null; }
@@ -625,6 +639,10 @@ async function storageGet(key){
         const { data, error } = await client.from('app_data').select('value,updated_at').eq('user_id',user.id).eq('key',key).maybeSingle();
         if(!error){
           if(!data) return local.value;
+          // Puxada explícita logo após o login: a nuvem manda, sem comparar
+          // data. Quem acabou de entrar numa conta quer os dados dela — ver
+          // afterSyncLogin(), que só liga isso depois de tratar o conflito.
+          if(preferRemoteOnPull) return data.value;
           const remoteIsNewer = !local.updatedAt || new Date(data.updated_at) > new Date(local.updatedAt);
           if(remoteIsNewer) return data.value;
           // Local tem uma edição mais recente que a nuvem (ex: feita offline) — usa o
@@ -687,8 +705,19 @@ async function applyLoadedState(){
       storageGet('materials'), storageGet('products'), storageGet('sales'), storageGet('orders'), storageGet('customers'), storageGet('settings'), storageGet('printFailures'), storageGet('listings'), storageGet('customOrders'),
     ]);
     if(!m && !p && !s && !o && !cu && !c && !pf && !li && !co){
+      // Instalação nova: NÃO persistir o andaime aqui.
+      //
+      // Gravar isto criava um carimbo de data "agora" pra um estado que o
+      // usuário nunca tocou. Se depois ele fizesse login numa conta que já
+      // tinha dados, a comparação de timestamp do storageGet via o vazio
+      // local como "edição mais recente", mantinha ele E o empurrava por
+      // cima da nuvem. Foi exatamente assim que os dados do dono sumiram
+      // ao abrir o app numa aba anônima e conectar a conta.
+      //
+      // Sem gravar, o local fica sem timestamp e a nuvem sempre vence — que
+      // é o certo pra quem acabou de instalar. O primeiro save de verdade
+      // acontece na primeira edição do usuário, como sempre aconteceu.
       state = defaultData();
-      await saveAll();
     } else {
       const seed = defaultData();
       state.materials = m ? JSON.parse(m) : seed.materials;
@@ -6957,8 +6986,34 @@ async function afterSyncLogin(){
         toast('Dados enviados para a nuvem');
       }
     } else {
+      // Os dois lados podem ter dado. Antes, isso caía direto na comparação
+      // de timestamp do storageGet, que em aparelho recém-instalado escolhia
+      // o vazio local e o empurrava por cima da conta — perda silenciosa.
+      // Agora: sem dado local, puxa a nuvem; com dado local, é conflito de
+      // verdade e quem decide é o usuário — com backup baixado antes.
+      if(await hasLocalData()){
+        exportBackup(true);
+        await new Promise(r=>setTimeout(r,300));
+        const usarNuvem = confirm(
+          'Esta conta já tem dados na nuvem, e este aparelho também tem dados salvos.\n\n' +
+          'Por segurança, acabamos de baixar um backup do que está neste aparelho.\n\n' +
+          'OK = usar os dados DA NUVEM (substitui os deste aparelho)\n' +
+          'Cancelar = manter os DESTE APARELHO e enviá-los para a nuvem'
+        );
+        if(!usarNuvem){
+          await saveAll();
+          toast('Dados deste aparelho enviados para a nuvem');
+          startRealtimeSync();
+          return;
+        }
+      }
       toast('Puxando dados da nuvem...');
-      await loadState();
+      preferRemoteOnPull = true;
+      try{ await loadState(); }
+      finally{ preferRemoteOnPull = false; }
+      // Grava o que veio da nuvem também neste aparelho, pra ele não ficar
+      // com a cópia antiga guardada e voltar a divergir no próximo acesso.
+      await saveAll();
     }
   }catch(e){ /* silencioso — segue com o que tem local */ }
   startRealtimeSync();

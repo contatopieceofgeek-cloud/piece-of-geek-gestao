@@ -95,6 +95,18 @@ Ficam de fora, de propósito: `IDB_NAME = 'piece_of_geek_db'` e `app:'piece-of-g
 
 Teste rápido de regressão: `JSON.stringify(defaultData())` e `JSON.stringify(migrateSettings({}))` não podem conter nenhum dado de negócio real.
 
+## ⚠️ Sincronização: instalação nova não pode competir com a nuvem
+
+Perda de dado real, em produção: o dono abriu o app numa aba anônima (sem `localStorage`, logo sem as credenciais do Supabase), o app concluiu "instalação nova", criou o andaime de `defaultData()` **e gravou** — com carimbo de data de agora. Ao conectar a conta em seguida, a comparação de timestamp do `storageGet()` viu o vazio local como "edição mais recente", manteve ele e o **empurrou por cima da nuvem**. 23 produtos, anúncios e configurações viraram `[]`.
+
+Três regras que saíram disso:
+
+1. **`applyLoadedState()` não persiste o estado de instalação nova.** Sem timestamp local, a nuvem sempre vence — que é o certo pra quem acabou de instalar. O primeiro save real acontece na primeira edição do usuário.
+2. **`afterSyncLogin()` trata conflito como conflito.** Se a nuvem tem dado e o aparelho também (`hasLocalData()`, que checa se existe timestamp gravado), o usuário escolhe qual lado vale — e um backup é baixado antes, automaticamente. Sem dado local, puxa a nuvem direto com `preferRemoteOnPull`, que faz o `storageGet` ignorar a comparação de data.
+3. **A comparação de timestamp só é válida entre dois estados que o usuário realmente editou.** Qualquer código novo que grave estado "de sistema" (andaime, migração, default) precisa ou não gravar, ou não carimbar data — senão volta a competir com a nuvem.
+
+Recuperação, se acontecer de novo: os dados ficam no IndexedDB da origem (`piece_of_geek_db`, store `kv`). Dá pra ler sem executar o app abrindo uma página da MESMA origem que não carrega o `app.js` (ex: `/termos.html`) e lendo o IndexedDB pelo console — foi assim que os dados voltaram.
+
 ## Assinatura e cobrança
 
 `app/js/config.js` guarda a URL e a publishable key do projeto Supabase **do produto**. Enquanto estiverem em branco, o app volta ao modo antigo de "traga seu próprio Supabase" (o usuário digita URL e chave em Configurações) — é o que mantém o desenvolvimento local e as contas antigas funcionando. Publishable key no código-fonte é seguro por design: quem protege o dado é a RLS, não o segredo da chave. **service_role key nunca entra aí** — só nos secrets das Edge Functions.
