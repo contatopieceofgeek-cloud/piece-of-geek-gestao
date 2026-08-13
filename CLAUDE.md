@@ -107,6 +107,10 @@ Três regras que saíram disso:
 
 Recuperação, se acontecer de novo: os dados ficam no IndexedDB da origem (`piece_of_geek_db`, store `kv`). Dá pra ler sem executar o app abrindo uma página da MESMA origem que não carrega o `app.js` (ex: `/termos.html`) e lendo o IndexedDB pelo console — foi assim que os dados voltaram.
 
+**As quatro decisões agora moram em `app/js/sync-rules.js`, testadas em `test/sync.test.js`** — `isFreshInstall`, `resolveRead`, `classifyWriteError` e `loginSyncDecision`. Eram comparações escritas inline no meio do IO, impossíveis de testar, e foi exatamente aí que o dado sumiu. O `app.js` chama essas funções; ao mexer em conflito de sincronização, mexa nelas, não recrie a comparação à mão.
+
+Cuidado com empate de data: `storageSet` grava o MESMO carimbo no local e na nuvem, então toda chave já sincronizada empata. Por isso só o local **estritamente** mais novo justifica reenviar (`localIsNewer`, não `!remoteIsNewer`) — tratar empate como "local mais novo" fazia o app disparar nove upserts inúteis por abertura.
+
 ## Assinatura e cobrança
 
 `app/js/config.js` guarda a URL e a publishable key do projeto Supabase **do produto**. Enquanto estiverem em branco, o app volta ao modo antigo de "traga seu próprio Supabase" (o usuário digita URL e chave em Configurações) — é o que mantém o desenvolvimento local e as contas antigas funcionando. Publishable key no código-fonte é seguro por design: quem protege o dado é a RLS, não o segredo da chave. **service_role key nunca entra aí** — só nos secrets das Edge Functions.

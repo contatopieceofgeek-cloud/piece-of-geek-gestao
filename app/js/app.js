@@ -638,15 +638,19 @@ async function storageGet(key){
       if(client && user){
         const { data, error } = await client.from('app_data').select('value,updated_at').eq('user_id',user.id).eq('key',key).maybeSingle();
         if(!error){
-          if(!data) return local.value;
-          // Puxada explícita logo após o login: a nuvem manda, sem comparar
-          // data. Quem acabou de entrar numa conta quer os dados dela — ver
-          // afterSyncLogin(), que só liga isso depois de tratar o conflito.
-          if(preferRemoteOnPull) return data.value;
-          const remoteIsNewer = !local.updatedAt || new Date(data.updated_at) > new Date(local.updatedAt);
-          if(remoteIsNewer) return data.value;
-          // Local tem uma edição mais recente que a nuvem (ex: feita offline) — usa o
-          // local e reenvia pra nuvem em segundo plano, pra não perder essa edição.
+          // A decisão de quem vence mora em js/sync-rules.js, testada em
+          // test/sync.test.js — era uma comparação escrita aqui no meio do IO
+          // que apagou os dados do dono.
+          const escolha = resolveRead({
+            hasRemote: !!data,
+            localUpdatedAt: local.updatedAt,
+            remoteUpdatedAt: data ? data.updated_at : null,
+            preferRemote: preferRemoteOnPull,
+          });
+          if(escolha === 'remote') return data.value;
+          if(escolha === 'local') return local.value;
+          // 'local-and-push': edição mais nova feita aqui (tipicamente
+          // offline) — usa a local e reenvia pra nuvem em segundo plano.
           lastLocalSaveAt = Date.now();
           client.from('app_data').upsert(
             { user_id:user.id, key, value:local.value, updated_at:local.updatedAt },
@@ -685,7 +689,10 @@ async function storageSet(key, value){
         if(subscription.writeBlocked){ subscription.writeBlocked = false; renderSubscriptionBanner(); }
       }
     }catch(e){
-      if(e && (e.code === '42501' || /row-level security/i.test(e.message||''))){
+      // Recusa da RLS vs. falta de conexão — ver classifyWriteError em
+      // js/sync-rules.js. Confundir os dois fazia assinatura vencida parar de
+      // sincronizar sem o usuário ficar sabendo.
+      if(classifyWriteError(e) === 'rls'){
         if(!subscription.writeBlocked){
           subscription.writeBlocked = true;
           renderSubscriptionBanner();
@@ -704,7 +711,7 @@ async function applyLoadedState(){
     const [m,p,s,o,cu,c,pf,li,co] = await Promise.all([
       storageGet('materials'), storageGet('products'), storageGet('sales'), storageGet('orders'), storageGet('customers'), storageGet('settings'), storageGet('printFailures'), storageGet('listings'), storageGet('customOrders'),
     ]);
-    if(!m && !p && !s && !o && !cu && !c && !pf && !li && !co){
+    if(isFreshInstall([m,p,s,o,cu,c,pf,li,co])){
       // Instalação nova: NÃO persistir o andaime aqui.
       //
       // Gravar isto criava um carimbo de data "agora" pra um estado que o
@@ -6980,18 +6987,22 @@ async function afterSyncLogin(){
   if(!client || !user) return;
   try{
     const { data } = await client.from('app_data').select('key').eq('user_id',user.id).limit(1);
-    if(!data || data.length===0){
+    // A decisão mora em loginSyncDecision (js/sync-rules.js), testada. Decidir
+    // isso sozinho pela data foi o que apagou a conta do dono.
+    const decisao = loginSyncDecision({
+      cloudHasData: !!(data && data.length),
+      localHasData: await hasLocalData(),
+    });
+
+    if(decisao === 'offer-upload'){
       if(confirm('Não encontrei dados na nuvem ainda pra essa conta. Enviar os dados que já estão salvos neste dispositivo como ponto de partida?')){
         await saveAll();
         toast('Dados enviados para a nuvem');
       }
     } else {
-      // Os dois lados podem ter dado. Antes, isso caía direto na comparação
-      // de timestamp do storageGet, que em aparelho recém-instalado escolhia
-      // o vazio local e o empurrava por cima da conta — perda silenciosa.
-      // Agora: sem dado local, puxa a nuvem; com dado local, é conflito de
-      // verdade e quem decide é o usuário — com backup baixado antes.
-      if(await hasLocalData()){
+      if(decisao === 'ask'){
+        // Conflito real: os dois lados têm dado. Backup antes de qualquer
+        // coisa, e quem escolhe é o usuário.
         exportBackup(true);
         await new Promise(r=>setTimeout(r,300));
         const usarNuvem = confirm(
