@@ -2598,6 +2598,10 @@ function renderImpressao(){
 }
 let editingPrintJobId = null;
 let printJobFirstRender = false;
+// Enquanto false, o campo de horas segue o tempo cadastrado no produto; ao
+// primeiro toque do usuário ele para de ser sobrescrito. É o pedido: "por
+// padrão o registrado no produto, mas com opção de ajustar".
+let printJobHoursTouched = false;
 function openPrintJobModal(productId, presetQty, presetOutcome, editId){
   if(state.products.length===0){
     blockedBy('Nenhum produto cadastrado',
@@ -2607,6 +2611,9 @@ function openPrintJobModal(productId, presetQty, presetOutcome, editId){
   }
   editingPrintJobId = editId || null;
   printJobFirstRender = !!editingPrintJobId;
+  // Registro que já existe pode ter horas corrigidas na mão — não sobrescrever
+  // com o cálculo do cadastro só porque a modal reabriu.
+  printJobHoursTouched = !!editingPrintJobId;
   const editing = editingPrintJobId ? state.printFailures.find(x=>x.id===editingPrintJobId) : null;
   const selId = productId || (editing && editing.productId) || state.products[0].id;
   const outcomeVal = editing ? editing.outcome : (presetOutcome||'success');
@@ -2624,6 +2631,10 @@ function openPrintJobModal(productId, presetQty, presetOutcome, editId){
       </select></div>
     </div>
     <div id="pjPctBlock" style="display:${outcomeVal==='failure'?'block':'none'};"><div class="field"><label>% concluído antes de falhar</label><input type="number" id="pjPct" value="${editing?editing.pctComplete:100}" min="1" max="100" oninput="updatePrintJobPreview()"></div></div>
+    <div class="field"><label>Horas de impressão</label>
+      <input type="number" id="pjHours" step="0.1" min="0" value="${editing?num(editing.hoursUsed||0,1).replace(',','.'):'0'}" oninput="printJobHoursTouched=true; updatePrintJobPreview()">
+      <div class="field hint" id="pjHoursHint" style="margin-top:4px;"></div>
+    </div>
     <div class="field"><label>Observações (opcional)</label><input id="pjNotes" value="${editing?(editing.notes||''):''}" placeholder="Ex: descolou da mesa, entupiu o bico..."></div>
     <div class="field hint" style="margin-top:-8px;">Caixa e plástico bolha não são descontados aqui — só saem do estoque na hora da venda. Só o filamento sai agora.</div>
     <div class="helper-block" id="pjPreview"></div>
@@ -2653,6 +2664,25 @@ function updatePrintJobPreview(){
       <span><input type="number" id="pjFil_${i}" value="${(need||0).toFixed(1)}" step="0.1" style="width:80px;padding:4px 6px;text-align:right;"> ${mat?mat.unit:'g'}</span>
     </div>`;
   }).join('');
+  // Horas: acompanha o cadastro do produto até o usuário mexer no campo.
+  // Máquina que roda 2 peças ao mesmo tempo, filamento que enrosca e some
+  // meia hora, leva que parou pra troca de cor — nada disso está no cadastro,
+  // e é a hora de máquina que decide o R$/hora de tudo.
+  const horasPrevistas = (prod.timeH||0) * qty * (pct/100);
+  const hoursEl = document.getElementById('pjHours');
+  if(hoursEl){
+    if(!printJobHoursTouched) hoursEl.value = horasPrevistas.toFixed(1);
+    const horasInformadas = Math.max(0, parseFloat(hoursEl.value)||0);
+    const dif = horasInformadas - horasPrevistas;
+    const hintEl = document.getElementById('pjHoursHint');
+    if(hintEl){
+      hintEl.innerHTML = (prod.timeH||0)===0
+        ? `O produto "${prod.name}" está sem tempo de impressão cadastrado — informe aqui quanto essa leva levou.`
+        : `Cadastro do produto: ${num(prod.timeH,2)}h × ${num(qty,0)} = <strong>${num(horasPrevistas,1)}h</strong>${pct<100?` (${pct}% concluído)`:''}.`
+          + (Math.abs(dif) > 0.05 ? ` Você informou <strong>${dif>0?'+':''}${num(dif,1)}h</strong> de diferença — vale só pra esta leva, não altera o cadastro.` : ' Ajuste se a leva levou mais ou menos que isso.');
+    }
+  }
+
   const printUnits = printUnitsOf(prod);
   const stockLine = outcome==='success'
     ? `<div class="calc-line total"><span>Estoque de "${prod.name}" após produção</span><span>${num(prod.stock,0)} → ${num(prod.stock+qty*printUnits,0)}</span></div>${printUnits>1?`<div class="field hint" style="margin-top:-6px;">${qty} impressão${qty>1?'ões':''} × ${printUnits} peças/leva = ${qty*printUnits} peças</div>`:''}`
@@ -2672,9 +2702,12 @@ function reversePrintJobEffects(j){
   });
   // stock é sempre em peças — uma impressão (qty=leva) rende unitsPerPrint peças cada.
   if(j.outcome==='success') prod.stock = Math.max(0, prod.stock - piecesFromPrintJob(prod, j.qty||1));
+  // Devolve à máquina EXATAMENTE a hora que o registro gravou — ver
+  // machineHoursOfJob em calc.js, onde a regra está testada.
+  const horas = machineHoursOfJob(j, prod);
   const machines = state.settings.machines||[];
   const machine = machines.find(m=>m.id===prod.machineId) || machines[0];
-  if(machine) machine.hoursUsed = Math.max(0, (machine.hoursUsed||0) - (j.qty||1)*(prod.timeH||0)*(j.pctComplete/100));
+  if(machine) machine.hoursUsed = Math.max(0, (machine.hoursUsed||0) - horas);
 }
 function confirmPrintJob(){
   const prod = state.products.find(p=>p.id===document.getElementById('pjProd').value);
@@ -2713,16 +2746,23 @@ function confirmPrintJob(){
     energyCost = cFail.energyCost*cFail.printUnits*qty*(pctComplete/100);
     totalLoss = materialCost+energyCost;
   }
+  // hoursUsed é o tempo REAL desta leva: começa no que o cadastro do produto
+  // prevê e o usuário corrige no campo se a leva levou diferente. Uma vez
+  // gravado nunca é recalculado — se o produto mudar de 3h pra 5h, este
+  // registro continua com as 3h de então (mesma regra dos snapshots de venda,
+  // ver pegadinha #8 do CLAUDE.md). Falha parcial só gastou a fração que
+  // chegou a imprimir, e é isso que o padrão do campo já traz.
+  const hoursInput = document.getElementById('pjHours');
+  const hoursUsed = hoursInput
+    ? Math.max(0, parseFloat(hoursInput.value)||0)
+    : (prod.timeH||0) * qty * (pctComplete/100);
+
+  // O contador da máquina soma exatamente a mesma hora gravada no registro —
+  // senão o estorno (editar/excluir) devolveria um número diferente do que
+  // entrou, e a hora de máquina, que é a base do R$/hora, iria derivando.
   const machines = state.settings.machines||[];
   const machine = machines.find(m=>m.id===prod.machineId) || machines[0];
-  if(machine){ machine.hoursUsed = (machine.hoursUsed||0) + qty*(prod.timeH||0)*(pctComplete/100); }
-
-  // hoursUsed é SNAPSHOT: o tempo cadastrado no produto NA HORA do registro.
-  // Nunca recalculado depois — se o produto mudar de 3h pra 5h, este registro
-  // tem que continuar mostrando as 3h de então (mesma regra dos snapshots de
-  // venda, ver pegadinha #8 do CLAUDE.md). Falha parcial só gastou a fração
-  // que chegou a imprimir.
-  const hoursUsed = (prod.timeH||0) * qty * (pctComplete/100);
+  if(machine){ machine.hoursUsed = (machine.hoursUsed||0) + hoursUsed; }
   if(oldJob){
     Object.assign(oldJob, { date, productId:prod.id, productName:prod.name, qty, outcome, pctComplete, hoursUsed, materialCost, energyCost, totalLoss, notes, filamentUsage });
   } else {

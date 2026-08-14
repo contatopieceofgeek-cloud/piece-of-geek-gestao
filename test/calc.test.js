@@ -222,3 +222,33 @@ test('sumActiveInMonth: sem data preenchida, vale desde sempre', () => {
   assert.strictEqual(calc.sumActiveInMonth(lista, '2030-12'), 196);
   assert.strictEqual(calc.sumActiveInMonth(null, '2026-08'), 0, 'lista ausente não quebra');
 });
+
+// ===========================================================================
+//  Horas de máquina de um registro de impressão
+// ===========================================================================
+test('machineHoursOfJob devolve o que o registro gravou, não o cadastro de agora', () => {
+  // Bug real: o estorno (editar/excluir) recalculava com o prod.timeH ATUAL.
+  // Quem mudasse o tempo do produto entre registrar e excluir devolvia à
+  // máquina uma hora que nunca entrou, e o contador — base do R$/hora e da
+  // depreciação — ia derivando em silêncio.
+  const job = { qty: 5, pctComplete: 100, hoursUsed: 17.5 };
+  const produtoDepoisDeEditado = { timeH: 9.9 };
+  assert.strictEqual(calc.machineHoursOfJob(job, produtoDepoisDeEditado), 17.5,
+    'o cadastro novo (5 × 9,9 = 49,5h) não pode vazar pro estorno');
+
+  // Ajuste manual pra MENOS também tem que ser respeitado.
+  assert.strictEqual(calc.machineHoursOfJob({ qty:2, pctComplete:100, hoursUsed:1.2 }, { timeH:3 }), 1.2);
+  // Zero é um valor legítimo, não "sem registro".
+  assert.strictEqual(calc.machineHoursOfJob({ qty:2, pctComplete:100, hoursUsed:0 }, { timeH:3 }), 0);
+});
+
+test('machineHoursOfJob cai na fórmula antiga só quando não há hora gravada', () => {
+  // Registro anterior ao campo: a fórmula velha era correta na época dele.
+  assert.strictEqual(calc.machineHoursOfJob({ qty:3, pctComplete:100 }, { timeH:2 }), 6);
+  // Falha parcial gastou só a fração que chegou a imprimir.
+  assert.strictEqual(calc.machineHoursOfJob({ qty:2, pctComplete:50 }, { timeH:4 }), 4);
+  // Sem pctComplete assume concluída; sem produto/tempo, zero.
+  assert.strictEqual(calc.machineHoursOfJob({ qty:2 }, { timeH:1.5 }), 3);
+  assert.strictEqual(calc.machineHoursOfJob({ qty:2, pctComplete:100 }, null), 0);
+  assert.strictEqual(calc.machineHoursOfJob(null, { timeH:3 }), 0);
+});

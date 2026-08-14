@@ -350,6 +350,21 @@ function piecesForSale(saleUnits, qty){ return (qty||0) * Math.max(1, saleUnits|
 // produto — senão mudar o tamanho do kit reescreve o histórico.
 function saleUnitsOfSale(sale){ return Math.max(1, (sale && sale.unitsPerSaleSnapshot) || 1); }
 
+/* Horas de máquina que um registro de impressão consumiu.
+   Sempre o que o REGISTRO gravou, nunca recalculado do cadastro atual do
+   produto. Bug real: o estorno (editar/excluir) refazia a conta com o
+   `prod.timeH` de agora — quem mudasse o tempo do produto entre registrar e
+   excluir devolvia à máquina um número diferente do que tinha entrado, e o
+   contador de horas (base do R$/hora e da depreciação) ia derivando sem
+   ninguém notar. Registro antigo, sem o campo, cai na fórmula velha, que era
+   correta na época em que ele foi gravado. */
+function machineHoursOfJob(job, prod){
+  if(!job) return 0;
+  if(job.hoursUsed != null) return job.hoursUsed;
+  const pct = job.pctComplete != null ? job.pctComplete : 100;
+  return (job.qty || 1) * ((prod && prod.timeH) || 0) * (pct / 100);
+}
+
 /* Despesas/impostos que valem no mês `ym`.
    A lista é FLAT, sem histórico: sem esse recorte, uma despesa cadastrada hoje
    era cobrada de TODOS os meses, inclusive os anteriores a ela existir — o
@@ -365,7 +380,7 @@ function sumActiveInMonth(list, ym){
 // Ponte pro Node (no navegador `module` não existe e este bloco é ignorado).
 if(typeof module !== 'undefined' && module.exports){
   module.exports = {
-    activeInMonth, sumActiveInMonth,
+    activeInMonth, sumActiveInMonth, machineHoursOfJob,
     materialByName, boxCost, filamentCost, bubbleWrapMaterial, bubbleWrapUnitCost,
     tapeMaterial, tapeUnitCost, toolCostPerUse, FLAT_PACKAGING_MAX_HEIGHT_CM,
     boxFitsDimensions, bestFittingBox, totalWeight, findMachine,
