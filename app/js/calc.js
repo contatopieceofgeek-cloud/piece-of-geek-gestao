@@ -350,9 +350,22 @@ function piecesForSale(saleUnits, qty){ return (qty||0) * Math.max(1, saleUnits|
 // produto — senão mudar o tamanho do kit reescreve o histórico.
 function saleUnitsOfSale(sale){ return Math.max(1, (sale && sale.unitsPerSaleSnapshot) || 1); }
 
+/* Despesas/impostos que valem no mês `ym`.
+   A lista é FLAT, sem histórico: sem esse recorte, uma despesa cadastrada hoje
+   era cobrada de TODOS os meses, inclusive os anteriores a ela existir — o
+   export Anual repetia a mesma assinatura de janeiro a dezembro. `startMonth`
+   em branco = vale desde sempre, que era o comportamento antes do campo. */
+function activeInMonth(list, ym){
+  return (list || []).filter(item => !item.startMonth || item.startMonth <= ym);
+}
+function sumActiveInMonth(list, ym){
+  return activeInMonth(list, ym).reduce((a, item) => a + (item.value || 0), 0);
+}
+
 // Ponte pro Node (no navegador `module` não existe e este bloco é ignorado).
 if(typeof module !== 'undefined' && module.exports){
   module.exports = {
+    activeInMonth, sumActiveInMonth,
     materialByName, boxCost, filamentCost, bubbleWrapMaterial, bubbleWrapUnitCost,
     tapeMaterial, tapeUnitCost, toolCostPerUse, FLAT_PACKAGING_MAX_HEIGHT_CM,
     boxFitsDimensions, bestFittingBox, totalWeight, findMachine,

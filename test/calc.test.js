@@ -195,3 +195,30 @@ test('recipes separam impressão, embalagem e componentes', () => {
   assert.deepStrictEqual(comps.map(nome), ['Parafuso']);
   assert.strictEqual(comps[0].qty, 6);
 });
+
+// ===========================================================================
+//  Despesas/impostos por mês de início (pegadinha #9 do CLAUDE.md)
+// ===========================================================================
+test('sumActiveInMonth só conta despesa a partir do mês da 1ª cobrança', () => {
+  const despesas = [
+    { name:'Assinatura', value:39.90, startMonth:'2026-07' },
+    { name:'Anúncio',    value:100,   startMonth:'2026-09' },
+  ];
+  // Bug real: o export Anual repetia a mesma assinatura de janeiro a dezembro
+  // mesmo o negócio tendo começado em julho.
+  assert.strictEqual(calc.sumActiveInMonth(despesas, '2026-06'), 0, 'antes da 1ª cobrança, nada');
+  assert.strictEqual(calc.sumActiveInMonth(despesas, '2026-07'), 39.90, 'no mês da 1ª cobrança, já conta');
+  assert.strictEqual(calc.sumActiveInMonth(despesas, '2026-08'), 39.90, 'segue contando nos meses seguintes');
+  assert.strictEqual(calc.sumActiveInMonth(despesas, '2026-09'), 139.90, 'a segunda entra quando chega a vez dela');
+  // Comparação é de string 'AAAA-MM', então a virada de ano tem que funcionar.
+  assert.strictEqual(calc.sumActiveInMonth(despesas, '2027-01'), 139.90, 'ano seguinte continua contando');
+});
+
+test('sumActiveInMonth: sem data preenchida, vale desde sempre', () => {
+  // Preserva o comportamento de antes do campo existir — é o que os dados
+  // já cadastrados recebem na migração, pra ninguém ver total mudar sozinho.
+  const lista = [{ name:'DAS-MEI', value:76, startMonth:'' }, { name:'Contador', value:120 }];
+  assert.strictEqual(calc.sumActiveInMonth(lista, '2020-01'), 196);
+  assert.strictEqual(calc.sumActiveInMonth(lista, '2030-12'), 196);
+  assert.strictEqual(calc.sumActiveInMonth(null, '2026-08'), 0, 'lista ausente não quebra');
+});

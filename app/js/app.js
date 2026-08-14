@@ -194,7 +194,7 @@ function sampleData(){
   d.settings.machines = [machine];
   d.settings.laborHourlyRate = 25;
   d.settings.operationsStartMonth = ym;
-  d.settings.expenses = [{id:uid(),name:'Assinatura de modelos 3D',value:39.90}];
+  d.settings.expenses = [{id:uid(),name:'Assinatura de modelos 3D',value:39.90,startMonth:ym}];
   return Object.assign(d, { materials, products, sales });
 }
 
@@ -396,6 +396,12 @@ function migrateSettings(settings){
   if(!Array.isArray(settings.taxes)){
     settings.taxes = settings.meiTax ? [{id:uid(),name:'Imposto MEI (DAS)',value:settings.meiTax}] : [];
   }
+  // Despesas/impostos que já existem ficam SEM data (= valem desde sempre),
+  // preservando o resultado que a pessoa já via. Quem quiser recortar preenche
+  // o mês na mão; linhas novas já nascem com o mês corrente.
+  [settings.expenses, settings.taxes].forEach(lista=>{
+    (lista||[]).forEach(item=>{ if(item.startMonth==null) item.startMonth = ''; });
+  });
   if(Array.isArray(settings.reserveGoals)){
     settings.reserveGoals.forEach(g=>{
       if(!g.autoMode) g.autoMode = (g.name==='Fundo Nova Máquina (Depreciação)') ? 'cost_depreciation' : 'pct_profit';
@@ -878,9 +884,10 @@ function blocoA(ym){
   const snap = (state.settings.monthlySnapshots||{})[ym];
   const expensesSrc = snap ? snap.expenses : state.settings.expenses;
   const taxesSrc = snap ? snap.taxes : state.settings.taxes;
-  const despesas = (expensesSrc||[]).reduce((a,e)=>a+(e.value||0),0);
+  // Só conta a partir do mês da 1ª cobrança (ver sumActiveInMonth em calc.js).
+  const despesas = sumActiveInMonth(expensesSrc, ym);
   const lucroBruto = receitaLiquida - custoProducao - frete - despesas;
-  const mei = (taxesSrc||[]).reduce((a,t)=>a+(t.value||0),0);
+  const mei = sumActiveInMonth(taxesSrc, ym);
   const lucroOperacional = lucroBruto - mei;
   return { faturamento, taxas, receitaLiquida, custoProducao, frete, despesas, lucroBruto, mei, lucroOperacional, qtdVendas: sales.length };
 }
@@ -6296,11 +6303,11 @@ function renderCaixa(){
     <div class="grid g-2" style="margin-top:14px;align-items:start;">
       <div class="card">
         <div class="card-title">Detalhamento — Despesas operacionais<span class="sub">${brl(a.despesas)}/mês</span></div>
-        ${breakdownTable(state.settings.expenses)}
+        ${breakdownTable(state.settings.expenses, currentMonth)}
       </div>
       <div class="card">
         <div class="card-title">Detalhamento — Impostos<span class="sub">${brl(a.mei)}/mês</span></div>
-        ${breakdownTable(state.settings.taxes)}
+        ${breakdownTable(state.settings.taxes, currentMonth)}
       </div>
     </div>
 
@@ -6361,10 +6368,19 @@ function renderCaixa(){
 function caixaRow(label, value, bold){
   return `<tr><td style="${bold?'font-weight:600;':''}">${label}</td><td class="right num" style="${bold?'font-weight:600;':''}color:${value<0?'var(--red)':bold?'var(--green)':'var(--text)'}">${brl(value)}</td></tr>`;
 }
-function breakdownTable(items){
+/* Detalhamento de despesas/impostos do mês `ym`. Item cuja 1ª cobrança ainda
+   não chegou aparece apagado e sem valor — se sumisse da lista, o usuário não
+   entenderia por que o total não bate com o que ele cadastrou. */
+function breakdownTable(items, ym){
   if(!items || items.length===0) return `${emptyState('Nenhum item cadastrado')}<button class="btn ghost sm" style="width:100%;margin-top:6px;" onclick="switchTab('configuracoes')">+ Adicionar item</button>`;
   return `<div class="tbl-wrap"><table><tbody>
-    ${items.map(i=>`<tr><td>${i.name}</td><td class="right num">${brl(i.value)}</td></tr>`).join('')}
+    ${items.map(i=>{
+      const futuro = ym && i.startMonth && i.startMonth > ym;
+      return `<tr${futuro?' style="opacity:.5;"':''}>
+        <td>${i.name}${futuro?` <span class="sub">a partir de ${monthLabel(i.startMonth)}</span>`:''}</td>
+        <td class="right num">${futuro ? '—' : brl(i.value)}</td>
+      </tr>`;
+    }).join('')}
   </tbody></table></div>
   <button class="btn ghost sm" style="width:100%;margin-top:10px;" onclick="switchTab('configuracoes')">Editar itens</button>`;
 }
@@ -6420,7 +6436,7 @@ function renderConfiguracoes(){
 
     <div class="section-title">Despesas operacionais mensais</div>
     <div class="card">
-      <div class="field hint" style="margin-top:0;margin-bottom:10px;">Cada item que você paga todo mês pra manter o negócio rodando: assinaturas, anúncios, ferramentas etc.</div>
+      <div class="field hint" style="margin-top:0;margin-bottom:10px;">Cada item que você paga todo mês pra manter o negócio rodando: assinaturas, anúncios, ferramentas etc. Em <strong>A partir de</strong>, o mês da primeira cobrança — antes dele a despesa não entra em nenhum cálculo. Em branco, vale pra todos os meses.</div>
       <div id="expenseRows"></div>
       <button class="btn ghost sm" onclick="addExpenseRow()">+ Adicionar despesa</button>
       <div class="field hint" style="margin-top:10px;text-align:right;">Total: <strong id="expenseTotal" style="color:var(--text)">${brl(editingExpenses.reduce((a,e)=>a+(e.value||0),0))}</strong></div>
@@ -6428,7 +6444,7 @@ function renderConfiguracoes(){
 
     <div class="section-title">Impostos mensais</div>
     <div class="card">
-      <div class="field hint" style="margin-top:0;margin-bottom:10px;">DAS-MEI e qualquer outro imposto que incida sobre o negócio.</div>
+      <div class="field hint" style="margin-top:0;margin-bottom:10px;">DAS-MEI e qualquer outro imposto que incida sobre o negócio. Em <strong>A partir de</strong>, o mês da primeira guia paga — em branco, vale pra todos os meses.</div>
       <div id="taxRows"></div>
       <button class="btn ghost sm" onclick="addTaxRow()">+ Adicionar imposto</button>
     </div>
@@ -6686,25 +6702,39 @@ function removeMachineRow(i){
   editingMachines.splice(i,1);
   renderMachineRows();
 }
+/* Linhas de nome + valor + mês da 1ª cobrança.
+   O mês existe porque a lista não tinha data nenhuma: uma despesa cadastrada
+   hoje era aplicada a TODOS os meses, inclusive os anteriores a ela existir —
+   o export Anual mostrava a mesma assinatura de janeiro a dezembro. Em branco
+   = vale desde sempre, que é o comportamento antigo (ver blocoA). */
 function renderNameValueRows(containerId, list, updateFn, removeFn){
   const el = document.getElementById(containerId);
   if(!el) return;
-  el.innerHTML = list.length ? list.map((item,i)=>`
-    <div style="display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) 28px;gap:8px;align-items:center;margin-bottom:8px;">
+  el.innerHTML = list.length ? `
+    <div style="display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1.1fr) 28px;gap:8px;margin-bottom:4px;">
+      <div class="field hint" style="margin:0;">Nome</div>
+      <div class="field hint" style="margin:0;">Valor mensal</div>
+      <div class="field hint" style="margin:0;">A partir de</div><div></div>
+    </div>` + list.map((item,i)=>`
+    <div style="display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1.1fr) 28px;gap:8px;align-items:center;margin-bottom:8px;">
       <input value="${item.name}" placeholder="Nome" style="min-width:0;" oninput="${updateFn}(${i},'name',this.value)">
-      <input type="number" step="0.01" value="${item.value}" placeholder="R$" style="min-width:0;" oninput="${updateFn}(${i},'value',this.value)">
+      <input type="number" step="0.01" min="0" value="${item.value}" placeholder="R$" style="min-width:0;" oninput="${updateFn}(${i},'value',this.value)">
+      <input type="month" value="${item.startMonth||''}" title="Mês da primeira cobrança — em branco vale desde sempre" style="min-width:0;" onchange="${updateFn}(${i},'startMonth',this.value)">
       <button class="btn ghost sm" title="Remover" style="padding:6px 8px;" onclick="${removeFn}(${i})">×</button>
     </div>
   `).join('') : `<div class="empty" style="padding:10px;">Nenhum item ainda</div>`;
 }
-function addExpenseRow(){ editingExpenses.push({id:uid(),name:'',value:0}); renderNameValueRows('expenseRows', editingExpenses, 'updateExpenseRow', 'removeExpenseRow'); }
+// Linha nova nasce começando no mês corrente: quem cadastra uma despesa hoje
+// começou a pagar por volta de agora, não em janeiro. Era essa a reclamação —
+// despesa criada agora aparecia em todos os meses anteriores do Anual.
+function addExpenseRow(){ editingExpenses.push({id:uid(),name:'',value:0,startMonth:todayStr().slice(0,7)}); renderNameValueRows('expenseRows', editingExpenses, 'updateExpenseRow', 'removeExpenseRow'); }
 function updateExpenseRow(i,field,val){
   editingExpenses[i][field] = field==='value' ? (parseFloat(val)||0) : val;
   const t = document.getElementById('expenseTotal');
   if(t) t.textContent = brl(editingExpenses.reduce((a,e)=>a+(e.value||0),0));
 }
 function removeExpenseRow(i){ editingExpenses.splice(i,1); renderNameValueRows('expenseRows', editingExpenses, 'updateExpenseRow', 'removeExpenseRow'); }
-function addTaxRow(){ editingTaxes.push({id:uid(),name:'',value:0}); renderNameValueRows('taxRows', editingTaxes, 'updateTaxRow', 'removeTaxRow'); }
+function addTaxRow(){ editingTaxes.push({id:uid(),name:'',value:0,startMonth:todayStr().slice(0,7)}); renderNameValueRows('taxRows', editingTaxes, 'updateTaxRow', 'removeTaxRow'); }
 function updateTaxRow(i,field,val){ editingTaxes[i][field] = field==='value' ? (parseFloat(val)||0) : val; }
 function removeTaxRow(i){ editingTaxes.splice(i,1); renderNameValueRows('taxRows', editingTaxes, 'updateTaxRow', 'removeTaxRow'); }
 const ML_CATEGORY_PRESETS = [
