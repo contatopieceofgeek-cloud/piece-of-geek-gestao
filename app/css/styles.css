@@ -188,6 +188,10 @@ tbody tr:hover{background:rgba(0,0,0,0.025);}
   background:var(--bg-alt);border:1px solid var(--line);border-radius:var(--radius-sm);
   padding:8px 10px;color:var(--text);font-size:13.5px;outline:none;width:100%;
   transition:border-color .12s ease, box-shadow .12s ease;
+  /* line-height explícito porque <select> e <input> calculam a altura do
+     conteúdo por métricas diferentes: com o padrão, todo select ficava 2px
+     mais alto que o input ao lado e a linha nunca fechava reta. */
+  line-height:1.35;
 }
 .field input:focus,.field select:focus,.field textarea:focus{border-color:var(--nozzle);box-shadow:0 0 0 3px var(--nozzle-dim);}
 /* Duas formas, de propósito:
@@ -197,10 +201,36 @@ tbody tr:hover{background:rgba(0,0,0,0.025);}
    O seletor composto faltava: 87 dos 94 blocos escritos como "field hint"
    caíam no texto do corpo (14px, quase preto), e só os 7 com cor inline
    pareciam dica — por isso davam a impressão de caixa escura aleatória. */
+/* Checkbox que divide linha com um campo normal: ocupa a mesma altura de um
+   input pra fechar na mesma base (antes era um margin-top:22px chutado, que
+   passou a brigar com o align-items:end das .row2/.row3). */
+.field-checkbox{
+  display:flex;align-items:center;gap:8px;
+  min-height:36px;
+  font-size:13px;color:var(--text-dim);font-weight:500;
+}
+.field-checkbox input[type="checkbox"]{width:auto;min-height:0;}
 .field .hint{font-size:11px;color:var(--text-faint);}
 .field.hint{font-size:12.5px;color:var(--text-dim);line-height:1.5;}
-.row2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;}
-.row3{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1fr);gap:12px;}
+/* align-items:end alinha os CAMPOS, não o topo das caixas. Rótulo comprido
+   ("Taxa fixa por unidade vendida (R$)") quebra em duas linhas e, sem isto,
+   empurrava só aquele input 17px pra baixo — a linha ficava torta. */
+.row2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;align-items:end;}
+.row3{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1fr);gap:12px;align-items:end;}
+
+/* Linha de item do carrinho (Nova venda). Mesma gap e mesmos .field das
+   .row2/.row3 do resto do modal — o que muda é só a proporção: Produto ocupa
+   o dobro, e o botão de remover tem largura fixa. */
+.cart-item{margin-bottom:10px;}
+.cart-item-row{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1fr) 34px;gap:12px;align-items:end;}
+/* Alinha o × pela base do input, não pela do rótulo. */
+.cart-item-remove{padding:8px 0;height:36px;}
+@media(max-width:640px){
+  /* Espremer três campos e um botão em 375px torna os números ilegíveis:
+     Produto ganha a linha inteira e o resto divide a de baixo. */
+  .cart-item-row{grid-template-columns:minmax(0,1fr) minmax(0,1fr) 34px;}
+  .cart-item-row > .field:first-child{grid-column:1 / -1;}
+}
 
 .progress{height:7px;border-radius:5px;background:var(--bg-alt);overflow:hidden;border:1px solid var(--line);}
 .progress > div{height:100%;border-radius:5px;background:var(--teal);transition:width .25s ease;}

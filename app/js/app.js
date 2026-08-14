@@ -3238,14 +3238,17 @@ function renderCartItemsList(){
     const prod = state.products.find(p=>p.id===item.productId);
     const saleUnits = prod ? saleUnitsOf(prod) : 1;
     const qtyLabel = saleUnits>1 ? `Qtd (kits de ${saleUnits})` : 'Qtd (un)';
-    return `<div style="margin-bottom:4px;">
-    <div style="display:grid;grid-template-columns:minmax(0,1fr) 76px 76px 28px;gap:6px;align-items:end;">
-      <div style="min-width:0;"><label style="font-size:10.5px;display:block;">Produto</label><select style="width:100%;min-width:0;box-sizing:border-box;" onchange="updateCartItem('${item.rowId}','productId',this.value)">
+    // Mesma convenção .field/label do resto do modal (Data, Cliente,
+    // Plataforma...) — antes esta linha tinha grid, rótulo e padding
+    // próprios, e era a única do formulário fora do padrão.
+    return `<div class="cart-item">
+    <div class="cart-item-row">
+      <div class="field" style="margin-bottom:0;"><label>Produto</label><select onchange="updateCartItem('${item.rowId}','productId',this.value)">
         ${state.products.map(p=>`<option value="${p.id}" ${p.id===item.productId?'selected':''}>${p.name}</option>`).join('')}
       </select></div>
-      <div style="min-width:0;"><label style="font-size:10.5px;display:block;white-space:normal;">${qtyLabel}</label><input type="number" min="1" value="${item.qty}" style="width:100%;min-width:0;box-sizing:border-box;padding:8px 4px;" oninput="updateCartItem('${item.rowId}','qty',this.value)"></div>
-      <div style="min-width:0;"><label style="font-size:10.5px;display:block;">Preço/venda</label><input type="number" step="0.01" value="${item.unitPrice.toFixed(2)}" style="width:100%;min-width:0;box-sizing:border-box;padding:8px 4px;" oninput="updateCartItem('${item.rowId}','unitPrice',this.value)"></div>
-      <button class="btn ghost sm" title="Remover item" style="padding:6px 8px;" onclick="removeCartItem('${item.rowId}')">×</button>
+      <div class="field" style="margin-bottom:0;"><label>${qtyLabel}</label><input type="number" min="1" step="1" value="${item.qty}" oninput="updateCartItem('${item.rowId}','qty',this.value)"></div>
+      <div class="field" style="margin-bottom:0;"><label>Preço/venda</label><input type="number" step="0.01" value="${item.unitPrice.toFixed(2)}" oninput="updateCartItem('${item.rowId}','unitPrice',this.value)"></div>
+      <button class="btn ghost sm cart-item-remove" title="Remover item" onclick="removeCartItem('${item.rowId}')">×</button>
     </div>
     ${cartItemDerivationHtml(item)}
     </div>`;
@@ -3294,8 +3297,11 @@ function updateFeeDefaults(){
       note = `<div class="field hint" style="margin-top:-8px;margin-bottom:12px;color:var(--amber);">O carrinho mistura produtos com e sem taxa real buscada (ou com taxas diferentes) — confira o percentual manualmente.</div>`;
     }
   }
-  if(pctEl && !pctEl.dataset.touched) pctEl.value = pctValue;
-  if(fixedEl && !fixedEl.dataset.touched) fixedEl.value = fixedValue;
+  // Arredonda pra 2 casas: a taxa real do ML vem de uma divisão
+  // (sale_fee_amount / preço) e chegava ao campo como 17,9595991839679 —
+  // ilegível, e o input só aceita 2 casas mesmo (step 0.01).
+  if(pctEl && !pctEl.dataset.touched) pctEl.value = Math.round((pctValue||0)*100)/100;
+  if(fixedEl && !fixedEl.dataset.touched) fixedEl.value = Math.round((fixedValue||0)*100)/100;
   if(noteEl) noteEl.innerHTML = note;
 }
 function matchingOrdersForProduct(productId){
@@ -6100,7 +6106,7 @@ function openMaterialModal(id){
             <input id="mColorName" placeholder="Nome da cor (ex: Vermelho)" value="${m.colorName||''}" oninput="updateFilamentNamePreview()">
           </div>
         </div>
-        <div class="field"><label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-dim);margin-top:22px;"><input type="checkbox" id="mIsDualColor" style="width:auto;" ${m.isDualColor?'checked':''} onchange="document.getElementById('mColor2Block').style.display=this.checked?'flex':'none'; updateFilamentNamePreview();"> É bicolor</label></div>
+        <div class="field"><label class="field-checkbox"><input type="checkbox" id="mIsDualColor" ${m.isDualColor?'checked':''} onchange="document.getElementById('mColor2Block').style.display=this.checked?'flex':'none'; updateFilamentNamePreview();"> É bicolor</label></div>
       </div>
       <div id="mColor2Block" style="display:${m.isDualColor?'flex':'none'};gap:8px;align-items:center;margin-bottom:12px;">
         <input type="color" id="mColor2" value="${m.color2||'#cccccc'}" style="width:44px;padding:2px;height:36px;flex:none;" oninput="updateFilamentNamePreview()">
