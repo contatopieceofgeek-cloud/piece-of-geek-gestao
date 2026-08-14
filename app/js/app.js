@@ -1386,7 +1386,7 @@ function renderDashboard(){
     ${renderDasCard()}
     ${renderMonthlyGoalCard(a)}
 
-    <div class="grid g-3" style="margin-top:14px;align-items:start;">
+    <div class="grid g-3" style="margin-top:14px;">
       <div class="card">
         <div class="card-title">Estoque de matéria-prima<span class="sub">${low.length} item(ns) em alerta</span></div>
         ${renderLowStockList(low)}
@@ -6300,7 +6300,7 @@ function renderCaixa(){
       </table></div>
     </div>
 
-    <div class="grid g-2" style="margin-top:14px;align-items:start;">
+    <div class="grid g-2" style="margin-top:14px;">
       <div class="card">
         <div class="card-title">Detalhamento — Despesas operacionais<span class="sub">${brl(a.despesas)}/mês</span></div>
         ${breakdownTable(state.settings.expenses, currentMonth)}
@@ -6372,7 +6372,7 @@ function caixaRow(label, value, bold){
    não chegou aparece apagado e sem valor — se sumisse da lista, o usuário não
    entenderia por que o total não bate com o que ele cadastrou. */
 function breakdownTable(items, ym){
-  if(!items || items.length===0) return `${emptyState('Nenhum item cadastrado')}<button class="btn ghost sm" style="width:100%;margin-top:6px;" onclick="switchTab('configuracoes')">+ Adicionar item</button>`;
+  if(!items || items.length===0) return `${emptyState('Nenhum item cadastrado')}<div class="card-actions"><button class="btn ghost sm" style="width:100%;" onclick="switchTab('configuracoes')">+ Adicionar item</button></div>`;
   return `<div class="tbl-wrap"><table><tbody>
     ${items.map(i=>{
       const futuro = ym && i.startMonth && i.startMonth > ym;
@@ -6382,7 +6382,7 @@ function breakdownTable(items, ym){
       </tr>`;
     }).join('')}
   </tbody></table></div>
-  <button class="btn ghost sm" style="width:100%;margin-top:10px;" onclick="switchTab('configuracoes')">Editar itens</button>`;
+  <div class="card-actions"><button class="btn ghost sm" style="width:100%;" onclick="switchTab('configuracoes')">Editar itens</button></div>`;
 }
 let editingPlatforms = [];
 let editingExpenses = [];
