@@ -1196,7 +1196,7 @@ function renderTopbarActions(){
   else if(currentTab==='estoque') el.innerHTML = stockTab==='materiais' ? `<button class="btn primary" onclick="openMaterialModal()">+ Nova matéria-prima</button>` : `<button class="btn primary" onclick="switchTab('impressao')">Ir pra Fila de Impressão</button>`;
   else if(currentTab==='impressao') el.innerHTML = `<button class="btn primary" onclick="openPrintJobModal()">+ Nova impressão</button>`;
   else if(currentTab==='calculo') el.innerHTML = `<button class="btn primary" onclick="switchTab('configuracoes')">Gerenciar impressoras</button>`;
-  else if(currentTab==='anual') el.innerHTML = `<button class="btn ghost" onclick="exportAnnualExcel()">Exportar Excel</button> <button class="btn ghost" onclick="window.print()">Exportar PDF</button> <button class="btn primary" onclick="openInvestmentModal()">+ Adicionar investimento</button>`;
+  else if(currentTab==='anual') el.innerHTML = `<button class="btn ghost" onclick="exportAnnualExcel()">Exportar Excel</button> <button class="btn ghost" onclick="exportCurrentTabPDF()">Exportar PDF</button> <button class="btn primary" onclick="openInvestmentModal()">+ Adicionar investimento</button>`;
   else if(currentTab==='taxas') el.innerHTML = `<button class="btn primary" onclick="confirmTaxas()">Salvar</button>`;
   else if(currentTab==='configuracoes') el.innerHTML = `<button class="btn primary" onclick="confirmConfiguracoes()">Salvar</button>`;
   else el.innerHTML = '';
@@ -2169,6 +2169,74 @@ function backfillMachineHours(){
       m.hoursUsed = state.sales.filter(s=>s.machineId===m.id).reduce((a,s)=>a+(s.hoursUsed||0),0);
     }
   });
+}
+/* ---------- Exportar a tela atual em PDF (via impressão do navegador) ----------
+   O que saía antes era a página viva jogada no papel: caixas de filtro com
+   <select> dentro, rodapés de botão vazios, o gráfico virando um retângulo
+   em branco e tudo colado na borda da folha, sem nada dizendo que documento
+   era aquele. Daí a impressão de "quadrados soltos".
+
+   Aqui o documento é preparado antes de imprimir e desfeito depois. O que o
+   CSS de impressão não consegue resolver sozinho é o <canvas>: ele é
+   bitmap, não reflui, e o Chart.js redesenha no evento de mídia — às vezes
+   pra um canvas de tamanho zero. Então cada gráfico é congelado numa <img>
+   antes, e o que estiver em branco (CDN do Chart.js fora do ar, por
+   exemplo) tem o cartão inteiro removido, em vez de imprimir uma moldura
+   vazia. */
+function canvasEstaEmBranco(canvas){
+  try{
+    const ctx = canvas.getContext('2d');
+    const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    for(let i = 3; i < data.length; i += 4) if(data[i] !== 0) return false;
+    return true;
+  }catch(e){ return false; } // Sem leitura possível, imprime como está.
+}
+function prepararImpressaoDaTela(){
+  const content = document.querySelector('.content');
+  if(!content) return;
+
+  document.querySelectorAll('.content canvas').forEach(canvas=>{
+    const cartao = canvas.closest('.card') || canvas.parentElement;
+    if(canvasEstaEmBranco(canvas)){
+      cartao.dataset.printRemovido = '1';
+      cartao.style.display = 'none';
+      return;
+    }
+    const img = document.createElement('img');
+    img.src = canvas.toDataURL('image/png');
+    img.className = 'print-chart';
+    img.dataset.printTemp = '1';
+    canvas.dataset.printOculto = '1';
+    canvas.style.display = 'none';
+    canvas.parentElement.insertBefore(img, canvas);
+  });
+
+  const cab = document.createElement('div');
+  cab.id = 'printHeader';
+  cab.dataset.printTemp = '1';
+  const aba = tabTitle();
+  const periodo = currentTab==='anual' ? currentYear : monthLabel(currentMonth);
+  cab.innerHTML = `<div class="print-biz">${bizName()}</div>
+    <div class="print-doc">${aba} — ${periodo}</div>
+    <div class="print-meta">Gerado em ${new Date().toLocaleString('pt-BR')} · ${PRODUCT_NAME}</div>`;
+  content.insertBefore(cab, content.firstChild);
+}
+function desfazerImpressaoDaTela(){
+  document.querySelectorAll('[data-print-temp]').forEach(el=>el.remove());
+  document.querySelectorAll('[data-print-oculto]').forEach(el=>{
+    el.style.display = ''; delete el.dataset.printOculto;
+  });
+  document.querySelectorAll('[data-print-removido]').forEach(el=>{
+    el.style.display = ''; delete el.dataset.printRemovido;
+  });
+}
+function exportCurrentTabPDF(){
+  prepararImpressaoDaTela();
+  const limpar = ()=>{ desfazerImpressaoDaTela(); window.removeEventListener('afterprint', limpar); };
+  window.addEventListener('afterprint', limpar);
+  // O timeout dá ao navegador uma chance de decodificar as <img> dos
+  // gráficos antes de montar as páginas.
+  setTimeout(()=>window.print(), 120);
 }
 function printHTML(html){
   const area = document.getElementById('catalogPrintArea');

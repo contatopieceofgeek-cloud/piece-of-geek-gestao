@@ -306,18 +306,40 @@ tbody tr:hover{background:rgba(0,0,0,0.025);}
   .tbl-compact-mobile tbody td[data-label="Piso p/ meta R$/hora"]{display:none;}
   .tbl-responsive tbody td:has(button){justify-content:flex-end;padding-top:10px;}
 }
+/* Cabeçalho do PDF — montado em prepararImpressaoDaTela(), só existe no papel. */
+#printHeader{display:none;}
 @media print{
   .sidebar, .topbar, .toast-wrap, .overlay, .modal-actions, button{display:none!important;}
+  /* Controles de tela que no papel viram caixa vazia: a barra de filtro é
+     só um <select> de período (que o cabeçalho já informa), e .card-actions
+     só carrega botões, que acabaram de ser escondidos. */
+  .filter-bar, .card-actions{display:none!important;}
   body{background:#fff;color:#111;}
   .main{width:100%;}
-  .content{padding:0;max-width:none;}
+  /* A margem da folha vem daqui e não do @page, que precisa continuar em 0
+     pro catálogo, cujas páginas já são 210x297mm com padding próprio. */
+  .content{padding:12mm 10mm;max-width:none;}
   .card{background:#fff;border:1px solid #ccc;color:#111;break-inside:avoid;}
+  .grid{break-inside:avoid;}
+  /* Título de seção não pode ficar sozinho no fim da página. */
+  .section-title{break-after:avoid;color:#111;}
   table{color:#111;}
   th{color:#555;border-color:#ddd;}
   td{border-color:#eee;}
-  .kpi{background:#fff;border:1px solid #ccc;}
-  .kpi-value, .card-title, .section-title{color:#111;}
-  canvas{max-width:100%;}
+  .kpi{background:#fff;border:1px solid #ccc;break-inside:avoid;}
+  .kpi-value, .card-title{color:#111;}
+  canvas, .print-chart{max-width:100%;height:auto;}
+
+  #printHeader{
+    display:block;
+    border-bottom:2px solid #111;
+    padding-bottom:8px;
+    margin-bottom:14px;
+  }
+  #printHeader .print-biz{font-family:var(--font-display);font-size:17px;font-weight:700;color:#111;}
+  #printHeader .print-doc{font-size:13px;color:#111;margin-top:2px;}
+  #printHeader .print-meta{font-size:10.5px;color:#666;margin-top:4px;}
+
   body.printing-catalog #app{display:none!important;}
   body.printing-catalog #catalogPrintArea{display:block!important;}
   @page{ margin:0; }
