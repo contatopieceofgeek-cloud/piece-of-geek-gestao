@@ -1506,19 +1506,39 @@ function openQuickQuoteModal(){
   renderQuoteLaborActionRows();
   updateQuickQuotePreview();
 }
+/* ---------- Envelope padrão das listas repetíveis ----------
+   Filamentos, mão de obra, ferramentas, componentes, despesas, impostos,
+   plataformas, faixas de preço: todas são "N campos + botão de remover".
+   Cada uma tinha grid, gap e proporções próprios escritos inline, o que fazia
+   a mesma coisa parecer nove coisas diferentes. Aqui todas passam pelo mesmo
+   cabeçalho de rótulos (uma vez, no topo) e pelas mesmas .form-row do CSS.
+   `cols` é o grid-template-columns SEM a coluna do ×, que é acrescentada
+   aqui — assim ninguém esquece de somar a largura do botão. */
+const FORM_ROW_X = 34;
+function formRowsHtml(cols, headers, rows, vazio){
+  if(!rows.length) return vazio || '';
+  return `<div class="form-rows" style="--cols:${cols} ${FORM_ROW_X}px;">
+    <div class="form-row-head">${headers.map(h=>`<span>${h}</span>`).join('')}<span></span></div>
+    ${rows.join('')}
+  </div>`;
+}
+function formRowX(onclick){
+  return `<button class="btn ghost sm form-row-x" title="Remover" onclick="${onclick}">×</button>`;
+}
 function renderQuoteFilamentRows(){
   const el = document.getElementById('qtFilamentRows');
   if(!el) return;
   const filamentOptions = state.materials.filter(m=>m.category==='Filamento');
-  el.innerHTML = quoteFilaments.map((f,i)=>`
-    <div style="display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr) 28px;gap:8px;align-items:center;margin-bottom:8px;">
-      <select style="min-width:0;" onchange="quoteFilaments[${i}].materialName=this.value; updateQuickQuotePreview();">
+  el.innerHTML = formRowsHtml('minmax(0,1.6fr) minmax(0,1fr)', ['Filamento','Peso (g)'],
+    quoteFilaments.map((f,i)=>`
+    <div class="form-row">
+      <select onchange="quoteFilaments[${i}].materialName=this.value; updateQuickQuotePreview();">
         ${filamentOptions.map(fo=>`<option value="${fo.name}" ${f.materialName===fo.name?'selected':''}>${fo.name}</option>`).join('')}
       </select>
-      <input type="number" step="0.01" value="${f.weightG}" placeholder="peso (g)" style="min-width:0;" oninput="quoteFilaments[${i}].weightG=parseFloat(this.value)||0; updateQuickQuotePreview();">
-      <button class="btn ghost sm" title="Remover" style="padding:6px 8px;" onclick="removeQuoteFilamentRow(${i})">×</button>
+      <input type="number" step="0.01" value="${f.weightG}" placeholder="peso (g)" oninput="quoteFilaments[${i}].weightG=parseFloat(this.value)||0; updateQuickQuotePreview();">
+      ${formRowX(`removeQuoteFilamentRow(${i})`)}
     </div>
-  `).join('');
+  `));
 }
 function addQuoteFilamentRow(){
   const first = (state.materials.find(m=>m.category==='Filamento')||{}).name||'PLA';
@@ -1535,13 +1555,14 @@ function removeQuoteFilamentRow(i){
 function renderQuoteLaborActionRows(){
   const el = document.getElementById('qtLaborActionRows');
   if(!el) return;
-  el.innerHTML = quoteLaborActions.map((a,i)=>`
-    <div style="display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr) 28px;gap:8px;align-items:center;margin-bottom:8px;">
-      <input list="laborActionOptions" value="${a.action}" placeholder="Ação (ex: Lixar)" style="min-width:0;" oninput="quoteLaborActions[${i}].action=this.value; updateQuickQuotePreview();">
-      <input type="number" step="1" value="${a.minutes}" placeholder="minutos" style="min-width:0;" oninput="quoteLaborActions[${i}].minutes=parseFloat(this.value)||0; updateQuickQuotePreview();">
-      <button class="btn ghost sm" title="Remover" style="padding:6px 8px;" onclick="removeQuoteLaborActionRow(${i})">×</button>
+  el.innerHTML = formRowsHtml('minmax(0,1.6fr) minmax(0,1fr)', ['Ação','Minutos'],
+    quoteLaborActions.map((a,i)=>`
+    <div class="form-row">
+      <input list="laborActionOptions" value="${a.action}" placeholder="Ação (ex: Lixar)" oninput="quoteLaborActions[${i}].action=this.value; updateQuickQuotePreview();">
+      <input type="number" step="1" value="${a.minutes}" placeholder="minutos" oninput="quoteLaborActions[${i}].minutes=parseFloat(this.value)||0; updateQuickQuotePreview();">
+      ${formRowX(`removeQuoteLaborActionRow(${i})`)}
     </div>
-  `).join('');
+  `));
 }
 function addQuoteLaborActionRow(){
   quoteLaborActions.push({action:'', minutes:0});
@@ -2042,11 +2063,11 @@ function openInvestmentModal(){
       <div class="field hint" style="margin-top:-8px;">Cada parcela conta no mês em que é paga, não tudo de uma vez na data da compra — e já aparece em Caixa no mês certo.</div>
     </div>
     <div id="invMachineSyncBlock" style="display:none;background:var(--bg-alt);border:1px solid var(--line-soft);border-radius:8px;padding:10px 12px;margin-bottom:12px;">
-      <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-dim);"><input type="checkbox" id="invSyncMachine" style="width:auto;" checked> Cadastrar automaticamente como impressora no Bloco B (Caixa)</label>
+      <label class="field-checkbox"><input type="checkbox" id="invSyncMachine" style="width:auto;" checked> Cadastrar automaticamente como impressora no Bloco B (Caixa)</label>
       <div class="field hint" style="margin-top:6px;">Cria uma impressora nova em Configurações com essa parcela — não afeta impressoras já cadastradas.</div>
     </div>
     <div id="invStockBlock" style="display:none;background:var(--bg-alt);border:1px solid var(--line-soft);border-radius:8px;padding:10px 12px;margin-bottom:12px;">
-      <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-dim);margin-bottom:8px;"><input type="checkbox" id="invAddStock" style="width:auto;" checked onchange="document.getElementById('invStockFields').style.display=this.checked?'grid':'none'"> Já entra no estoque de matéria-prima</label>
+      <label class="field-checkbox" style="margin-bottom:8px;"><input type="checkbox" id="invAddStock" style="width:auto;" checked onchange="document.getElementById('invStockFields').style.display=this.checked?'grid':'none'"> Já entra no estoque de matéria-prima</label>
       <div id="invStockFields" class="row2" style="margin-bottom:0;">
         <div class="field" style="margin-bottom:0;"><label>Material</label><select id="invMaterial"></select></div>
         <div class="field" style="margin-bottom:0;"><label>Quantidade recebida</label><input type="number" id="invQty" step="0.01" placeholder="Ex: 1000"></div>
@@ -3352,9 +3373,9 @@ function updateSalePreview(){
     const matches = matchingOrdersForProduct(prod.id);
     if(matches.length){
       if(cartOrderLinks[prod.id]===undefined && matches.length===1){ cartOrderLinks[prod.id] = matches[0].id; }
-      matchBlock = `<div style="margin-top:4px;font-size:11px;background:var(--bg-alt);border:1px solid var(--line-soft);border-radius:6px;padding:6px 8px;">
-        <label style="font-size:11px;">Bate com pedido em aberto —</label>
-        <select style="margin-top:3px;" onchange="onOrderMatchChange('${prod.id}', this.value); updateSalePreview();">
+      matchBlock = `<div class="field" style="margin:6px 0 0;">
+        <label>Bate com um pedido em aberto</label>
+        <select onchange="onOrderMatchChange('${prod.id}', this.value); updateSalePreview();">
           <option value="">Não vincular</option>
           ${matches.map(o=>`<option value="${o.id}" ${cartOrderLinks[prod.id]===o.id?'selected':''}>${orderCustomerName(o)||'Sem cliente'} — ${o.qty}x${o.dueDate?' (prazo '+fmtDate(o.dueDate)+')':''}</option>`).join('')}
         </select>
@@ -4182,7 +4203,7 @@ function renderListingLinkField(platform, val){
 function renderListingField(idKey, f, val, isNa){
   const id = `lst_${idKey}_${f.key}`;
   const naKey = `${idKey}_${f.key}`;
-  const naBox = `<label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:400;color:var(--text-faint);margin-left:8px;cursor:pointer;"><input type="checkbox" ${isNa?'checked':''} onchange="toggleListingFieldNa('${id}','${naKey}',this.checked)" style="width:auto;margin:0;">não se aplica</label>`;
+  const naBox = `<label class="field-checkbox inline"><input type="checkbox" ${isNa?'checked':''} onchange="toggleListingFieldNa('${id}','${naKey}',this.checked)" style="width:auto;margin:0;">não se aplica</label>`;
   const dis = isNa ? 'disabled' : '';
   if(f.type==='select'){
     return `<div class="field"><label>${f.label}${naBox}</label><select id="${id}" ${dis}>
@@ -4804,15 +4825,16 @@ function renderFilamentRows(){
   const el = document.getElementById('filamentRows');
   if(!el) return;
   const filamentOptions = state.materials.filter(m=>m.category==='Filamento');
-  el.innerHTML = editingFilaments.map((f,i)=>`
-    <div style="display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr) 28px;gap:8px;align-items:center;margin-bottom:8px;">
-      <select style="min-width:0;" onchange="editingFilaments[${i}].materialName=this.value; refreshCurrentPreview();">
+  el.innerHTML = formRowsHtml('minmax(0,1.6fr) minmax(0,1fr)', ['Filamento','Peso (g)'],
+    editingFilaments.map((f,i)=>`
+    <div class="form-row">
+      <select onchange="editingFilaments[${i}].materialName=this.value; refreshCurrentPreview();">
         ${filamentOptions.map(fo=>`<option value="${fo.name}" ${f.materialName===fo.name?'selected':''}>${fo.name}</option>`).join('')}
       </select>
-      <input type="number" step="0.01" value="${f.weightG}" placeholder="peso (g)" style="min-width:0;" oninput="editingFilaments[${i}].weightG=parseFloat(this.value)||0; refreshCurrentPreview();">
-      <button class="btn ghost sm" title="Remover" style="padding:6px 8px;" onclick="removeFilamentRow(${i})">×</button>
+      <input type="number" step="0.01" value="${f.weightG}" placeholder="peso (g)" oninput="editingFilaments[${i}].weightG=parseFloat(this.value)||0; refreshCurrentPreview();">
+      ${formRowX(`removeFilamentRow(${i})`)}
     </div>
-  `).join('');
+  `));
 }
 function addFilamentRow(){
   const firstFilament = (state.materials.find(m=>m.category==='Filamento')||{}).name||'PLA';
@@ -4829,13 +4851,14 @@ function removeFilamentRow(i){
 function renderLaborActionRows(){
   const el = document.getElementById('laborActionRows');
   if(!el) return;
-  el.innerHTML = editingLaborActions.map((a,i)=>`
-    <div style="display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr) 28px;gap:8px;align-items:center;margin-bottom:8px;">
-      <input list="laborActionOptions" value="${a.action}" placeholder="Ação (ex: Lixar)" style="min-width:0;" oninput="editingLaborActions[${i}].action=this.value; refreshCurrentPreview();">
-      <input type="number" step="1" value="${a.minutes}" placeholder="minutos" style="min-width:0;" oninput="editingLaborActions[${i}].minutes=parseFloat(this.value)||0; refreshCurrentPreview();">
-      <button class="btn ghost sm" title="Remover" style="padding:6px 8px;" onclick="removeLaborActionRow(${i})">×</button>
+  el.innerHTML = formRowsHtml('minmax(0,1.6fr) minmax(0,1fr)', ['Ação','Minutos'],
+    editingLaborActions.map((a,i)=>`
+    <div class="form-row">
+      <input list="laborActionOptions" value="${a.action}" placeholder="Ação (ex: Lixar)" oninput="editingLaborActions[${i}].action=this.value; refreshCurrentPreview();">
+      <input type="number" step="1" value="${a.minutes}" placeholder="minutos" oninput="editingLaborActions[${i}].minutes=parseFloat(this.value)||0; refreshCurrentPreview();">
+      ${formRowX(`removeLaborActionRow(${i})`)}
     </div>
-  `).join('');
+  `));
 }
 function addLaborActionRow(){
   editingLaborActions.push({action:'', minutes:0});
@@ -4855,15 +4878,16 @@ function renderToolsUsedRows(){
     el.innerHTML = `<div class="field hint" style="margin-top:0;">Nenhuma ferramenta cadastrada ainda — cadastre em Estoque (categoria Ferramentas) pra poder usar aqui.</div>`;
     return;
   }
-  el.innerHTML = editingToolsUsed.map((t,i)=>`
-    <div style="display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr) 28px;gap:8px;align-items:center;margin-bottom:8px;">
-      <select style="min-width:0;" onchange="editingToolsUsed[${i}].toolId=this.value; refreshCurrentPreview();">
+  el.innerHTML = formRowsHtml('minmax(0,1.6fr) minmax(0,1fr)', ['Ferramenta','Usos'],
+    editingToolsUsed.map((t,i)=>`
+    <div class="form-row">
+      <select onchange="editingToolsUsed[${i}].toolId=this.value; refreshCurrentPreview();">
         ${toolOptions.map(to=>`<option value="${to.id}" ${t.toolId===to.id?'selected':''}>${to.name}</option>`).join('')}
       </select>
-      <input type="number" step="1" value="${t.uses}" placeholder="usos" style="min-width:0;" oninput="editingToolsUsed[${i}].uses=parseFloat(this.value)||0; refreshCurrentPreview();">
-      <button class="btn ghost sm" title="Remover" style="padding:6px 8px;" onclick="removeToolsUsedRow(${i})">×</button>
+      <input type="number" step="1" value="${t.uses}" placeholder="usos" oninput="editingToolsUsed[${i}].uses=parseFloat(this.value)||0; refreshCurrentPreview();">
+      ${formRowX(`removeToolsUsedRow(${i})`)}
     </div>
-  `).join('');
+  `));
 }
 function addToolsUsedRow(){
   const toolOptions = state.materials.filter(m=>m.category==='Ferramentas');
@@ -4885,19 +4909,20 @@ function renderComponentsRows(){
     el.innerHTML = `<div class="field hint" style="margin-top:0;">Nenhum componente cadastrado ainda — cadastre em Estoque (categoria Componentes) pra poder usar aqui.</div>`;
     return;
   }
-  el.innerHTML = editingComponents.map((comp,i)=>`
-    <div style="display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,0.7fr) minmax(0,1.1fr) 28px;gap:8px;align-items:center;margin-bottom:8px;">
-      <select style="min-width:0;" onchange="editingComponents[${i}].materialId=this.value; refreshCurrentPreview();">
+  el.innerHTML = formRowsHtml('minmax(0,1.4fr) minmax(0,0.7fr) minmax(0,1.1fr)', ['Componente','Qtd','Conta por'],
+    editingComponents.map((comp,i)=>`
+    <div class="form-row">
+      <select onchange="editingComponents[${i}].materialId=this.value; refreshCurrentPreview();">
         ${compOptions.map(co=>`<option value="${co.id}" ${comp.materialId===co.id?'selected':''}>${co.name}</option>`).join('')}
       </select>
-      <input type="number" step="1" value="${comp.qty}" placeholder="qtd" style="min-width:0;" oninput="editingComponents[${i}].qty=parseFloat(this.value)||0; refreshCurrentPreview();">
-      <select style="min-width:0;" onchange="editingComponents[${i}].scope=this.value; refreshCurrentPreview();">
+      <input type="number" step="1" value="${comp.qty}" placeholder="qtd" oninput="editingComponents[${i}].qty=parseFloat(this.value)||0; refreshCurrentPreview();">
+      <select onchange="editingComponents[${i}].scope=this.value; refreshCurrentPreview();">
         <option value="peca" ${comp.scope==='peca'?'selected':''}>Por peça (× un. por venda)</option>
         <option value="venda" ${comp.scope==='venda'?'selected':''}>Uma vez por venda</option>
       </select>
-      <button class="btn ghost sm" title="Remover" style="padding:6px 8px;" onclick="removeComponentRow(${i})">×</button>
+      ${formRowX(`removeComponentRow(${i})`)}
     </div>
-  `).join('');
+  `));
 }
 function addComponentRow(){
   const compOptions = state.materials.filter(m=>m.category==='Componentes');
@@ -5521,7 +5546,7 @@ function openCustomOrderModal(id){
           <div class="field"><label>Tamanho (mm)</label><input id="coSizeLabel" value="${o.sizeLabel||''}" placeholder="Ex: 80 x 60" style="${reqBorder('sizeLabel')}"></div>
         </div>
         <div class="field"><label>Acabamento</label><input id="coFinish" value="${o.finish||''}" placeholder="Ex: fosco, brilhoso"></div>
-        <div class="field"><label style="display:flex;align-items:center;gap:8px;font-weight:400;"><input type="checkbox" id="coApproved" ${o.approved?'checked':''} style="width:auto;"> Texto confirmado por escrito com o cliente</label></div>
+        <div class="field"><label class="field-checkbox"><input type="checkbox" id="coApproved" ${o.approved?'checked':''} style="width:auto;"> Texto confirmado por escrito com o cliente</label></div>
         <div class="row2">
           <div class="field"><label>Data da confirmação</label><input type="date" id="coApprovalDate" value="${o.approvalDate||''}"></div>
           <div class="field"><label>Confirmado por</label><input id="coApprovedBy" value="${o.approvedBy||''}"></div>
@@ -5655,14 +5680,14 @@ function openCustomOrderModal(id){
 
       <div class="section-title">Conferência antes de embalar</div>
       <div class="row3">
-        <label style="display:flex;align-items:center;gap:6px;font-weight:400;font-size:12.5px;"><input type="checkbox" id="coCheckTextConferred" ${o.checkTextConferred?'checked':''} style="width:auto;"> Texto conferido</label>
-        <label style="display:flex;align-items:center;gap:6px;font-weight:400;font-size:12.5px;"><input type="checkbox" id="coCheckNoLayerFailure" ${o.checkNoLayerFailure?'checked':''} style="width:auto;"> Sem falha de camada</label>
-        <label style="display:flex;align-items:center;gap:6px;font-weight:400;font-size:12.5px;"><input type="checkbox" id="coCheckBurrRemoved" ${o.checkBurrRemoved?'checked':''} style="width:auto;"> Rebarba removida</label>
+        <label class="field-checkbox sm"><input type="checkbox" id="coCheckTextConferred" ${o.checkTextConferred?'checked':''} style="width:auto;"> Texto conferido</label>
+        <label class="field-checkbox sm"><input type="checkbox" id="coCheckNoLayerFailure" ${o.checkNoLayerFailure?'checked':''} style="width:auto;"> Sem falha de camada</label>
+        <label class="field-checkbox sm"><input type="checkbox" id="coCheckBurrRemoved" ${o.checkBurrRemoved?'checked':''} style="width:auto;"> Rebarba removida</label>
       </div>
       <div class="row3" style="margin-top:8px;">
-        <label style="display:flex;align-items:center;gap:6px;font-weight:400;font-size:12.5px;"><input type="checkbox" id="coCheckHoleFree" ${o.checkHoleFree?'checked':''} style="width:auto;"> Furo/argola livre</label>
-        <label style="display:flex;align-items:center;gap:6px;font-weight:400;font-size:12.5px;"><input type="checkbox" id="coCheckPieceClean" ${o.checkPieceClean?'checked':''} style="width:auto;"> Peça limpa</label>
-        <label style="display:flex;align-items:center;gap:6px;font-weight:400;font-size:12.5px;"><input type="checkbox" id="coCheckPackaged" ${o.checkPackaged?'checked':''} style="width:auto;"> Embalada</label>
+        <label class="field-checkbox sm"><input type="checkbox" id="coCheckHoleFree" ${o.checkHoleFree?'checked':''} style="width:auto;"> Furo/argola livre</label>
+        <label class="field-checkbox sm"><input type="checkbox" id="coCheckPieceClean" ${o.checkPieceClean?'checked':''} style="width:auto;"> Peça limpa</label>
+        <label class="field-checkbox sm"><input type="checkbox" id="coCheckPackaged" ${o.checkPackaged?'checked':''} style="width:auto;"> Embalada</label>
       </div>
     </div>
 
@@ -6170,7 +6195,7 @@ function openMaterialModal(id){
       <div class="field"><label>Estoque atual</label><input type="number" id="mStock" value="${qtyInputValue(m.stock, m.unit)}" step="${stepForUnit(m.unit)}" min="0"></div>
       <div class="field"><label>Estoque mínimo (alerta)</label><input type="number" id="mLow" value="${qtyInputValue(m.lowStock, m.unit)}" step="${stepForUnit(m.unit)}" min="0"></div>
     </div>
-    ${!editing ? `<label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-dim);margin:-6px 0 12px;"><input type="checkbox" id="mAddInvestment" style="width:auto;" checked> Registrar essa compra como investimento em Anual</label>` : ''}
+    ${!editing ? `<label class="field-checkbox" style="margin:-6px 0 12px;"><input type="checkbox" id="mAddInvestment" style="width:auto;" checked> Registrar essa compra como investimento em Anual</label>` : ''}
     <div class="modal-actions">
       <button class="btn ghost" onclick="closeModal()">Cancelar</button>
       <button class="btn primary" onclick="confirmMaterial(${editing?`'${id}'`:'null'})">${editing?'Salvar':'Criar'}</button>
@@ -6363,7 +6388,7 @@ function openRestockModal(id){
     <div class="field"><label>Estoque atual</label><input value="${num(m.stock,1)} ${m.unit}" disabled></div>
     <div class="field"><label>Quantidade a adicionar (${m.unit})</label><input type="number" id="rQty" step="${stepForUnit(m.unit)}" min="0" placeholder="Ex: ${m.purchaseQty}"></div>
     <div class="field"><label>Custo total da compra (opcional — recalcula custo unitário)</label><input type="number" id="rCost" step="0.01" placeholder="Ex: ${m.purchasePrice}"></div>
-    <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-dim);margin:-6px 0 12px;"><input type="checkbox" id="rAddInvestment" style="width:auto;" checked> Também registrar como investimento em Anual (se informar o custo acima)</label>
+    <label class="field-checkbox" style="margin:-6px 0 12px;"><input type="checkbox" id="rAddInvestment" style="width:auto;" checked> Também registrar como investimento em Anual (se informar o custo acima)</label>
     <div class="modal-actions">
       <button class="btn ghost" onclick="closeModal()">Cancelar</button>
       <button class="btn primary" onclick="confirmRestock('${id}')">Adicionar ao estoque</button>
@@ -6723,14 +6748,15 @@ function renderCustomOrderPriceTierRows(type){
   if(!el) return;
   const tiers = editingCustomOrderPriceTable[type]||[];
   if(!tiers.length){ el.innerHTML = `<div class="empty" style="padding:8px;font-size:12.5px;">Nenhuma faixa cadastrada — sem faixa, o Diagnóstico não compara com tabela.</div>`; return; }
-  el.innerHTML = tiers.map((t,i)=>`
-    <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) 28px;gap:8px;align-items:center;margin-bottom:8px;">
-      <input type="number" min="1" step="1" value="${t.minQty||1}" placeholder="de (un)" style="min-width:0;" oninput="editingCustomOrderPriceTable['${type}'][${i}].minQty=parseFloat(this.value)||1">
-      <input type="number" min="1" step="1" value="${t.maxQty||''}" placeholder="até (opcional)" style="min-width:0;" oninput="editingCustomOrderPriceTable['${type}'][${i}].maxQty=parseFloat(this.value)||0">
-      <input type="number" step="0.01" value="${t.unitPrice||''}" placeholder="R$/un" style="min-width:0;" oninput="editingCustomOrderPriceTable['${type}'][${i}].unitPrice=parseFloat(this.value)||0">
-      <button class="btn ghost sm" title="Remover" style="padding:6px 8px;" onclick="removePriceTierRow('${type}',${i})">×</button>
+  el.innerHTML = formRowsHtml('minmax(0,1fr) minmax(0,1fr) minmax(0,1fr)', ['De (un)','Até (un)','R$ por unidade'],
+    tiers.map((t,i)=>`
+    <div class="form-row">
+      <input type="number" min="1" step="1" value="${t.minQty||1}" placeholder="de (un)" oninput="editingCustomOrderPriceTable['${type}'][${i}].minQty=parseFloat(this.value)||1">
+      <input type="number" min="1" step="1" value="${t.maxQty||''}" placeholder="até (opcional)" oninput="editingCustomOrderPriceTable['${type}'][${i}].maxQty=parseFloat(this.value)||0">
+      <input type="number" step="0.01" value="${t.unitPrice||''}" placeholder="R$/un" oninput="editingCustomOrderPriceTable['${type}'][${i}].unitPrice=parseFloat(this.value)||0">
+      ${formRowX(`removePriceTierRow('${type}',${i})`)}
     </div>
-  `).join('');
+  `));
 }
 function addPriceTierRow(type){
   editingCustomOrderPriceTable[type].push({minQty:1, maxQty:0, unitPrice:0});
@@ -6834,19 +6860,16 @@ function removeMachineRow(i){
 function renderNameValueRows(containerId, list, updateFn, removeFn){
   const el = document.getElementById(containerId);
   if(!el) return;
-  el.innerHTML = list.length ? `
-    <div style="display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1.1fr) 28px;gap:8px;margin-bottom:4px;">
-      <div class="field hint" style="margin:0;">Nome</div>
-      <div class="field hint" style="margin:0;">Valor mensal</div>
-      <div class="field hint" style="margin:0;">A partir de</div><div></div>
-    </div>` + list.map((item,i)=>`
-    <div style="display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1.1fr) 28px;gap:8px;align-items:center;margin-bottom:8px;">
-      <input value="${item.name}" placeholder="Nome" style="min-width:0;" oninput="${updateFn}(${i},'name',this.value)">
-      <input type="number" step="0.01" min="0" value="${item.value}" placeholder="R$" style="min-width:0;" oninput="${updateFn}(${i},'value',this.value)">
-      <input type="month" value="${item.startMonth||''}" title="Mês da primeira cobrança — em branco vale desde sempre" style="min-width:0;" onchange="${updateFn}(${i},'startMonth',this.value)">
-      <button class="btn ghost sm" title="Remover" style="padding:6px 8px;" onclick="${removeFn}(${i})">×</button>
+  el.innerHTML = formRowsHtml('minmax(0,2fr) minmax(0,1fr) minmax(0,1.1fr)',
+    ['Nome','Valor mensal','A partir de'],
+    list.map((item,i)=>`
+    <div class="form-row">
+      <input value="${item.name}" placeholder="Nome" oninput="${updateFn}(${i},'name',this.value)">
+      <input type="number" step="0.01" min="0" value="${item.value}" placeholder="R$" oninput="${updateFn}(${i},'value',this.value)">
+      <input type="month" value="${item.startMonth||''}" title="Mês da primeira cobrança — em branco vale desde sempre" onchange="${updateFn}(${i},'startMonth',this.value)">
+      ${formRowX(`${removeFn}(${i})`)}
     </div>
-  `).join('') : `<div class="empty" style="padding:10px;">Nenhum item ainda</div>`;
+  `), `<div class="empty" style="padding:10px;">Nenhum item ainda</div>`);
 }
 // Linha nova nasce começando no mês corrente: quem cadastra uma despesa hoje
 // começou a pagar por volta de agora, não em janeiro. Era essa a reclamação —
@@ -6912,17 +6935,23 @@ function toggleMlCategories(){
 function renderPlatformRows(){
   const el = document.getElementById('platformRows');
   if(!el) return;
-  el.innerHTML = editingPlatforms.map((p,i)=>{
+  // Rótulo uma vez, no cabeçalho — antes só a PRIMEIRA linha os mostrava
+  // (`i===0 ? <label> : ''`), e como cada plataforma é seguida do próprio
+  // painel (categorias do ML, faixas da Shopee), quem chegava na terceira
+  // linha já não tinha referência nenhuma na tela.
+  el.innerHTML = formRowsHtml('minmax(0,2.2fr) minmax(0,0.8fr) minmax(0,0.8fr)',
+    ['Plataforma','Taxa %','Taxa fixa R$'],
+    editingPlatforms.map((p,i)=>{
     const isML = /mercado\s*livre/i.test(p.name);
     const isShopee = /shopee/i.test(p.name) && p.tiers;
     const canHaveListing = !isML && !isShopee;
     const otherTemplateOptions = canHaveListing ? editingPlatforms.filter((op,oi)=>oi!==i && op.listingTemplate && !/mercado\s*livre/i.test(op.name) && !(/shopee/i.test(op.name)&&op.tiers)) : [];
     return `
-    <div style="display:grid;grid-template-columns:minmax(0,2.2fr) minmax(0,0.8fr) minmax(0,0.8fr) 28px;gap:8px;align-items:end;margin-bottom:${(isML||isShopee||canHaveListing)?4:8}px;">
-      <div class="field" style="margin-bottom:0;min-width:0;">${i===0?'<label>Plataforma</label>':''}<input value="${p.name}" style="min-width:0;" oninput="editingPlatforms[${i}].name=this.value"></div>
-      <div class="field" style="margin-bottom:0;min-width:0;">${i===0?'<label>Taxa %</label>':''}<input type="number" step="0.01" value="${p.pct}" style="min-width:0;" oninput="editingPlatforms[${i}].pct=parseFloat(this.value)||0"></div>
-      <div class="field" style="margin-bottom:0;min-width:0;">${i===0?'<label>Taxa fixa R$</label>':''}<input type="number" step="0.01" value="${p.fixed}" style="min-width:0;" oninput="editingPlatforms[${i}].fixed=parseFloat(this.value)||0"></div>
-      <button class="btn ghost sm" title="Remover" style="padding:6px 8px;" onclick="removePlatformRow(${i})">×</button>
+    <div class="form-row" style="margin-bottom:${(isML||isShopee||canHaveListing)?4:8}px;">
+      <input value="${p.name}" oninput="editingPlatforms[${i}].name=this.value">
+      <input type="number" step="0.01" value="${p.pct}" oninput="editingPlatforms[${i}].pct=parseFloat(this.value)||0">
+      <input type="number" step="0.01" value="${p.fixed}" oninput="editingPlatforms[${i}].fixed=parseFloat(this.value)||0">
+      ${formRowX(`removePlatformRow(${i})`)}
     </div>
     ${isML ? mlCategoryTable(i) : ''}
     ${isShopee ? shopeeTierPanel(p) : ''}
@@ -6935,7 +6964,7 @@ function renderPlatformRows(){
       </select>
       <div class="field hint" style="margin-top:4px;">${p.listingTemplate?'Produtos ganha um preço próprio pra essa plataforma, e Anúncios ganha uma aba com os mesmos campos da plataforma copiada.':'Sem aba de Anúncios, essa plataforma entra só no cálculo de taxa das vendas.'}</div>
     </div>` : ''}
-  `;}).join('');
+  `;}));
 }
 /* Tabela de categorias do ML, embaixo da linha da plataforma. Cada linha tem
    as duas taxas editáveis e um botão pra jogar aquele percentual na taxa da

@@ -97,6 +97,20 @@ Todos os grids (`.g-2`…`.g-5`, `.row2`, `.row3`) usam `minmax(0,1fr)`. `1fr` s
 
 `.card` é coluna flex, e `.card-actions` (`margin-top:auto`) gruda o rodapé de botões embaixo — é o que faz dois cartões lado a lado terem os botões na mesma linha. `align-items:start` num grid é opt-out consciente: sobrou só nos quadros Kanban (Pedidos, Personalizados), onde as colunas não têm fundo e esticar não mudaria nada.
 
+## Formulários: um jeito só de desenhar campo e linha
+
+**A aparência de campo é global, não presa ao `.field`.** Antes só `.field input` era estilizado, e as ~10 listas repetíveis do app montam inputs soltos dentro de um grid próprio — ficavam com a aparência crua do navegador ao lado de campos estilizados. Era essa a origem de "as caixas parecem aleatórias". O seletor hoje cobre `input`/`select`/`textarea` em qualquer lugar, com exceção explícita de `checkbox`/`radio`/`color`/`file`/`button`/`hidden`, que têm desenho próprio e virariam caixas de largura total.
+
+Três formas, e não existe uma quarta:
+
+- **`.field` + `<label>`** — campo avulso. Em grade, dentro de `.row2`/`.row3`.
+- **`.form-rows` + `.form-row`** — lista repetível ("N campos + ×"): filamentos, mão de obra, ferramentas, componentes, despesas, impostos, plataformas, faixas de preço. O rótulo aparece **uma vez** no `.form-row-head`; a proporção das colunas vem da variável `--cols`. Use o helper `formRowsHtml(cols, headers, rows, vazio)` em `app.js` — ele acrescenta sozinho a coluna do `×` (`FORM_ROW_X`), então ninguém esquece de somar a largura do botão. O botão sai de `formRowX(onclick)`.
+- **`.field-checkbox`** (e as variantes `.sm` pra checklist empilhada, `.inline` pra colar num rótulo) — checkbox. Ocupa a altura de um input pra fechar na mesma base quando divide linha com um campo.
+
+⚠️ **`align-items:end` nas `.row2`/`.row3`/`.form-row` alinha os CAMPOS, não o topo das caixas.** Rótulo que quebra em duas linhas ("Taxa fixa por unidade vendida (R$)") empurrava só aquele input 17px pra baixo. Pelo mesmo motivo, `<select>` e `<input>` levam `line-height` explícito: cada um calcula a altura do conteúdo por métricas próprias, e o select saía 2px mais alto que o input ao lado.
+
+Teste rápido de regressão: percorrer as abas e os modais lendo `getComputedStyle` de cada campo — `background`, `border`, `border-radius`, `font-size` e `padding` têm que dar **uma assinatura só** (hoje: 86 campos nas páginas, 113 nos modais).
+
 ## Ícones
 
 `app/img/logo.png` (480px) é o ícone do PWA e o do manifest. Os favicons são arquivos separados e **pré-reduzidos** — `favicon-16/32/48/180.png`, cada um com seu `sizes` no `<link>`. Apontar o favicon direto pro logo de 480px fazia o navegador reduzir 30× num salto só, o que serrilha, e baixava 238 KB pra desenhar 16 pixels.

@@ -184,7 +184,16 @@ tbody tr:hover{background:rgba(0,0,0,0.025);}
 
 .field{display:flex;flex-direction:column;gap:5px;margin-bottom:12px;}
 .field label{font-size:12px;color:var(--text-dim);font-weight:500;}
-.field input,.field select,.field textarea{
+/* A aparência de campo é GLOBAL, não presa ao .field.
+   Antes só `.field input` era estilizado, e as ~15 linhas repetíveis do app
+   (filamentos, mão de obra, ferramentas, componentes, despesas, plataformas,
+   metas de reserva...) montam os inputs soltos dentro de um grid próprio —
+   ficavam com a aparência crua do navegador, ao lado de campos estilizados.
+   Era essa a origem das "caixas que parecem aleatórias".
+   Checkbox/radio/cor/arquivo ficam de fora: têm desenho próprio e virariam
+   caixas de largura total. */
+input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="file"]):not([type="button"]):not([type="hidden"]),
+select, textarea{
   background:var(--bg-alt);border:1px solid var(--line);border-radius:var(--radius-sm);
   padding:8px 10px;color:var(--text);font-size:13.5px;outline:none;width:100%;
   transition:border-color .12s ease, box-shadow .12s ease;
@@ -192,8 +201,9 @@ tbody tr:hover{background:rgba(0,0,0,0.025);}
      conteúdo por métricas diferentes: com o padrão, todo select ficava 2px
      mais alto que o input ao lado e a linha nunca fechava reta. */
   line-height:1.35;
+  min-width:0; /* Sem isto o input não encolhe dentro de grid/flex. */
 }
-.field input:focus,.field select:focus,.field textarea:focus{border-color:var(--nozzle);box-shadow:0 0 0 3px var(--nozzle-dim);}
+input:focus,select:focus,textarea:focus{border-color:var(--nozzle);box-shadow:0 0 0 3px var(--nozzle-dim);}
 /* Duas formas, de propósito:
    .field .hint  → legenda DENTRO de um campo, abaixo do input. Bem discreta.
    .field.hint   → bloco de explicação solto (as duas classes no MESMO
@@ -209,7 +219,12 @@ tbody tr:hover{background:rgba(0,0,0,0.025);}
   min-height:36px;
   font-size:13px;color:var(--text-dim);font-weight:500;
 }
-.field-checkbox input[type="checkbox"]{width:auto;min-height:0;}
+.field-checkbox input[type="checkbox"]{width:auto;min-height:0;flex:none;}
+/* Variante compacta pra listas de verificação (checklist de encomenda), onde
+   os itens se empilham e não dividem linha com campo nenhum. */
+.field-checkbox.sm{min-height:28px;font-size:12.5px;font-weight:400;gap:6px;}
+/* Variante em linha, pra colar num rótulo existente (ex: "N/A"). */
+.field-checkbox.inline{display:inline-flex;min-height:0;font-size:11px;font-weight:400;color:var(--text-faint);gap:4px;margin-left:8px;cursor:pointer;}
 .field .hint{font-size:11px;color:var(--text-faint);}
 .field.hint{font-size:12.5px;color:var(--text-dim);line-height:1.5;}
 /* align-items:end alinha os CAMPOS, não o topo das caixas. Rótulo comprido
@@ -218,9 +233,36 @@ tbody tr:hover{background:rgba(0,0,0,0.025);}
 .row2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;align-items:end;}
 .row3{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1fr);gap:12px;align-items:end;}
 
-/* Linha de item do carrinho (Nova venda). Mesma gap e mesmos .field das
-   .row2/.row3 do resto do modal — o que muda é só a proporção: Produto ocupa
-   o dobro, e o botão de remover tem largura fixa. */
+/* ---------- Linhas repetíveis (item + botão de remover) ----------
+   Filamentos, mão de obra, ferramentas, componentes, despesas, impostos,
+   plataformas, metas de reserva, faixas de preço: todas são "N campos + ×".
+   Cada uma tinha o próprio grid inline, com gap e proporções ligeiramente
+   diferentes — mesma coisa desenhada de nove jeitos. Aqui vira uma definição
+   só, com a mesma gap de 12px das .row2/.row3.
+
+   Uso:
+     <div class="form-rows">
+       <div class="form-row-head"><span>Nome</span><span>Valor</span><span></span></div>
+       <div class="form-row"><input><input><button class="form-row-x">×</button></div>
+     </div>
+   A proporção das colunas vem de --cols, definido por quem usa. */
+.form-rows{--cols:minmax(0,1fr);}
+.form-row,.form-row-head{
+  display:grid;
+  grid-template-columns:var(--cols);
+  gap:12px;
+  align-items:center;
+}
+.form-row{margin-bottom:8px;}
+/* Cabeçalho de rótulos: mesma tipografia do <label> de um .field, pra que a
+   linha repetível não pareça de outra família. Aparece uma vez, no topo. */
+.form-row-head{margin-bottom:6px;}
+.form-row-head > *{font-size:12px;color:var(--text-dim);font-weight:500;}
+.form-row-x{padding:8px 0;height:36px;}
+
+/* Linha de item do carrinho (Nova venda): mesma família, mas com rótulo em
+   cada linha (o produto muda, então repetir "Produto" ajuda) e por isso usa
+   .field de verdade em vez do cabeçalho único. */
 .cart-item{margin-bottom:10px;}
 .cart-item-row{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1fr) 34px;gap:12px;align-items:end;}
 /* Alinha o × pela base do input, não pela do rótulo. */
