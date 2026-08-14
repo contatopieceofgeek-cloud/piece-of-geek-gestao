@@ -1229,6 +1229,7 @@ function renderContent(){
   else if(currentTab==='configuracoes') c.innerHTML = renderConfiguracoes();
   if(currentTab==='dashboard') setTimeout(drawDashboardCharts,0);
   if(currentTab==='anual') setTimeout(drawAnnualChart,0);
+  setTimeout(syncFixedTableColumns,0);
   if(currentTab==='calculo') updateCalculoExample();
   if(currentTab==='taxas') renderPlatformRows();
   if(currentTab==='configuracoes'){
@@ -4113,6 +4114,29 @@ function listingPriceDisplay(l, p){
   if(allSame) return brl(parseFloat(String(entries[0][1]).replace(',','.'))||0);
   return entries.map(([name,v])=>`${name} ${brl(parseFloat(String(v).replace(',','.'))||0)}`).join(' · ');
 }
+/* Iguala a 1ª coluna das tabelas .tbl-cols-fixed que são irmãs na página.
+   As outras colunas já têm largura fixa no CSS; só a do nome é flexível,
+   porque fixar um valor truncaria produto de nome comprido. O problema é que
+   cada tabela dimensionava essa coluna pelo conteúdo dela — em tela larga
+   sobrava espaço e todas ficavam iguais por acaso, mas ao apertar a janela o
+   grupo com o nome mais longo esticava a primeira coluna e empurrava Preço e
+   Status pra direita, só naquele quadro.
+
+   Em vez de estimar a largura do texto, deixa o navegador medir: lê o que
+   cada tabela pediu naturalmente e aplica o MAIOR valor em todas. Roda uma
+   vez por render, e sai antes de mexer no DOM se já estiverem iguais. */
+function syncFixedTableColumns(){
+  const tabelas = [...document.querySelectorAll('table.tbl-cols-fixed')];
+  if(tabelas.length < 2) return;
+  tabelas.forEach(t=>t.style.removeProperty('--c1'));
+  const larguras = tabelas.map(t=>{
+    const c = t.querySelector('thead th:first-child');
+    return c ? c.getBoundingClientRect().width : 0;
+  });
+  const maior = Math.ceil(Math.max(...larguras));
+  if(!maior || maior - Math.min(...larguras) < 1) return;
+  tabelas.forEach(t=>t.style.setProperty('--c1', maior + 'px'));
+}
 function renderAnunciosLista(){
   const q = anunciosFilter.search.toLowerCase();
   const list = q ? state.products.filter(p=>p.name.toLowerCase().includes(q)) : state.products;
@@ -4139,7 +4163,10 @@ function renderAnunciosLista(){
         </td>
       </tr>`;
     }).join('');
-    return `<div class="section-title">${category}</div><div class="card"><div class="tbl-wrap tbl-responsive"><table>
+    // .tbl-cols-fixed: uma tabela por categoria, e sem largura fixa cada uma
+    // dimensionava as colunas pelo próprio conteúdo — "Preço" e "Status"
+    // caíam num x diferente em cada quadro. Ver o comentário no CSS.
+    return `<div class="section-title">${category}</div><div class="card"><div class="tbl-wrap tbl-responsive"><table class="tbl-cols-fixed" style="--c2:240px;--c3:235px;--c4:210px;">
       <thead><tr><th>Produto</th><th class="right">Preço</th><th>Status</th><th></th></tr></thead>
       <tbody>${rows}</tbody>
     </table></div></div>`;

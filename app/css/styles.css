@@ -162,6 +162,30 @@ td{padding:9px 10px;border-bottom:1px solid var(--line-soft);vertical-align:midd
 tr:last-child td{border-bottom:none;}
 tbody tr:hover{background:rgba(0,0,0,0.025);}
 .tbl-wrap{overflow-x:auto;}
+/* Colunas de largura fixa, pra tabelas IRMÃS ficarem alinhadas entre si.
+   A Lista de Anúncios monta uma tabela por categoria, e cada uma calculava
+   as próprias colunas a partir do conteúdo dela — "Preço" caía num x
+   diferente em cada quadro, dando a impressão de bagunça. Só a 1ª coluna
+   (nome do produto) fica flexível e absorve a sobra.
+   As larguras vêm do conteúdo mais largo que cada coluna pode receber:
+   preço com as duas plataformas ("ML R$ 1.234,90 · Shopee R$ 1.234,90"),
+   status com selo + "atualizado dd/mm/aaaa", e os dois botões de ação.
+   min-width impede que colunas encolham e desalinhem quando a janela aperta
+   — aí quem rola é o .tbl-wrap, que já existe pra isso.
+   Fora do celular: abaixo de 640px a tabela vira cartão (.tbl-responsive) e
+   largura de coluna deixa de existir. */
+@media(min-width:641px){
+  /* --c1 é preenchido por syncFixedTableColumns() com a maior largura de
+     nome entre TODAS as tabelas irmãs. Fixar um valor no CSS truncaria nome
+     de produto comprido, e deixar em auto era justamente o que desalinhava
+     quando a janela apertava: o grupo com o nome mais longo ficava com a
+     primeira coluna maior e empurrava as outras. */
+  .tbl-cols-fixed{min-width:calc(var(--c1,180px) + var(--c2) + var(--c3) + var(--c4));}
+  .tbl-cols-fixed th:nth-child(1),.tbl-cols-fixed td:nth-child(1){width:var(--c1,auto);}
+  .tbl-cols-fixed th:nth-child(2),.tbl-cols-fixed td:nth-child(2){width:var(--c2);}
+  .tbl-cols-fixed th:nth-child(3),.tbl-cols-fixed td:nth-child(3){width:var(--c3);}
+  .tbl-cols-fixed th:nth-child(4),.tbl-cols-fixed td:nth-child(4){width:var(--c4);}
+}
 .num{font-family:var(--font-mono);}
 .right{text-align:right;}
 .center{text-align:center;}
