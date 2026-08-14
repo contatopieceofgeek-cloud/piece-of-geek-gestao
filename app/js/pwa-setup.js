@@ -44,8 +44,23 @@
     // produto — antes virava "Gestão 3D — Gestão", com o sufixo duplicado.
     var fullTitle = own ? (own + ' — ' + defaultName) : defaultName;
     var iconUri = branding.logo || defaultIconUri;
-    document.getElementById('pwaAppleIcon').href = iconUri;
-    document.getElementById('pwaFavicon').href = iconUri;
+    // Só um dos dois conjuntos fica no documento, senão o navegador escolhe
+    // sozinho entre o ícone do produto e o do negócio (e escolhe pelo
+    // `sizes`, ou seja: o do produto ganharia sempre).
+    //   com logo próprio -> ficam os dois <link> dinâmicos
+    //   sem logo próprio -> ficam os [data-product-icon] estáticos, que já
+    //                       vêm reduzidos; deixar os dinâmicos sem href faria
+    //                       o navegador baixar a própria página achando que é
+    //                       PNG.
+    var appleEl = document.getElementById('pwaAppleIcon');
+    var favEl = document.getElementById('pwaFavicon');
+    var produtoEls = document.querySelectorAll('link[data-product-icon]');
+    if(branding.logo){
+      appleEl.href = iconUri; favEl.href = iconUri;
+      for(var i = 0; i < produtoEls.length; i++) produtoEls[i].remove();
+    } else {
+      appleEl.remove(); favEl.remove();
+    }
     document.title = fullTitle;
     var appleTitleMeta = document.querySelector('meta[name="apple-mobile-web-app-title"]');
     if(appleTitleMeta) appleTitleMeta.setAttribute('content', name);

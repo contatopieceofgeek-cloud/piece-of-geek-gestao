@@ -10,6 +10,14 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Gestão 3D">
 <link rel="manifest" id="pwaManifestLink">
+<!-- Favicons já no tamanho certo. Apontar direto pro logo.png de 480px fazia
+     o navegador reduzir 30x num salto só, o que serrilha — e ainda baixava
+     238 KB pra desenhar 16 pixels. Os pwaAppleIcon/pwaFavicon abaixo só
+     entram em cena quando o usuário cadastra um logo próprio (pwa-setup.js). -->
+<link rel="icon" type="image/png" sizes="16x16" href="img/favicon-16.png" data-product-icon>
+<link rel="icon" type="image/png" sizes="32x32" href="img/favicon-32.png" data-product-icon>
+<link rel="icon" type="image/png" sizes="48x48" href="img/favicon-48.png" data-product-icon>
+<link rel="apple-touch-icon" sizes="180x180" href="img/favicon-180.png" data-product-icon>
 <link rel="apple-touch-icon" id="pwaAppleIcon">
 <link rel="icon" id="pwaFavicon">
 <link rel="preconnect" href="https://fonts.googleapis.com">
