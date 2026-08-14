@@ -11,6 +11,21 @@ const brl = (n) => (typeof n==='number' && isFinite(n) ? n : 0).toLocaleString('
 const num = (n,d=2) => (typeof n==='number' && isFinite(n) ? n : 0).toLocaleString('pt-BR',{minimumFractionDigits:d,maximumFractionDigits:d});
 const pct = (n,d=1) => (isFinite(n)?n:0).toLocaleString('pt-BR',{minimumFractionDigits:d,maximumFractionDigits:d})+'%';
 const fmtHm = (hours) => { const h=Math.floor(hours||0); const m=Math.round(((hours||0)%1)*60); return h>0 ? `${h}h${m>0?' '+m+'min':''}` : `${m}min`; };
+/* Quantidade por unidade de medida.
+   'un' é contável: não existe meia caixa nem 2,5 parafusos, então o passo do
+   campo é 1 e o valor é inteiro. Grama e metro aceitam fração.
+   Isso resolve dois incômodos reais: a setinha do campo subia o estoque de
+   caixa de 0,01 em 0,01, e a aritmética de float (0.1+0.2) fazia o valor
+   aparecer como 24.010000000000002 no campo, porque ia pro HTML sem
+   arredondar. */
+const isCountableUnit = (unit) => unit === 'un';
+const stepForUnit = (unit) => isCountableUnit(unit) ? '1' : '0.01';
+const roundQty = (n, unit) => {
+  const v = (typeof n==='number' && isFinite(n)) ? n : 0;
+  return isCountableUnit(unit) ? Math.round(v) : Math.round(v*100)/100;
+};
+// Valor pronto pra ir num <input type="number"> (ponto decimal, sem lixo).
+const qtyInputValue = (n, unit) => String(roundQty(n, unit));
 const monthLabel = (ym) => { const [y,m]=ym.split('-'); return new Date(y,m-1,1).toLocaleDateString('pt-BR',{month:'long',year:'numeric'}); };
 function monthDiff(fromYm, toYm){
   const [y1,m1] = fromYm.split('-').map(Number);
@@ -210,6 +225,10 @@ function migrateMaterials(materials){
     if(m.colorName2==null) m.colorName2 = '';
     if(m.toolType==null) m.toolType = '';
     if(m.usefulLifeUses==null) m.usefulLifeUses = 0;
+    // Limpa o lixo de float que já ficou gravado (ex: 24.010000000000002 de
+    // caixa). Arredonda pela unidade: 'un' é contável, o resto vai a 2 casas.
+    m.stock = roundQty(m.stock, m.unit);
+    m.lowStock = roundQty(m.lowStock, m.unit);
   });
   return materials;
 }
@@ -245,8 +264,25 @@ function migratePrintFailures(list){
   list.forEach(f=>{
     if(!f.outcome) f.outcome = 'failure';
     if(f.qty==null) f.qty = 1;
+    // hoursUsed NÃO é preenchido aqui: esta função roda antes de
+    // state.products existir (ver applyLoadedState), então o produto ainda
+    // não dá pra consultar. Fica pra backfillPrintJobHours().
   });
   return list;
+}
+/* Registros anteriores ao campo de tempo: estima UMA vez a partir do produto
+   atual e congela. Não é o tempo exato da época, mas é a única fonte que
+   existe — congelar evita o número ficar mudando a cada edição do produto.
+   Precisa rodar DEPOIS de state.products estar carregado. */
+function backfillPrintJobHours(){
+  let mudou = false;
+  (state.printFailures||[]).forEach(f=>{
+    if(f.hoursUsed!=null) return;
+    const prod = (state.products||[]).find(p=>p.id===f.productId);
+    f.hoursUsed = prod ? (prod.timeH||0) * (f.qty||1) * ((f.pctComplete!=null?f.pctComplete:100)/100) : 0;
+    mudou = true;
+  });
+  if(mudou) savePrintFailures();
 }
 function migrateCustomOrders(list){
   list.forEach(o=>{
@@ -740,6 +776,7 @@ async function applyLoadedState(){
       if(!state.settings.platforms || !state.settings.platforms.length) state.settings.platforms = seed.settings.platforms;
       state.products = p ? JSON.parse(p) : seed.products;
       migrateProducts(state.products);
+      backfillPrintJobHours();
       backfillMachineHours();
       snapshotPastMonths();
     }
@@ -2437,26 +2474,32 @@ function renderImpressao(){
   const lossMonth = jobsMonth.reduce((a,f)=>a+(f.totalLoss||0),0);
   const lossYear = jobsYear.reduce((a,f)=>a+(f.totalLoss||0),0);
   const failuresMonth = jobsMonth.filter(f=>f.outcome==='failure').length;
+  // Horas de bico ocupadas no mês — o recurso escasso do negócio, mesmo
+  // critério do R$/hora usado no resto do app.
+  const hoursMonth = jobsMonth.reduce((a,f)=>a+(f.hoursUsed||0),0);
+  const hoursLostMonth = jobsMonth.filter(f=>f.outcome==='failure').reduce((a,f)=>a+(f.hoursUsed||0),0);
 
   const recent = state.printFailures.slice().sort((a,b)=>b.date.localeCompare(a.date)).slice(0,15);
   const outcomeBadge = (o)=>({success:'<span class="badge ok">Sucesso</span>',test:'<span class="badge info">Teste</span>',failure:'<span class="badge bad">Falha</span>'}[o]||o);
 
   return `
-    <div class="grid g-3" style="margin-bottom:16px;">
+    <div class="grid g-4" style="margin-bottom:16px;">
       <div class="kpi" style="--accent:var(--red)"><div class="kpi-label">Perdido este mês</div><div class="kpi-value neg">${brl(lossMonth)}</div><div class="kpi-note">${failuresMonth} falha(s)</div></div>
       <div class="kpi" style="--accent:var(--red)"><div class="kpi-label">Perdido este ano</div><div class="kpi-value neg">${brl(lossYear)}</div><div class="kpi-note">${jobsYear.filter(f=>f.outcome==='failure').length} falha(s)</div></div>
-      <div class="kpi"><div class="kpi-label">Impressões este mês</div><div class="kpi-value">${jobsMonth.length}</div></div>
+      <div class="kpi"><div class="kpi-label">Impressões este mês</div><div class="kpi-value">${jobsMonth.length}</div><div class="kpi-note">&nbsp;</div></div>
+      <div class="kpi" style="--accent:var(--teal)"><div class="kpi-label">Horas de impressora no mês</div><div class="kpi-value">${fmtHm(hoursMonth)}</div><div class="kpi-note">${hoursLostMonth>0?`${fmtHm(hoursLostMonth)} perdidas em falha`:'&nbsp;'}</div></div>
     </div>
     <div class="card">
       <div class="card-title">Histórico de impressões<span class="sub">mais recentes primeiro</span></div>
       ${recent.length ? `<div class="tbl-wrap tbl-responsive"><table>
-        <thead><tr><th>Data</th><th>Produto</th><th class="right">Qtd</th><th>Filamento gasto</th><th>Resultado</th><th class="right">Prejuízo</th><th>Obs.</th><th></th></tr></thead>
+        <thead><tr><th>Data</th><th>Produto</th><th class="right">Qtd</th><th class="right">Tempo</th><th>Filamento gasto</th><th>Resultado</th><th class="right">Prejuízo</th><th>Obs.</th><th></th></tr></thead>
         <tbody>${recent.map(f=>{
           const filamentSummary = (f.filamentUsage||[]).map(u=>`${u.materialName} ${num(u.qty,1)}${u.unit}`).join(' + ') || '—';
           return `<tr>
           <td class="num" data-label="Data">${fmtDate(f.date)}</td>
           <td data-label="Produto">${f.productName}</td>
           <td class="right num" data-label="Qtd">${num(f.qty||1,0)}${f.outcome==='failure'&&f.pctComplete<100?` (${num(f.pctComplete,0)}%)`:''}</td>
+          <td class="right num" data-label="Tempo">${f.hoursUsed>0?fmtHm(f.hoursUsed):'—'}</td>
           <td data-label="Filamento gasto" title="${filamentSummary}">${filamentSummary}</td>
           <td data-label="Resultado">${outcomeBadge(f.outcome)}</td>
           <td class="right num" data-label="Prejuízo" style="color:var(--red)">${f.totalLoss?brl(f.totalLoss):'—'}</td>
@@ -2589,10 +2632,16 @@ function confirmPrintJob(){
   const machine = machines.find(m=>m.id===prod.machineId) || machines[0];
   if(machine){ machine.hoursUsed = (machine.hoursUsed||0) + qty*(prod.timeH||0)*(pctComplete/100); }
 
+  // hoursUsed é SNAPSHOT: o tempo cadastrado no produto NA HORA do registro.
+  // Nunca recalculado depois — se o produto mudar de 3h pra 5h, este registro
+  // tem que continuar mostrando as 3h de então (mesma regra dos snapshots de
+  // venda, ver pegadinha #8 do CLAUDE.md). Falha parcial só gastou a fração
+  // que chegou a imprimir.
+  const hoursUsed = (prod.timeH||0) * qty * (pctComplete/100);
   if(oldJob){
-    Object.assign(oldJob, { date, productId:prod.id, productName:prod.name, qty, outcome, pctComplete, materialCost, energyCost, totalLoss, notes, filamentUsage });
+    Object.assign(oldJob, { date, productId:prod.id, productName:prod.name, qty, outcome, pctComplete, hoursUsed, materialCost, energyCost, totalLoss, notes, filamentUsage });
   } else {
-    state.printFailures.push({ id:uid(), date, productId:prod.id, productName:prod.name, qty, outcome, pctComplete, materialCost, energyCost, totalLoss, notes, filamentUsage });
+    state.printFailures.push({ id:uid(), date, productId:prod.id, productName:prod.name, qty, outcome, pctComplete, hoursUsed, materialCost, energyCost, totalLoss, notes, filamentUsage });
   }
   saveMaterials(); savePrintFailures(); saveProducts(); if(machine) saveSettings();
 
@@ -5987,8 +6036,8 @@ function openMaterialModal(id){
     </div>
     <div class="field"><label>Custo unitário calculado</label><input id="mUnitCost" value="${brl(m.costPerUnit)}" disabled></div>
     <div class="row2">
-      <div class="field"><label>Estoque atual</label><input type="number" id="mStock" value="${m.stock}" step="0.01"></div>
-      <div class="field"><label>Estoque mínimo (alerta)</label><input type="number" id="mLow" value="${m.lowStock}" step="0.01"></div>
+      <div class="field"><label>Estoque atual</label><input type="number" id="mStock" value="${qtyInputValue(m.stock, m.unit)}" step="${stepForUnit(m.unit)}" min="0"></div>
+      <div class="field"><label>Estoque mínimo (alerta)</label><input type="number" id="mLow" value="${qtyInputValue(m.lowStock, m.unit)}" step="${stepForUnit(m.unit)}" min="0"></div>
     </div>
     ${!editing ? `<label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-dim);margin:-6px 0 12px;"><input type="checkbox" id="mAddInvestment" style="width:auto;" checked> Registrar essa compra como investimento em Anual</label>` : ''}
     <div class="modal-actions">
@@ -6117,11 +6166,13 @@ function confirmMaterial(id){
   if(dup){ toast(`Já existe uma matéria-prima chamada "${dup.name}" — use outro nome`,'err'); return; }
   const purchasePrice = parseFloat(document.getElementById('mPPrice').value)||0;
   const purchaseQty = parseFloat(document.getElementById('mPQty').value)||1;
-  const stock = parseFloat(document.getElementById('mStock').value)||0;
-  const lowStock = parseFloat(document.getElementById('mLow').value)||0;
+  // Arredonda conforme a unidade: 'un' é contável, não guarda 24,01 caixas.
+  const unidade = document.getElementById('mUnit').value;
+  const stock = roundQty(parseFloat(document.getElementById('mStock').value)||0, unidade);
+  const lowStock = roundQty(parseFloat(document.getElementById('mLow').value)||0, unidade);
   if(purchasePrice<0 || purchaseQty<0 || stock<0 || lowStock<0){ toast('Valores de preço/quantidade/estoque não podem ser negativos','err'); return; }
   const data = {
-    name, category, unit: document.getElementById('mUnit').value,
+    name, category, unit: unidade,
     purchasePrice, purchaseQty, costPerUnit: purchasePrice/purchaseQty,
     stock, lowStock,
     isBox, isEnvelope, isSaquinho, isBubbleWrap, isTape, lengthCm, widthCm, heightCm,
@@ -6179,7 +6230,7 @@ function openRestockModal(id){
   const m = state.materials.find(x=>x.id===id);
   showModal(`Reabastecer: ${m.name}`, `
     <div class="field"><label>Estoque atual</label><input value="${num(m.stock,1)} ${m.unit}" disabled></div>
-    <div class="field"><label>Quantidade a adicionar (${m.unit})</label><input type="number" id="rQty" step="0.01" placeholder="Ex: ${m.purchaseQty}"></div>
+    <div class="field"><label>Quantidade a adicionar (${m.unit})</label><input type="number" id="rQty" step="${stepForUnit(m.unit)}" min="0" placeholder="Ex: ${m.purchaseQty}"></div>
     <div class="field"><label>Custo total da compra (opcional — recalcula custo unitário)</label><input type="number" id="rCost" step="0.01" placeholder="Ex: ${m.purchasePrice}"></div>
     <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-dim);margin:-6px 0 12px;"><input type="checkbox" id="rAddInvestment" style="width:auto;" checked> Também registrar como investimento em Anual (se informar o custo acima)</label>
     <div class="modal-actions">
@@ -6210,7 +6261,7 @@ function confirmRestock(id){
       investMsg = ' — registrado como investimento em Anual';
     }
   }
-  m.stock += qty;
+  m.stock = roundQty(m.stock + qty, m.unit);
   saveMaterials(); toast('Estoque atualizado'+investMsg); closeModal(); renderContent();
 }
 /* ===================== CAIXA ===================== */
@@ -7392,6 +7443,7 @@ function importBackup(file){
       state.printFailures = migratePrintFailures(Array.isArray(data.printFailures) ? data.printFailures : []);
       state.listings = Array.isArray(data.listings) ? data.listings : [];
       state.customOrders = migrateCustomOrders(Array.isArray(data.customOrders) ? data.customOrders : []);
+      backfillPrintJobHours();
       backfillMachineHours();
       await saveAll();
       toast('Backup importado com sucesso');
