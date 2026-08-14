@@ -396,6 +396,16 @@ function migrateSettings(settings){
   if(!Array.isArray(settings.taxes)){
     settings.taxes = settings.meiTax ? [{id:uid(),name:'Imposto MEI (DAS)',value:settings.meiTax}] : [];
   }
+  // Tabela de categorias do ML. O seed é estimativa declarada — quem tem a
+  // conta conectada substitui pela taxa real da API; quem edita na mão vira
+  // 'manual'. Ver ML_CATEGORY_SEED.
+  if(!Array.isArray(settings.mlCategories)){
+    settings.mlCategories = ML_CATEGORY_SEED.map(c=>({
+      id: uid(), nome: c.nome, mlCategoryId: '',
+      classicaPct: c.classicaPct, premiumPct: c.premiumPct,
+      origem: 'estimativa', atualizadoEm: '',
+    }));
+  }
   // Despesas/impostos que já existem ficam SEM data (= valem desde sempre),
   // preservando o resultado que a pessoa já via. Quem quiser recortar preenche
   // o mês na mão; linhas novas já nascem com o mês corrente.
@@ -6805,15 +6815,52 @@ function removeExpenseRow(i){ editingExpenses.splice(i,1); renderNameValueRows('
 function addTaxRow(){ editingTaxes.push({id:uid(),name:'',value:0,startMonth:todayStr().slice(0,7)}); renderNameValueRows('taxRows', editingTaxes, 'updateTaxRow', 'removeTaxRow'); }
 function updateTaxRow(i,field,val){ editingTaxes[i][field] = field==='value' ? (parseFloat(val)||0) : val; }
 function removeTaxRow(i){ editingTaxes.splice(i,1); renderNameValueRows('taxRows', editingTaxes, 'updateTaxRow', 'removeTaxRow'); }
-const ML_CATEGORY_PRESETS = [
-  { label:'Casa/Decoração · Clássico', pct:12 },
-  { label:'Brinquedos/Hobbies · Clássico', pct:12 },
-  { label:'Eletrônicos · Clássico', pct:11 },
-  { label:'Escritório/Papelaria · Clássico', pct:13 },
-  { label:'Qualquer categoria · Premium', pct:17 },
+/* ---------- Categorias do Mercado Livre (clássico x premium) ----------
+   O ML cobra percentual DIFERENTE por categoria (são ~477) e por tipo de
+   anúncio. Antes isto era uma fileira de chips fixos com um número só, sem
+   dizer se era clássico ou premium — e envelhecia sozinho, porque ninguém
+   atualiza número escrito no código.
+
+   Agora é uma lista de verdade em `settings.mlCategories`, com as duas taxas
+   lado a lado. Quem tem a conta do ML conectada busca o valor real pela API;
+   quem não tem digita na mão. As linhas que vieram do seed nascem marcadas
+   como estimativa (`origem:'estimativa'`), pra ficar claro no que dá pra
+   confiar. Máximo de 5 visíveis — o resto abre no "ver todas". */
+const ML_CATEGORY_SEED = [
+  { nome:'Casa / Decoração',        classicaPct:12, premiumPct:17 },
+  { nome:'Brinquedos e Hobbies',    classicaPct:12, premiumPct:17 },
+  { nome:'Eletrônicos / Acessórios',classicaPct:11, premiumPct:16 },
+  { nome:'Escritório / Papelaria',  classicaPct:13, premiumPct:18 },
 ];
-function applyMlPreset(i, pct){
-  editingPlatforms[i].pct = pct;
+// Preço de referência das taxas da tabela. Acima de R$79 o ML não soma o
+// custo fixo por peso, então o percentual sai "limpo" — abaixo disso a mesma
+// categoria mostraria um percentual maior e a comparação entre linhas
+// deixaria de valer.
+const ML_REF_PRICE = 100;
+let mlCategoriesExpanded = false;
+
+function mlCategories(){ return state.settings.mlCategories || []; }
+function applyMlCategoryFee(platIndex, pct){
+  editingPlatforms[platIndex].pct = pct;
+  renderPlatformRows();
+  toast(`Taxa de ${num(pct,1)}% aplicada — clique em Salvar taxas`);
+}
+function removeMlCategory(id){
+  state.settings.mlCategories = mlCategories().filter(c=>c.id!==id);
+  saveSettings();
+  renderPlatformRows();
+}
+function updateMlCategory(id, campo, valor){
+  const c = mlCategories().find(x=>x.id===id);
+  if(!c) return;
+  c[campo] = campo==='nome' ? valor : (parseFloat(valor)||0);
+  // Editado na mão deixa de ser estimativa do seed e deixa de ser "da API".
+  c.origem = 'manual';
+  c.atualizadoEm = todayStr();
+  saveSettings();
+}
+function toggleMlCategories(){
+  mlCategoriesExpanded = !mlCategoriesExpanded;
   renderPlatformRows();
 }
 function renderPlatformRows(){
@@ -6831,11 +6878,8 @@ function renderPlatformRows(){
       <div class="field" style="margin-bottom:0;min-width:0;">${i===0?'<label>Taxa fixa R$</label>':''}<input type="number" step="0.01" value="${p.fixed}" style="min-width:0;" oninput="editingPlatforms[${i}].fixed=parseFloat(this.value)||0"></div>
       <button class="btn ghost sm" title="Remover" style="padding:6px 8px;" onclick="removePlatformRow(${i})">×</button>
     </div>
-    ${isML ? `<div style="margin:0 0 12px;display:flex;flex-wrap:wrap;gap:6px;">
-        ${ML_CATEGORY_PRESETS.map(pr=>`<button type="button" class="chip" style="cursor:pointer;border:none;" onclick="applyMlPreset(${i},${pr.pct})">${pr.label} (${pr.pct}%)</button>`).join('')}
-      </div>
-      <div class="field hint" style="margin-top:-8px;margin-bottom:12px;">Estimativas por grupo de categoria (2026) — o Mercado Livre tem ~477 categorias com percentuais próprios. Confira o valor exato no Seller Center do seu anúncio antes de confiar cegamente.</div>` : ''}
-    ${isShopee ? `<div class="field hint" style="margin-top:-8px;margin-bottom:12px;">Taxa % e fixa aqui são só o padrão de fallback — nas vendas, a faixa oficial da Shopee (por valor do produto) é aplicada automaticamente.</div>` : ''}
+    ${isML ? mlCategoryTable(i) : ''}
+    ${isShopee ? shopeeTierPanel(p) : ''}
     ${canHaveListing ? `<div class="field" style="margin-bottom:12px;"><label>Aba de Anúncios pra "${p.name}"</label>
       <select onchange="editingPlatforms[${i}].listingTemplate=this.value||null; renderPlatformRows();">
         <option value="">Sem aba de Anúncios (só taxa pra Vendas)</option>
@@ -6846,6 +6890,184 @@ function renderPlatformRows(){
       <div class="field hint" style="margin-top:4px;">${p.listingTemplate?'Produtos ganha um preço próprio pra essa plataforma, e Anúncios ganha uma aba com os mesmos campos da plataforma copiada.':'Sem aba de Anúncios, essa plataforma entra só no cálculo de taxa das vendas.'}</div>
     </div>` : ''}
   `;}).join('');
+}
+/* Tabela de categorias do ML, embaixo da linha da plataforma. Cada linha tem
+   as duas taxas editáveis e um botão pra jogar aquele percentual na taxa da
+   plataforma (que é o número que o app usa em Vendas). */
+function mlCategoryTable(platIndex){
+  const todas = mlCategories();
+  const visiveis = mlCategoriesExpanded ? todas : todas.slice(0,5);
+  const ocultas = todas.length - visiveis.length;
+  const selo = (c) => c.origem==='api'
+    ? `<span class="chip" style="background:var(--teal-bg,transparent);color:var(--teal);">API do ML${c.atualizadoEm?' · '+fmtDate(c.atualizadoEm):''}</span>`
+    : c.origem==='manual'
+      ? `<span class="chip">você digitou${c.atualizadoEm?' · '+fmtDate(c.atualizadoEm):''}</span>`
+      : `<span class="chip" title="Veio do cadastro inicial do app, não da API">estimativa</span>`;
+
+  const linhas = visiveis.map(c=>`
+    <tr>
+      <td data-label="Categoria" style="min-width:150px;">
+        <input value="${c.nome}" style="width:100%;min-width:0;" oninput="updateMlCategory('${c.id}','nome',this.value)">
+        <div style="margin-top:4px;">${selo(c)}</div>
+      </td>
+      <td data-label="Clássico" class="right">
+        <input type="number" step="0.1" min="0" value="${c.classicaPct}" style="width:72px;text-align:right;" oninput="updateMlCategory('${c.id}','classicaPct',this.value)">
+        <button class="btn ghost sm" style="margin-left:4px;padding:4px 7px;" title="Usar essa taxa na plataforma" onclick="applyMlCategoryFee(${platIndex},${c.classicaPct})">usar</button>
+      </td>
+      <td data-label="Premium" class="right">
+        <input type="number" step="0.1" min="0" value="${c.premiumPct}" style="width:72px;text-align:right;" oninput="updateMlCategory('${c.id}','premiumPct',this.value)">
+        <button class="btn ghost sm" style="margin-left:4px;padding:4px 7px;" title="Usar essa taxa na plataforma" onclick="applyMlCategoryFee(${platIndex},${c.premiumPct})">usar</button>
+      </td>
+      <td data-label="" class="right"><button class="btn ghost sm" title="Remover categoria" style="padding:6px 8px;" onclick="removeMlCategory('${c.id}')">×</button></td>
+    </tr>`).join('');
+
+  return `<div style="margin:0 0 14px;">
+    <div class="field hint" style="margin:0 0 8px;">O Mercado Livre cobra percentual diferente por categoria e por tipo de anúncio. <strong>Clássico</strong> aparece menos na busca e custa menos; <strong>Premium</strong> aparece mais e inclui parcelamento sem juros pro comprador, por isso é mais caro. Os percentuais abaixo valem pra um produto de ${brl(ML_REF_PRICE)} — em itens abaixo de R$ 79 o ML soma um custo fixo por peso, e o percentual efetivo sobe.</div>
+    ${todas.length ? `<div class="tbl-wrap tbl-responsive"><table>
+      <thead><tr><th>Categoria</th><th class="right">Clássico %</th><th class="right">Premium %</th><th></th></tr></thead>
+      <tbody>${linhas}</tbody>
+    </table></div>
+    ${ocultas>0 ? `<button class="btn ghost sm" style="margin-top:8px;" onclick="toggleMlCategories()">Ver todas (${ocultas} a mais)</button>`
+      : (mlCategoriesExpanded && todas.length>5 ? `<button class="btn ghost sm" style="margin-top:8px;" onclick="toggleMlCategories()">Mostrar só as 5 primeiras</button>` : '')}`
+    : emptyState('Nenhuma categoria cadastrada')}
+    <button class="btn ghost sm" style="margin-top:8px;" onclick="openMlCategoryModal()">+ Adicionar categoria</button>
+  </div>`;
+}
+
+/* Painel explicativo da Shopee. Não edita nada: as faixas são política da
+   plataforma, e o app já as aplica sozinho em cada venda — o que faltava era
+   deixar visível o que estava rodando escondido. */
+function shopeeTierPanel(plat){
+  const tiers = plat.tiers || [];
+  const faixaLabel = (t, ant) => {
+    const de = ant==null ? 'até' : `de ${brl(ant+0.01)} a`;
+    return t.max===Infinity || t.max==null ? `acima de ${brl(ant||0)}` : `${de} ${brl(t.max)}`;
+  };
+  let anterior = null;
+  const linhas = tiers.map(t=>{
+    // Exemplo no teto da faixa (ou um pouco acima do piso, na última).
+    const exemplo = (t.max===Infinity || t.max==null) ? (anterior||0) + 100 : t.max;
+    const taxa = exemplo*(t.pct/100) + t.fixed;
+    const label = faixaLabel(t, anterior);
+    anterior = (t.max===Infinity || t.max==null) ? anterior : t.max;
+    return `<tr>
+      <td data-label="Faixa">${label}</td>
+      <td data-label="Comissão" class="right num">${num(t.pct,0)}%</td>
+      <td data-label="Fixo" class="right num">${brl(t.fixed)}</td>
+      <td data-label="Exemplo" class="right num">${brl(exemplo)} → <strong>${brl(taxa)}</strong> (${num(taxa/exemplo*100,1)}%)</td>
+    </tr>`;
+  }).join('');
+
+  const caps = (plat.freightCapTiers||[]).map(f=>
+    `${f.max===Infinity||f.max==null ? 'acima disso' : 'até '+brl(f.max)}: ${brl(f.cap)}`
+  ).join(' · ');
+
+  return `<div style="margin:0 0 14px;">
+    <div class="field hint" style="margin:0 0 8px;">A Shopee não tem taxa única: ela cobra <strong>comissão percentual + um valor fixo</strong>, e os dois mudam conforme o preço do produto. O app aplica a faixa certa sozinho em cada venda — os campos "Taxa %" e "Taxa fixa" acima só entram se nenhuma faixa casar.</div>
+    <div class="tbl-wrap tbl-responsive"><table>
+      <thead><tr><th>Preço do produto</th><th class="right">Comissão</th><th class="right">Fixo</th><th class="right">Exemplo no teto da faixa</th></tr></thead>
+      <tbody>${linhas}</tbody>
+    </table></div>
+    ${caps ? `<div class="field hint" style="margin-top:8px;">O Frete Grátis da Shopee é subsidiado até um teto, que também varia por faixa (${caps}). O que passar disso sai do seu bolso — é isso que o campo de frete do produto estima.</div>` : ''}
+    <div class="field hint" style="margin-top:6px;">Faixas conforme a política vigente. Quando a Shopee mudar, o valor certo está no Seller Centre → Taxas.</div>
+  </div>`;
+}
+
+/* Adicionar categoria: busca na API do ML se a conta estiver conectada,
+   senão cai no cadastro manual — que é o mesmo formulário, só sem o
+   preenchimento automático. */
+function openMlCategoryModal(){
+  const conectado = !!initSupabase();
+  showModal('Adicionar categoria do Mercado Livre', `
+    <div class="field"><label>Buscar categoria</label>
+      <input id="mlCatSearch" placeholder="Ex: suporte para headset" autocomplete="off" oninput="searchMlCategoryForTable(this.value)">
+      <div id="mlCatResults" style="max-height:180px;overflow-y:auto;"></div>
+    </div>
+    <div class="field hint" style="margin-top:-4px;">${conectado
+      ? `Digite o que você vende (3 letras ou mais). O app pergunta ao Mercado Livre em qual categoria isso cai e busca as duas taxas reais pra um produto de ${brl(ML_REF_PRICE)}.`
+      : 'A busca automática precisa da conta do Mercado Livre conectada (aba Taxas, logo abaixo). Sem ela, preencha o nome e as duas taxas na mão.'}</div>
+    <div class="row2">
+      <div class="field"><label>Nome da categoria</label><input id="mlCatName" placeholder="Ex: Casa / Decoração"></div>
+      <div class="field"><label>ID no ML (opcional)</label><input id="mlCatId" placeholder="MLB1234"></div>
+    </div>
+    <div class="row2">
+      <div class="field"><label>Taxa clássico (%)</label><input type="number" step="0.1" min="0" id="mlCatClassica" value="0"></div>
+      <div class="field"><label>Taxa premium (%)</label><input type="number" step="0.1" min="0" id="mlCatPremium" value="0"></div>
+    </div>
+    <div id="mlCatStatus" class="field hint" style="margin-top:-4px;"></div>
+    <div class="modal-actions">
+      <button class="btn ghost" onclick="closeModal()">Cancelar</button>
+      <button class="btn primary" onclick="confirmMlCategory()">Adicionar</button>
+    </div>
+  `);
+}
+let mlCatSearchTimer = null;
+function searchMlCategoryForTable(q){
+  clearTimeout(mlCatSearchTimer);
+  const el = document.getElementById('mlCatResults');
+  if(!el) return;
+  if(!q || q.trim().length<3){ el.innerHTML=''; return; }
+  mlCatSearchTimer = setTimeout(async ()=>{
+    const client = initSupabase();
+    if(!client){ el.innerHTML = `<div class="field hint" style="margin:6px 0 0;">Sem conta do ML conectada — preencha os campos abaixo na mão.</div>`; return; }
+    try{
+      const { data, error } = await client.functions.invoke('ml-api', { body:{ action:'search-category', q } });
+      if(error || !data || !data.results){ el.innerHTML = `<div class="field hint" style="margin:6px 0 0;">Não consegui buscar agora — dá pra preencher na mão abaixo.</div>`; return; }
+      el.innerHTML = data.results.slice(0,6).map(r=>
+        `<div style="padding:6px 8px;border:1px solid var(--line);border-top:none;cursor:pointer;font-size:12px;background:var(--panel);"
+          onmousedown="pickMlCategoryForTable('${r.category_id}','${(r.category_name||'').replace(/'/g,"\\'")}')">${r.category_name}</div>`).join('');
+    }catch(e){ el.innerHTML = `<div class="field hint" style="margin:6px 0 0;">Não consegui buscar agora — dá pra preencher na mão abaixo.</div>`; }
+  }, 400);
+}
+/* Escolhida a categoria, busca as DUAS taxas. São duas chamadas ao
+   fee-lookup que já está deployado (gold_special = clássico, gold_pro =
+   premium) — de propósito, pra não exigir redeploy de Edge Function. */
+async function pickMlCategoryForTable(categoryId, categoryName){
+  document.getElementById('mlCatResults').innerHTML = '';
+  document.getElementById('mlCatSearch').value = categoryName;
+  document.getElementById('mlCatName').value = categoryName;
+  document.getElementById('mlCatId').value = categoryId;
+  const status = document.getElementById('mlCatStatus');
+  const client = initSupabase();
+  if(!client){ status.textContent = 'Sem conexão — preencha as taxas na mão.'; return; }
+  status.textContent = 'Buscando as duas taxas no Mercado Livre...';
+  const buscar = async (listingTypeId)=>{
+    const { data, error } = await client.functions.invoke('ml-api', {
+      body:{ action:'fee-lookup', price: ML_REF_PRICE, categoryId, listingTypeId }
+    });
+    if(error || !data || data.error || data.feePct==null) return null;
+    return data.feePct;
+  };
+  try{
+    const [classica, premium] = await Promise.all([buscar('gold_special'), buscar('gold_pro')]);
+    if(classica==null && premium==null){
+      status.textContent = 'O Mercado Livre não respondeu as taxas — preencha na mão.';
+      return;
+    }
+    if(classica!=null) document.getElementById('mlCatClassica').value = num(classica,1).replace(',','.');
+    if(premium!=null) document.getElementById('mlCatPremium').value = num(premium,1).replace(',','.');
+    document.getElementById('mlCatStatus').dataset.origem = 'api';
+    status.innerHTML = `Taxas reais pra um produto de ${brl(ML_REF_PRICE)}${classica==null?' (clássico não veio)':''}${premium==null?' (premium não veio)':''}.`;
+  }catch(e){ status.textContent = 'Falha ao buscar — preencha as taxas na mão.'; }
+}
+function confirmMlCategory(){
+  const nome = document.getElementById('mlCatName').value.trim();
+  if(!nome){ toast('Dê um nome à categoria','err'); return; }
+  const origem = document.getElementById('mlCatStatus').dataset.origem === 'api' ? 'api' : 'manual';
+  if(!Array.isArray(state.settings.mlCategories)) state.settings.mlCategories = [];
+  state.settings.mlCategories.push({
+    id: uid(),
+    nome,
+    mlCategoryId: document.getElementById('mlCatId').value.trim(),
+    classicaPct: parseFloat(document.getElementById('mlCatClassica').value)||0,
+    premiumPct: parseFloat(document.getElementById('mlCatPremium').value)||0,
+    origem,
+    atualizadoEm: todayStr(),
+  });
+  saveSettings();
+  closeModal();
+  renderPlatformRows();
+  toast('Categoria adicionada');
 }
 function addPlatformRow(){
   editingPlatforms.push({id:uid(),name:'Nova plataforma',pct:0,fixed:0,listingTemplate:null});

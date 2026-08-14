@@ -79,6 +79,18 @@ Estado global em `state = { materials, products, sales, orders, customers, print
 
     **Existem DOIS cortes de data, e eles se somam.** `operationsStartMonth` é global (o negócio não existia); `expenses[].startMonth`/`taxes[].startMonth` é por item (a despesa não existia) — mês da primeira cobrança, configurável na coluna "A partir de" de cada linha em Configurações. O global é aplicado primeiro, o por-item depois, via `sumActiveInMonth(lista, ym)` em `calc.js` (testada). O corte por item vale igual pra lista ao vivo e pra `monthlySnapshots`, já que o `startMonth` vai junto no snapshot. Linha nova nasce com o mês corrente; item que já existia é migrado com `startMonth:''` (= vale desde sempre), pra ninguém ver um total mudar sozinho depois da atualização. No Detalhamento do Caixa, item que ainda não começou aparece apagado com "a partir de \<mês\>" em vez de sumir — se sumisse, o total não bateria com o que o usuário cadastrou e ele não saberia por quê.
 
+## Taxas: como cada plataforma é explicada
+
+A aba Taxas mostra, embaixo da linha de cada plataforma, um painel explicando **como aquela plataforma cobra** — antes o app calculava certo mas não contava a regra pra ninguém.
+
+- **Mercado Livre** → `mlCategoryTable()`. `settings.mlCategories` é uma lista de `{id, nome, mlCategoryId, classicaPct, premiumPct, origem, atualizadoEm}`. `origem` é `'estimativa'` (veio do `ML_CATEGORY_SEED`), `'api'` (buscada no ML) ou `'manual'` (digitada/editada) — e aparece como selo na linha, porque o usuário precisa saber em qual número dá pra confiar. Editar qualquer campo na mão vira `'manual'`. Máximo de 5 linhas visíveis; o resto abre no "Ver todas".
+
+  A busca automática usa a Edge Function **`ml-api` que já está deployada**, chamando `fee-lookup` **duas vezes** (`gold_special` = clássico, `gold_pro` = premium) em vez de criar uma ação nova — de propósito, pra não exigir redeploy. Se você mexer nisso, manter essa restrição em mente ou avisar que precisa deployar.
+
+  As taxas da tabela são sempre pra `ML_REF_PRICE` (R$ 100), **acima do corte de R$ 79** onde o ML soma custo fixo por peso. Abaixo disso a mesma categoria mostraria percentual maior e comparar linhas deixaria de valer. Não baixar essa referência sem repensar a tabela inteira.
+
+- **Shopee** → `shopeeTierPanel()`. Só leitura: as faixas (`plat.tiers`) são política da plataforma e o app já as aplica sozinho via `computeTieredFee`. O painel mostra cada faixa com um **exemplo no teto**, o que torna visível o degrau que ninguém enxerga sozinho: R$ 79,99 paga 25% efetivos, R$ 99,99 paga 30%. Os campos "Taxa %"/"Taxa fixa" da linha são só fallback pra quando nenhuma faixa casar.
+
 ## Layout: `minmax(0,1fr)`, nunca `1fr`
 
 Todos os grids (`.g-2`…`.g-5`, `.row2`, `.row3`) usam `minmax(0,1fr)`. `1fr` sozinho é `minmax(AUTO,1fr)`: a coluna **nunca encolhe abaixo do conteúdo dela**. Um cartão com tabela larga inchava a própria coluna, espremia as irmãs e empurrava a página pra fora da tela — era essa a causa de "as caixas ficam de tamanhos diferentes", e no celular a aba Caixa rolava de lado. Com mínimo 0 as colunas ficam iguais e quem rola é a tabela, dentro do `.tbl-wrap` (que já tem `overflow-x:auto`). Grid novo tem que seguir isso.
