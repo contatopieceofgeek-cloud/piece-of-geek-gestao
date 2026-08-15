@@ -330,6 +330,39 @@ function computeTieredFee(tiers, amount, units){
   return { fee: amount*(tier.pct/100) + tier.fixed*u, tier };
 }
 
+/* ===== Taxa do carrinho: por ANÚNCIO, não por pedido =====
+   Bug real, nas duas plataformas: a taxa era calculada uma vez sobre o TOTAL
+   do pedido. Marketplace não cobra assim — cada anúncio tem a taxa dele.
+
+   Mercado Livre: com produtos de categorias diferentes no mesmo carrinho, o
+   app pegava o percentual genérico da plataforma e só avisava "confira
+   manualmente", jogando fora a taxa real que já tinha buscado por produto.
+   Uma venda de R$49,90 (17,5% real) + R$29,90 (11%) dava R$8,78 em vez de
+   R$12,02 — 27% a menos de taxa, ou seja, lucro superestimado.
+
+   Shopee: a faixa é escolhida pelo preço do ITEM, mas era escolhida pelo
+   total. Dois itens de R$49,90 (cada um na faixa de 20% + R$4) somavam
+   R$99,80 e caíam na faixa de 14% + R$16, cobrada 2x — R$45,97 em vez de
+   R$27,96, 64% a mais.
+
+   `line` é {qty, unitPrice, realFeePct}. unitPrice é o preço de UMA venda
+   (kit inteiro), que é o que o anúncio custa pro comprador. */
+function cartLineFee(plat, line){
+  const qty = Math.max(0, (line && line.qty) || 0);
+  const unitPrice = Math.max(0, (line && line.unitPrice) || 0);
+  if(qty <= 0 || unitPrice <= 0) return 0;
+  // Taxa real buscada na API do ML: percentual já completo (o custo
+  // operacional por peso vem embutido), então não soma fixo em cima.
+  if(line.realFeePct != null) return unitPrice * qty * (line.realFeePct / 100);
+  if(plat && plat.tiers) return computeTieredFee(plat.tiers, unitPrice, 1).fee * qty;
+  const pct = (plat && plat.pct) || 0;
+  const fixed = (plat && plat.fixed) || 0;
+  return unitPrice * qty * (pct / 100) + fixed * qty;
+}
+function cartTotalFee(plat, lines){
+  return (lines || []).reduce((a, l) => a + cartLineFee(plat, l), 0);
+}
+
 function extraListingPlatforms(){
   return (state.settings.platforms||[]).filter(p=>p.listingTemplate);
 }
@@ -389,7 +422,7 @@ if(typeof module !== 'undefined' && module.exports){
     channelFeeAt, profitPerHourAt, minPriceForTarget, maxTimeAtMarketPrice,
     effectiveMarketPrice, tablePriceFor, hourlyVerdict, productRecipe,
     componentMaterialNames, printJobRecipe, packagingRecipe, componentsRecipe,
-    computeTieredFee, extraListingPlatforms,
+    computeTieredFee, cartLineFee, cartTotalFee, extraListingPlatforms,
     printUnitsOf, saleUnitsOf, piecesFromPrintJob, piecesForSale, saleUnitsOfSale,
   };
 }

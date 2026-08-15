@@ -252,3 +252,62 @@ test('machineHoursOfJob cai na fórmula antiga só quando não há hora gravada'
   assert.strictEqual(calc.machineHoursOfJob({ qty:2, pctComplete:100 }, null), 0);
   assert.strictEqual(calc.machineHoursOfJob(null, { timeH:3 }), 0);
 });
+
+// ===========================================================================
+//  Taxa do carrinho: cobrada por ANÚNCIO, não sobre o total do pedido
+// ===========================================================================
+const ML = { name:'Mercado Livre', pct:11, fixed:0 };
+const SHOPEE = { name:'Shopee', pct:14, fixed:26, tiers:[
+  { max:7.99,  pct:50, fixed:0 },
+  { max:79.99, pct:20, fixed:4 },
+  { max:99.99, pct:14, fixed:16 },
+  { max:Infinity, pct:14, fixed:26 },
+]};
+
+test('BUG: carrinho do ML misturava taxas e usava só a genérica', () => {
+  // Caso real: R$49,90 com taxa real de 17,5% + R$29,90 sem taxa real (11%).
+  // O app cobrava 11% sobre os R$79,80 = R$8,78, e ainda mandava o usuário
+  // "conferir manualmente" — jogando fora a taxa que já tinha buscado.
+  const linhas = [
+    { qty:1, unitPrice:49.90, realFeePct:17.5 },
+    { qty:1, unitPrice:29.90, realFeePct:null },
+  ];
+  const total = calc.cartTotalFee(ML, linhas);
+  assert.ok(Math.abs(total - 12.02) < 0.01, `esperava R$12,02, veio ${total.toFixed(2)}`);
+  assert.ok(Math.abs(total - 79.80*0.11) > 3, 'não pode cair no 11% sobre o total (R$8,78)');
+
+  // Cada linha com a taxa dela.
+  assert.ok(Math.abs(calc.cartLineFee(ML, linhas[0]) - 8.7325) < 0.001);
+  assert.ok(Math.abs(calc.cartLineFee(ML, linhas[1]) - 3.289) < 0.001);
+});
+
+test('BUG: faixa da Shopee vinha do total do pedido, não do preço do item', () => {
+  // Dois itens de R$49,90: cada um está na faixa até R$79,99 (20% + R$4).
+  // Somados dão R$99,80, que caía na faixa de 14% + R$16 — e o fixo ainda
+  // era multiplicado pelas 2 unidades. R$45,97 em vez de R$27,96.
+  const linhas = [
+    { qty:1, unitPrice:49.90, realFeePct:null },
+    { qty:1, unitPrice:49.90, realFeePct:null },
+  ];
+  const total = calc.cartTotalFee(SHOPEE, linhas);
+  assert.ok(Math.abs(total - 27.96) < 0.01, `esperava R$27,96, veio ${total.toFixed(2)}`);
+
+  // Uma linha com qty 2 tem que dar o mesmo que duas linhas de qty 1.
+  assert.ok(Math.abs(calc.cartTotalFee(SHOPEE, [{qty:2, unitPrice:49.90, realFeePct:null}]) - total) < 0.001,
+    'o fixo é por unidade vendida; agrupar não pode mudar a conta');
+});
+
+test('cartLineFee: taxa real do ML não soma taxa fixa em cima', () => {
+  // mlRealFeePct já vem com o custo operacional por peso embutido.
+  const platComFixo = { name:'Mercado Livre', pct:11, fixed:5 };
+  assert.strictEqual(calc.cartLineFee(platComFixo, { qty:1, unitPrice:100, realFeePct:20 }), 20);
+  // Sem taxa real, o fixo entra por unidade vendida.
+  assert.strictEqual(calc.cartLineFee(platComFixo, { qty:2, unitPrice:100, realFeePct:null }), 100*2*0.11 + 5*2);
+});
+
+test('cartLineFee: linha sem valor não gera taxa', () => {
+  assert.strictEqual(calc.cartLineFee(ML, { qty:0, unitPrice:50, realFeePct:null }), 0);
+  assert.strictEqual(calc.cartLineFee(ML, { qty:1, unitPrice:0, realFeePct:null }), 0);
+  assert.strictEqual(calc.cartTotalFee(ML, []), 0);
+  assert.strictEqual(calc.cartTotalFee(ML, null), 0);
+});

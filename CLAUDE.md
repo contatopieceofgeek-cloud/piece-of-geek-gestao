@@ -89,6 +89,8 @@ A aba Taxas mostra, embaixo da linha de cada plataforma, um painel explicando **
 
   As taxas da tabela são sempre pra `ML_REF_PRICE` (R$ 100), **acima do corte de R$ 79** onde o ML soma custo fixo por peso. Abaixo disso a mesma categoria mostraria percentual maior e comparar linhas deixaria de valer. Não baixar essa referência sem repensar a tabela inteira.
 
+⚠️ **A taxa é por ANÚNCIO, nunca sobre o total do pedido** — `cartLineFee`/`cartTotalFee` em `calc.js`, testadas. Marketplace cobra cada anúncio separado, e calcular sobre o total errava nas duas plataformas: no ML, carrinho com taxas reais diferentes caía no percentual genérico (R$8,78 em vez de R$12,02, lucro superestimado); na Shopee, dois itens de R$49,90 (faixa de 20%+R$4 cada) somavam R$99,80 e caíam na faixa de 14%+R$16 cobrada 2x (R$45,97 em vez de R$27,96). `confirmSale` grava a taxa própria de cada linha, não um rateio do total pelo faturamento — senão o histórico mistura as taxas de produtos de categorias diferentes. A exceção é quando o usuário digita um percentual à mão: aí não há como separar, e o rateio proporcional é a única leitura possível de um número só. O campo "Taxa nessa venda (%)" mostra a taxa EFETIVA (soma por anúncio ÷ total), e o painel embaixo lista de onde veio cada número.
+
 - **Shopee** → `shopeeTierPanel()`. Só leitura: as faixas (`plat.tiers`) são política da plataforma e o app já as aplica sozinho via `computeTieredFee`. O painel mostra cada faixa com um **exemplo no teto**, o que torna visível o degrau que ninguém enxerga sozinho: R$ 79,99 paga 25% efetivos, R$ 99,99 paga 30%. Os campos "Taxa %"/"Taxa fixa" da linha são só fallback pra quando nenhuma faixa casar.
 
 ## Layout: `minmax(0,1fr)`, nunca `1fr`

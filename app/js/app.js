@@ -3280,17 +3280,39 @@ function renderCartItemsList(){
 // custo fixo do ML/Shopee é por unidade vendida do anúncio, não por pedido
 // (vender 2 kits cobra o fixo 2x). Chamadas fora de Vendas (painel de preço
 // de Produtos, já avaliando UMA venda) continuam corretas com o default 1.
+/* As linhas do carrinho no formato que cartLineFee() espera: cada uma com a
+   taxa real do PRÓPRIO produto, quando já foi buscada na API do ML. */
+function cartFeeLines(){
+  const isML = /mercado\s*livre/i.test(currentSalePlatform()||'');
+  return cartItems.map(it=>{
+    const prod = state.products.find(p=>p.id===it.productId);
+    return {
+      qty: it.qty,
+      unitPrice: it.unitPrice,
+      // Taxa real só vale no ML — é de lá que ela foi buscada.
+      realFeePct: (isML && prod && prod.mlRealFeePct!=null) ? prod.mlRealFeePct : null,
+    };
+  });
+}
+function currentSalePlatformObj(){
+  const el = document.getElementById('sPlat');
+  return state.settings.platforms.find(p=>p.name===(el?el.value:''));
+}
+// true quando o usuário digitou % ou fixo à mão — aí o número dele manda.
+function saleFeeOverridden(){
+  const pctEl = document.getElementById('sFeePct'), fixedEl = document.getElementById('sFeeFixed');
+  return !!((pctEl && pctEl.dataset.touched) || (fixedEl && fixedEl.dataset.touched));
+}
+/* Sem override: soma a taxa de cada linha (ver cartLineFee em calc.js — o
+   marketplace cobra por anúncio, não por pedido). Com override: o percentual
+   digitado vale pro total, porque é isso que a pessoa quis dizer ao digitar
+   um número só. */
 function saleFeeFromForm(gross, totalUnits){
   if(gross<=0) return 0;
   const units = totalUnits!=null ? totalUnits : 1;
-  const pctEl = document.getElementById('sFeePct'), fixedEl = document.getElementById('sFeeFixed');
-  const touched = (pctEl && pctEl.dataset.touched) || (fixedEl && fixedEl.dataset.touched);
-  const plat = state.settings.platforms.find(p=>p.name===document.getElementById('sPlat').value);
-  if(!touched && plat && plat.tiers){
-    return computeTieredFee(plat.tiers, gross, units).fee;
-  }
-  const pct = parseFloat(pctEl.value)||0;
-  const fixed = parseFloat(fixedEl.value)||0;
+  if(!saleFeeOverridden()) return cartTotalFee(currentSalePlatformObj(), cartFeeLines());
+  const pct = parseFloat(document.getElementById('sFeePct').value)||0;
+  const fixed = parseFloat(document.getElementById('sFeeFixed').value)||0;
   return gross*(pct/100) + fixed*units;
 }
 // Se o produto já teve a taxa REAL do ML buscada (mlRealFeePct, via
@@ -3303,21 +3325,41 @@ function updateFeeDefaults(){
   const plat = state.settings.platforms.find(x=>x.name===platName);
   const pctEl = document.getElementById('sFeePct'), fixedEl = document.getElementById('sFeeFixed');
   const noteEl = document.getElementById('sFeeRealNote');
-  let pctValue = plat ? plat.pct : 0;
-  let fixedValue = plat ? plat.fixed : 0;
+  /* O campo mostra a taxa EFETIVA da venda, calculada por anúncio e
+     convertida em percentual do total. Antes mostrava o percentual genérico
+     da plataforma e, quando os produtos tinham taxas diferentes, o app
+     desistia com um "confira manualmente" — beco sem saída, e ainda por cima
+     usava o número errado no cálculo. */
+  const lines = cartFeeLines();
+  const gross = cartItems.reduce((a,it)=>a+it.qty*it.unitPrice,0);
+  const feeTotal = cartTotalFee(plat, lines);
+  let pctValue = gross>0 ? (feeTotal/gross)*100 : (plat ? plat.pct : 0);
+  let fixedValue = 0;
   let note = '';
-  if(/mercado ?livre/i.test(platName||'') && cartItems.length){
-    const realFees = cartItems.map(it=>{
+  if(gross>0 && cartItems.length){
+    const detalhe = cartItems.map((it,i)=>{
       const prod = state.products.find(p=>p.id===it.productId);
-      return (prod && prod.mlRealFeePct!=null) ? prod.mlRealFeePct : null;
-    });
-    const known = realFees.filter(f=>f!=null);
-    if(known.length===cartItems.length && known.every(f=>f===known[0])){
-      pctValue = known[0]; fixedValue = 0;
-      note = `<div class="field hint" style="margin-top:-8px;margin-bottom:12px;color:var(--teal);">Usando a taxa real já buscada ${cartItems.length>1?'pra esses produtos':'pra esse produto'}: ${num(pctValue,1)}%.</div>`;
-    } else if(known.length>0){
-      note = `<div class="field hint" style="margin-top:-8px;margin-bottom:12px;color:var(--amber);">O carrinho mistura produtos com e sem taxa real buscada (ou com taxas diferentes) — confira o percentual manualmente.</div>`;
-    }
+      const f = cartLineFee(plat, lines[i]);
+      const pctLinha = it.qty*it.unitPrice>0 ? (f/(it.qty*it.unitPrice))*100 : 0;
+      let origem = 'taxa cadastrada';
+      if(lines[i].realFeePct!=null) origem = 'taxa real do ML';
+      else if(plat && plat.tiers){
+        // Qual faixa ESTE anúncio pegou — o degrau só fica visível assim.
+        const { tier } = computeTieredFee(plat.tiers, it.unitPrice, 1);
+        const teto = (tier.max==null || !isFinite(tier.max)) ? 'acima da última faixa' : `faixa até ${brl(tier.max)}`;
+        origem = `${teto}: ${num(tier.pct,0)}%${tier.fixed?' + '+brl(tier.fixed)+'/un':''}`;
+      }
+      return `<div style="display:flex;justify-content:space-between;gap:10px;">
+        <span>${prod?prod.name:'—'} <span style="color:var(--text-faint);">(${origem})</span></span>
+        <span class="num">${num(pctLinha,1)}% · ${brl(f)}</span>
+      </div>`;
+    }).join('');
+    note = `<div class="helper-block" style="margin:-4px 0 12px;">
+      <div style="margin-bottom:6px;">Cada anúncio é cobrado com a taxa dele — o marketplace não cobra sobre o total do pedido:</div>
+      ${detalhe}
+      ${cartItems.length>1?`<div style="display:flex;justify-content:space-between;gap:10px;border-top:1px solid var(--line-soft);margin-top:6px;padding-top:6px;font-weight:600;">
+        <span>Total</span><span class="num">${num(pctValue,1)}% · ${brl(feeTotal)}</span></div>`:''}
+    </div>`;
   }
   // Arredonda pra 2 casas: a taxa real do ML vem de uma divisão
   // (sale_fee_amount / preço) e chegava ao campo como 17,9595991839679 —
@@ -3337,27 +3379,25 @@ function updateSalePreview(){
   // Total de VENDAS/kits no carrinho — a taxa fixa do ML/Shopee é por
   // unidade vendida do anúncio, não uma vez por pedido (ver saleFeeFromForm).
   const totalUnits = cartItems.reduce((a,it)=>a+it.qty,0);
-  const pctEl = document.getElementById('sFeePct'), fixedEl = document.getElementById('sFeeFixed');
-  const touched = (pctEl && pctEl.dataset.touched) || (fixedEl && fixedEl.dataset.touched);
-  const plat = state.settings.platforms.find(p=>p.name===document.getElementById('sPlat').value);
-  let tierNote = '';
-  if(!touched && plat && plat.tiers && totalGross>0){
-    const { tier } = computeTieredFee(plat.tiers, totalGross, totalUnits);
-    pctEl.value = tier.pct;
-    fixedEl.value = tier.fixed;
-    tierNote = `<div class="field hint" style="margin-top:-8px;margin-bottom:12px;color:var(--teal);">Faixa aplicada automaticamente: até ${(tier.max==null||!isFinite(tier.max))?'qualquer valor':brl(tier.max)} → ${tier.pct}%${tier.fixed?' + '+brl(tier.fixed)+'/un':''} (tabela oficial Shopee 2026)</div>`;
-  }
+  const plat = currentSalePlatformObj();
+  /* A faixa da Shopee era escolhida aqui pelo TOTAL do pedido e escrita por
+     cima dos campos de taxa — dois itens de R$49,90 (faixa de 20%+R$4 cada)
+     somavam R$99,80 e caíam na faixa de 14%+R$16, cobrada 2x. A faixa agora
+     é por item, dentro de cartLineFee(), e o detalhamento em sFeeRealNote
+     mostra em qual faixa cada anúncio caiu. Nada mais escreve nos campos. */
   const tierNoteEl = document.getElementById('sTierNote');
-  if(tierNoteEl) tierNoteEl.innerHTML = tierNote;
+  if(tierNoteEl) tierNoteEl.innerHTML = '';
+  const feeLines = cartFeeLines();
   const totalFee = saleFeeFromForm(totalGross, totalUnits);
   const totalShipping = parseFloat(document.getElementById('sShipping').value)||0;
 
   let totalCost = 0, totalProfit = 0, allAllocations = {};
-  const itemLines = cartItems.map(item=>{
+  const itemLines = cartItems.map((item,i)=>{
     const prod = state.products.find(p=>p.id===item.productId);
     const itemGross = item.qty*item.unitPrice;
     const share = totalGross>0 ? itemGross/totalGross : 0;
-    const itemFee = totalFee*share;
+    // Mesma regra do confirmSale: taxa própria da linha, salvo override.
+    const itemFee = saleFeeOverridden() ? totalFee*share : cartLineFee(plat, feeLines[i]);
     const itemShipping = totalShipping*share;
     const calc = calcProduct(prod);
     // calc.totalCost já é o custo de UMA venda (kit inteiro, embalagem
@@ -3444,6 +3484,12 @@ function confirmSale(){
   const customerId = document.getElementById('sCustomer').value || null;
   const totalUnits = cartItems.reduce((a,it)=>a+it.qty,0);
   const totalFee = saleFeeFromForm(totalGross, totalUnits);
+  const platObj = currentSalePlatformObj();
+  const isMLSale = /mercado\s*livre/i.test(plat||'');
+  const feeLineFor = (it)=>{
+    const pr = state.products.find(p=>p.id===it.productId);
+    return (isMLSale && pr && pr.mlRealFeePct!=null) ? pr.mlRealFeePct : null;
+  };
   const totalShipping = parseFloat(document.getElementById('sShipping').value)||0;
   const totalCoupon = parseFloat(document.getElementById('sCoupon').value)||0;
   const trackingCode = document.getElementById('sTracking').value.trim() || null;
@@ -3459,7 +3505,15 @@ function confirmSale(){
     if(!prod) return;
     const itemGross = item.qty*item.unitPrice;
     const share = totalGross>0 ? itemGross/totalGross : 0;
-    const itemFee = totalFee*share;
+    // A taxa de cada linha é a DELA (ver cartLineFee), não um rateio do total
+    // pelo faturamento: dois produtos de categorias diferentes têm taxas
+    // diferentes, e ratear misturava as duas no histórico. Só quando o
+    // usuário digita um percentual único é que não há como separar — aí sim
+    // rateia, que é a única leitura possível de um número só.
+    const itemFee = saleFeeOverridden()
+      ? totalFee*share
+      : cartLineFee(platObj, { qty:item.qty, unitPrice:item.unitPrice, realFeePct: feeLineFor(item) });
+    // Frete e cupom continuam rateados: são do PEDIDO, não do anúncio.
     const itemShipping = totalShipping*share;
     const itemCoupon = totalCoupon*share;
     const calc = calcProduct(prod);
