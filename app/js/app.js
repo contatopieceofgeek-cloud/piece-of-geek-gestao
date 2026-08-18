@@ -7020,22 +7020,31 @@ function renderPlatformRows(){
   // (`i===0 ? <label> : ''`), e como cada plataforma é seguida do próprio
   // painel (categorias do ML, faixas da Shopee), quem chegava na terceira
   // linha já não tinha referência nenhuma na tela.
-  el.innerHTML = formRowsHtml('minmax(0,2.2fr) minmax(0,0.8fr) minmax(0,0.8fr)',
-    ['Plataforma','Taxa %','Taxa fixa R$'],
+  /* Os campos "Taxa %"/"Taxa fixa" saíram da linha da plataforma e passaram a
+     aparecer SÓ onde são a fonte da taxa:
+       Mercado Livre — quem manda é a tabela de categorias logo abaixo; o
+         percentual em uso vira texto, trocado pelos botões "usar".
+       Shopee — as faixas cobrem qualquer preço (a última é pega-tudo), então
+         os campos nunca chegavam a ser usados. Eram decorativos.
+       Demais plataformas — aí sim são a única fonte, e continuam editáveis
+         no bloco da própria plataforma. */
+  el.innerHTML = formRowsHtml('minmax(0,1fr)', ['Plataforma'],
     editingPlatforms.map((p,i)=>{
     const isML = /mercado\s*livre/i.test(p.name);
     const isShopee = /shopee/i.test(p.name) && p.tiers;
     const canHaveListing = !isML && !isShopee;
     const otherTemplateOptions = canHaveListing ? editingPlatforms.filter((op,oi)=>oi!==i && op.listingTemplate && !/mercado\s*livre/i.test(op.name) && !(/shopee/i.test(op.name)&&op.tiers)) : [];
     return `
-    <div class="form-row" style="margin-bottom:${(isML||isShopee||canHaveListing)?4:8}px;">
+    <div class="form-row" style="margin-bottom:4px;">
       <input value="${p.name}" oninput="editingPlatforms[${i}].name=this.value">
-      <input type="number" step="0.01" value="${p.pct}" oninput="editingPlatforms[${i}].pct=parseFloat(this.value)||0">
-      <input type="number" step="0.01" value="${p.fixed}" oninput="editingPlatforms[${i}].fixed=parseFloat(this.value)||0">
       ${formRowX(`removePlatformRow(${i})`)}
     </div>
     ${isML ? mlCategoryTable(i) : ''}
     ${isShopee ? shopeeTierPanel(p) : ''}
+    ${(!isML && !isShopee) ? `<div class="row2" style="margin-bottom:4px;">
+      <div class="field"><label>Taxa %</label><input type="number" step="0.01" value="${p.pct}" oninput="editingPlatforms[${i}].pct=parseFloat(this.value)||0"></div>
+      <div class="field"><label>Taxa fixa por unidade vendida (R$)</label><input type="number" step="0.01" value="${p.fixed}" oninput="editingPlatforms[${i}].fixed=parseFloat(this.value)||0"></div>
+    </div>` : ''}
     ${canHaveListing ? `<div class="field" style="margin-bottom:12px;"><label>Aba de Anúncios pra "${p.name}"</label>
       <select onchange="editingPlatforms[${i}].listingTemplate=this.value||null; renderPlatformRows();">
         <option value="">Sem aba de Anúncios (só taxa pra Vendas)</option>
@@ -7079,6 +7088,10 @@ function mlCategoryTable(platIndex){
 
   return `<div style="margin:0 0 14px;">
     <div class="field hint" style="margin:0 0 8px;">O Mercado Livre cobra percentual diferente por categoria e por tipo de anúncio. <strong>Clássico</strong> aparece menos na busca e custa menos; <strong>Premium</strong> aparece mais e inclui parcelamento sem juros pro comprador, por isso é mais caro. Os percentuais abaixo valem pra um produto de ${brl(ML_REF_PRICE)} — em itens abaixo de R$ 79 o ML soma um custo fixo por peso, e o percentual efetivo sobe.</div>
+    <div class="helper-block" style="margin:0 0 10px;display:flex;justify-content:space-between;gap:10px;align-items:baseline;">
+      <span>Taxa em uso pros produtos que ainda não tiveram a taxa real buscada:</span>
+      <strong class="num" style="color:var(--text);white-space:nowrap;">${num(editingPlatforms[platIndex].pct,1)}%${editingPlatforms[platIndex].fixed?' + '+brl(editingPlatforms[platIndex].fixed)+'/un':''}</strong>
+    </div>
     ${todas.length ? `<div class="tbl-wrap tbl-responsive"><table>
       <thead><tr><th>Categoria</th><th class="right">Clássico %</th><th class="right">Premium %</th><th></th></tr></thead>
       <tbody>${linhas}</tbody>
@@ -7119,7 +7132,7 @@ function shopeeTierPanel(plat){
   ).join(' · ');
 
   return `<div style="margin:0 0 14px;">
-    <div class="field hint" style="margin:0 0 8px;">A Shopee não tem taxa única: ela cobra <strong>comissão percentual + um valor fixo</strong>, e os dois mudam conforme o preço do produto. O app aplica a faixa certa sozinho em cada venda — os campos "Taxa %" e "Taxa fixa" acima só entram se nenhuma faixa casar.</div>
+    <div class="field hint" style="margin:0 0 8px;">A Shopee não tem taxa única: ela cobra <strong>comissão percentual + um valor fixo</strong>, e os dois mudam conforme o preço do produto. O app aplica a faixa certa sozinho, <strong>item por item</strong> — o que decide é o preço de cada anúncio, não o total do pedido. Por isso não há campo de taxa pra editar aqui: as faixas abaixo cobrem qualquer valor.</div>
     <div class="tbl-wrap tbl-responsive"><table>
       <thead><tr><th>Preço do produto</th><th class="right">Comissão</th><th class="right">Fixo</th><th class="right">Exemplo no teto da faixa</th></tr></thead>
       <tbody>${linhas}</tbody>
