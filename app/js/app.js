@@ -2122,7 +2122,8 @@ function renderMeiLimitCard(y, year){
       </div>
       <div class="field hint" style="margin-top:10px;">${ehMei
         ? `Ultrapassar em até 20% (${brl(tolerance)}) permite continuar no regime até dezembro pagando DAS complementar; acima disso o desenquadramento retroage ao início do ano. Teto editável em Configurações, caso a Receita reajuste.`
-        : `Os ${brl(limit)} são o <strong>teto</strong> do MEI, não um gatilho: é o quanto se pode faturar <em>sendo</em> MEI. Não existe valor abaixo do qual não é preciso formalizar — quem vende com habitualidade se enquadra independente do quanto, e o imposto de pessoa física incide desde o primeiro real. O que este número responde é: <strong>se eu formalizar, MEI ainda me serve, ou já seria ME?</strong> A obrigação em si é conversa de contador.`}</div>
+        : `<strong>Os ${brl(limit)} são um teto, não um gatilho.</strong> É o quanto dá pra faturar <em>sendo</em> MEI — passou disso, o enquadramento vira ME.
+           <br><br>Não existe valor abaixo do qual não precisa formalizar: quem vende com habitualidade se enquadra independente do quanto, e o imposto de pessoa física vale desde o primeiro real. Então esta barra não responde <em>“já preciso abrir MEI?”</em>, e sim <strong>“se eu formalizar, MEI ainda me serve?”</strong> — a obrigação em si é conversa de contador.`}</div>
     </div>`;
 }
 function drawAnnualChart(){

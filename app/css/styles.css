@@ -250,7 +250,13 @@ input:focus,select:focus,textarea:focus{border-color:var(--nozzle);box-shadow:0 
 /* Variante em linha, pra colar num rótulo existente (ex: "N/A"). */
 .field-checkbox.inline{display:inline-flex;min-height:0;font-size:11px;font-weight:400;color:var(--text-faint);gap:4px;margin-left:8px;cursor:pointer;}
 .field .hint{font-size:11px;color:var(--text-faint);}
-.field.hint{font-size:12.5px;color:var(--text-dim);line-height:1.5;}
+/* .field é coluna flex (rótulo em cima, campo embaixo). A variante .hint não é
+   campo, é PARÁGRAFO — e herdando o flex, todo <strong>/<em> dentro dela virava
+   item de flex e ganhava a própria linha: "Quanto você gastou com ML Ads em" /
+   "agosto de 2026" / ". Diferente das despesas fixas..." em três linhas soltas.
+   display:block devolve o texto ao fluxo normal. Nenhum .field.hint do app tem
+   label/input dentro (conferido nas 100 ocorrências), então não há o que quebrar. */
+.field.hint{display:block;font-size:12.5px;color:var(--text-dim);line-height:1.5;}
 /* align-items:end alinha os CAMPOS, não o topo das caixas. Rótulo comprido
    ("Taxa fixa por unidade vendida (R$)") quebra em duas linhas e, sem isto,
    empurrava só aquele input 17px pra baixo — a linha ficava torta. */
