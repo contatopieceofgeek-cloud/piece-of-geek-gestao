@@ -499,6 +499,12 @@ function migrateSettings(settings){
   settings.machines.forEach(m=>{ if(m.energyCostPerHour==null) m.energyCostPerHour = 0.0704; if(m.powerConsumptionKw==null) m.powerConsumptionKw = 0; if(!m.id) m.id = uid(); if(!Array.isArray(m.maintenanceLog)) m.maintenanceLog = []; if(m.maintenanceCostPerHour==null) m.maintenanceCostPerHour = 0.25; });
   if(settings.energyTariffPerKwh==null) settings.energyTariffPerKwh = 0.75;
   if(settings.meiRevenueLimit==null) settings.meiRevenueLimit = 81000;
+  /* Regime tributário. Muda o SENTIDO do teto de R$81.000, não só o texto:
+     pra quem é MEI é um limite que não pode estourar (desenquadramento);
+     pra quem não é, é a resposta de "se eu formalizar, MEI ainda me serve?".
+     Quem já tinha o lembrete de DAS ligado é MEI — é o único jeito de pagar
+     DAS —, então a migração usa isso pra não perguntar de novo. */
+  if(settings.taxRegime==null) settings.taxRegime = settings.dasEnabled ? 'mei' : '';
   if(settings.monthlyGoal==null) settings.monthlyGoal = 0;
   if(!settings.dasPaid) settings.dasPaid = {};
   if(settings.dasDueDay==null) settings.dasDueDay = 20;
@@ -2074,14 +2080,25 @@ function renderMeiLimitCard(y, year){
   const isCurrentYear = year===new Date().getFullYear();
   const projected = isCurrentYear && monthsWithData>0 && monthsWithData<12 ? monthlyAvg*12 : y.faturamento;
   const pctReal = Math.min(150,(y.faturamento/limit)*100);
+  /* O mesmo número quer dizer coisas diferentes conforme o regime, e usar o
+     texto errado induz a erro grave: quem NÃO é MEI não pode ser
+     "desenquadrado", e — mais importante — o teto não é gatilho pra abrir
+     MEI. Não existe piso de faturamento abaixo do qual não se formaliza. */
+  const ehMei = state.settings.taxRegime === 'mei';
   let status;
-  if(y.faturamento>tolerance) status = {cls:'bad', text:'Já passou da tolerância de 20% — risco de desenquadramento retroativo'};
-  else if(y.faturamento>limit) status = {cls:'warn', text:'Já passou do limite anual — ainda dentro da tolerância de 20%, mas fique atento'};
-  else if(isCurrentYear && projected>limit) status = {cls:'warn', text:`No ritmo atual (${brl(monthlyAvg)}/mês), deve ultrapassar o limite este ano`};
-  else status = {cls:'ok', text:'Dentro do limite'};
+  if(ehMei){
+    if(y.faturamento>tolerance) status = {cls:'bad', text:'Já passou da tolerância de 20% — risco de desenquadramento retroativo'};
+    else if(y.faturamento>limit) status = {cls:'warn', text:'Já passou do limite anual — ainda dentro da tolerância de 20%, mas fique atento'};
+    else if(isCurrentYear && projected>limit) status = {cls:'warn', text:`No ritmo atual (${brl(monthlyAvg)}/mês), deve ultrapassar o limite este ano`};
+    else status = {cls:'ok', text:'Dentro do limite'};
+  } else {
+    if(y.faturamento>limit) status = {cls:'warn', text:'Acima do teto do MEI — nesse faturamento o enquadramento seria ME'};
+    else if(isCurrentYear && projected>limit) status = {cls:'warn', text:`No ritmo atual (${brl(monthlyAvg)}/mês), passa do teto do MEI este ano`};
+    else status = {cls:'ok', text:'Cabe no teto do MEI'};
+  }
   return `
     <div class="card" style="margin-top:14px;">
-      <div class="card-title">Teto do MEI<span class="sub">limite anual: ${brl(limit)}</span></div>
+      <div class="card-title">${ehMei?'Teto do MEI':'Seu faturamento x teto do MEI'}<span class="sub">teto anual: ${brl(limit)}</span></div>
       <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
         <div style="flex:1;min-width:220px;">
           <div class="progress" style="height:10px;"><div style="width:${pctReal}%;background:${status.cls==='bad'?'var(--red)':status.cls==='warn'?'var(--amber)':'var(--teal)'}"></div></div>
@@ -2089,7 +2106,9 @@ function renderMeiLimitCard(y, year){
         </div>
         <span class="badge ${status.cls}">${status.text}</span>
       </div>
-      <div class="field hint" style="margin-top:10px;">Limite editável em Configurações (ex: se a Receita Federal reajustar o teto do MEI). Ultrapassar em até 20% (${brl(tolerance)}) permite continuar no regime até dezembro pagando DAS complementar; acima disso o desenquadramento retroage ao início do ano.</div>
+      <div class="field hint" style="margin-top:10px;">${ehMei
+        ? `Ultrapassar em até 20% (${brl(tolerance)}) permite continuar no regime até dezembro pagando DAS complementar; acima disso o desenquadramento retroage ao início do ano. Teto editável em Configurações, caso a Receita reajuste.`
+        : `Os ${brl(limit)} são o <strong>teto</strong> do MEI, não um gatilho: é o quanto se pode faturar <em>sendo</em> MEI. Não existe valor abaixo do qual não é preciso formalizar — quem vende com habitualidade se enquadra independente do quanto, e o imposto de pessoa física incide desde o primeiro real. O que este número responde é: <strong>se eu formalizar, MEI ainda me serve, ou já seria ME?</strong> A obrigação em si é conversa de contador.`}</div>
     </div>`;
 }
 function drawAnnualChart(){
@@ -6411,7 +6430,12 @@ function renderConfiguracoes(){
     <div class="section-title">MEI, capacidade e metas</div>
     <div class="card">
       <div class="row2">
-        <div class="field"><label>Limite anual de faturamento do MEI (R$)</label><input type="number" min="0" id="cfgMeiLimit" value="${s.meiRevenueLimit||81000}" step="100"></div>
+        <div class="field"><label>Regime tributário</label><select id="cfgTaxRegime">
+          <option value="" ${!s.taxRegime?'selected':''}>Ainda não formalizado</option>
+          <option value="mei" ${s.taxRegime==='mei'?'selected':''}>MEI</option>
+          <option value="outro" ${s.taxRegime==='outro'?'selected':''}>ME ou outro regime</option>
+        </select></div>
+        <div class="field"><label>Teto anual do MEI (R$)</label><input type="number" min="0" id="cfgMeiLimit" value="${s.meiRevenueLimit||81000}" step="100"></div>
         <div class="field"><label>Horas de impressão disponíveis por dia (por impressora)</label><input type="number" min="0" id="cfgPrintHours" value="${s.printHoursPerDay||8}" step="0.5"></div>
       </div>
       <div class="field"><label>Meta de faturamento mensal (R$)</label><input type="number" min="0" id="cfgMonthlyGoal" value="${s.monthlyGoal||0}" step="50" placeholder="0 = sem meta definida"></div>
@@ -6975,6 +6999,7 @@ function confirmConfiguracoes(){
   s.whatsapp = document.getElementById('cfgWhatsapp').value.trim();
   s.instagram = document.getElementById('cfgInstagram').value.trim().replace(/^@/,'');
   s.laborHourlyRate = numField('cfgLabor');
+  s.taxRegime = document.getElementById('cfgTaxRegime').value;
   s.meiRevenueLimit = numField('cfgMeiLimit', 81000);
   s.monthlyGoal = numField('cfgMonthlyGoal');
   s.printHoursPerDay = numField('cfgPrintHours', 8);
