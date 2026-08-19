@@ -1,0 +1,15 @@
+# Cabeçalhos de segurança (formato do Netlify).
+#
+# Estes NÃO funcionam como <meta> no HTML — o navegador ignora
+# frame-ancestors e X-Frame-Options entregues por meta, e avisa no console.
+# O CSP principal continua no <meta> de app/index.html, porque lá ele vale
+# mesmo abrindo o arquivo direto; aqui ficam só os que exigem cabeçalho.
+#
+# Se a hospedagem mudar de Netlify, este arquivo vira inerte: reproduzir as
+# mesmas regras no que a nova hospedagem usar.
+/*
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Content-Security-Policy: frame-ancestors 'none'
+  Permissions-Policy: geolocation=(), microphone=(), camera=()

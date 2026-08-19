@@ -3,6 +3,23 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<!-- Segunda camada, caso algum texto escape do esc(): mesmo que uma tag entre
+     no HTML, o navegador se recusa a buscar script de origem não listada.
+     'unsafe-inline' em script-src é inevitável hoje — o app inteiro usa
+     onclick= no HTML; tirar isso exige trocar todos os handlers por
+     addEventListener. img-src precisa de data: (fotos ficam como data URI) e
+     https: (imagens de anúncio). connect-src cobre Supabase. -->
+<meta http-equiv="Content-Security-Policy" content="
+  default-src 'self';
+  script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net;
+  style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+  font-src 'self' https://fonts.gstatic.com;
+  img-src 'self' data: blob: https:;
+  connect-src 'self' https://*.supabase.co https://api.mercadolibre.com;
+  base-uri 'self';
+  form-action 'none';
+  object-src 'none';
+">
 <title>Gestão 3D</title>
 <meta name="theme-color" content="#F4F5F7">
 <meta name="mobile-web-app-capable" content="yes">

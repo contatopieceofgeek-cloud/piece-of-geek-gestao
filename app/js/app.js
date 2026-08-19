@@ -18,6 +18,50 @@ const fmtHm = (hours) => { const h=Math.floor(hours||0); const m=Math.round(((ho
    caixa de 0,01 em 0,01, e a aritmética de float (0.1+0.2) fazia o valor
    aparecer como 24.010000000000002 no campo, porque ia pro HTML sem
    arredondar. */
+/* ===================== ESCAPE DE TEXTO DO USUÁRIO =====================
+   O app inteiro monta HTML com template string e joga no innerHTML. Sem
+   escapar, qualquer texto que o usuário digita vira MARCAÇÃO: um produto
+   chamado `<img src=x onerror=...>` executava script ao abrir a aba
+   Produtos — verificado, não é teórico.
+
+   Não é só "o usuário se ataca sozinho". Importar backup aceita arquivo de
+   qualquer origem (e valida só o formato), e com a sincronização ligada o
+   token da sessão fica no localStorage, ao alcance do script injetado.
+
+   REGRA: todo dado vindo de `state` que for texto livre passa por esc()
+   antes de entrar em template string — no conteúdo E dentro de atributo
+   (as aspas também são escapadas, senão dá pra fechar o value= e injetar
+   um handler). Número formatado por brl()/num() já é seguro.
+
+   Em atributo, use sempre aspas duplas: esc() troca " por &quot; mas deixa
+   a apóstrofe, que é legítima em português ("D'Ávila"). */
+function esc(v){
+  if(v == null) return '';
+  return String(v)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+/* Link digitado pelo usuário (link do anúncio, WhatsApp...). Escapar aspas
+   NÃO basta num href: `javascript:alert(1)` não tem aspa nenhuma e executa
+   ao clique. Só http(s) e mailto passam; o resto vira link morto. */
+function safeUrl(v){
+  const s = String(v == null ? '' : v).trim();
+  if(!s) return '';
+  if(/^(https?:|mailto:)/i.test(s)) return esc(s);
+  // Sem esquema, assume https — é o que a pessoa quis dizer ao colar
+  // "mercadolivre.com.br/...".
+  if(/^[\w.-]+\.[a-z]{2,}(?:[\/?#]|$)/i.test(s)) return esc('https://' + s);
+  return '';
+}
+/* Pra texto que vai dentro de string JavaScript num onclick="fn('...')".
+   Escapar HTML não basta ali: a apóstrofe fecha o argumento. */
+function escJs(v){
+  if(v == null) return '';
+  return String(v).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\r?\n/g, ' ');
+}
 const isCountableUnit = (unit) => unit === 'un';
 const stepForUnit = (unit) => isCountableUnit(unit) ? '1' : '0.01';
 const roundQty = (n, unit) => {
@@ -806,7 +850,7 @@ async function loadState(){
   await applyLoadedState();
   render();
   if(!hasCloudStorage()){
-    if(syncStatus.email) toast(`Sincronizado como ${syncStatus.email}`);
+    if(syncStatus.email) toast(`Sincronizado como ${esc(syncStatus.email)}`);
     else toast('Salvando no navegador (IndexedDB) — evite navegação anônima para não perder dados.');
   }
   if(syncStatus.configured && syncStatus.email) startRealtimeSync();
@@ -1009,8 +1053,8 @@ function render(){
     <div class="sidebar-backdrop" id="sidebarBackdrop" onclick="closeSidebar()"></div>
     <div class="sidebar" id="sidebar">
       <div class="brand">
-        <img class="brand-mark" src="${bizLogoSrc()}" alt="${bizName()}">
-        <div class="brand-text">${bizName()}<small>Gestão do negócio</small></div>
+        <img class="brand-mark" src="${bizLogoSrc()}" alt="${esc(bizName())}">
+        <div class="brand-text">${esc(bizName())}<small>Gestão do negócio</small></div>
       </div>
       <div class="nav">
         ${navItem('dashboard','Dashboard')}
@@ -1037,7 +1081,7 @@ function render(){
           <button class="btn ghost sm" style="flex:1;padding:6px;" onclick="document.getElementById('importFile').click()">Importar</button>
         </div>
         <input type="file" id="importFile" accept="application/json" style="display:none" onchange="if(this.files[0]) importBackup(this.files[0]); this.value='';">
-        <button class="btn ghost sm" style="width:100%;margin-top:6px;padding:6px;${syncStatus.email?'color:var(--teal);':''}" onclick="openSyncModal()">${syncStatusLabel()}</button>
+        <button class="btn ghost sm" style="width:100%;margin-top:6px;padding:6px;${esc(syncStatus.email?'color:var(--teal);':'')}" onclick="openSyncModal()">${syncStatusLabel()}</button>
         <button class="btn ghost sm" style="width:100%;margin-top:6px;padding:6px;" onclick="openOnboardingModal()">Guia rápido</button>
         <button class="btn ghost sm" style="width:100%;margin-top:6px;padding:6px;color:var(--red);" onclick="openResetModal()">Recomeçar do zero</button>
       </div>
@@ -1452,7 +1496,7 @@ function renderProfitabilityTable(){
   return `<div class="tbl-wrap tbl-responsive"><table>
     <thead><tr><th>Produto</th><th class="right">Qtd</th><th class="right">Receita</th><th class="right">Lucro</th><th class="right">Margem</th><th class="right">Lucro/hora impressora</th></tr></thead>
     <tbody>${rows.map(p=>`<tr>
-      <td data-label="Produto">${p.name}</td>
+      <td data-label="Produto">${esc(p.name)}</td>
       <td class="right num" data-label="Qtd">${p.qty}</td>
       <td class="right num" data-label="Receita">${brl(p.revenue)}</td>
       <td class="right num" data-label="Lucro" style="color:${p.profit<0?'var(--red)':'var(--green)'}">${brl(p.profit)}</td>
@@ -1486,10 +1530,10 @@ function openQuickQuoteModal(){
     <div class="row3" style="margin-top:14px;">
       <div class="field"><label>Tempo de impressão (h)</label><input type="number" id="qtTimeH" value="1" step="0.1" oninput="updateQuickQuotePreview()"></div>
       <div class="field"><label>Impressora</label><select id="qtMachine" onchange="updateQuickQuotePreview()">
-        ${machines.map(m=>`<option value="${m.id}">${m.name}</option>`).join('')}
+        ${machines.map(m=>`<option value="${m.id}">${esc(m.name)}</option>`).join('')}
       </select></div>
       <div class="field"><label>Caixa</label><select id="qtBox" onchange="updateQuickQuotePreview()">
-        ${boxOptions.map(b=>`<option value="${b.name}">${b.name}</option>`).join('')}
+        ${boxOptions.map(b=>`<option value="${esc(b.name)}">${esc(b.name)}</option>`).join('')}
       </select></div>
     </div>
     <div class="field"><label>Margem de lucro desejada (%)</label><input type="number" id="qtMargin" value="${((1-1/(state.settings.markupMultiplier||2.5))*100).toFixed(0)}" oninput="updateQuickQuotePreview()"></div>
@@ -1534,7 +1578,7 @@ function renderQuoteFilamentRows(){
     quoteFilaments.map((f,i)=>`
     <div class="form-row">
       <select onchange="quoteFilaments[${i}].materialName=this.value; updateQuickQuotePreview();">
-        ${filamentOptions.map(fo=>`<option value="${fo.name}" ${f.materialName===fo.name?'selected':''}>${fo.name}</option>`).join('')}
+        ${filamentOptions.map(fo=>`<option value="${esc(fo.name)}" ${esc(f.materialName===fo.name?'selected':'')}>${esc(fo.name)}</option>`).join('')}
       </select>
       <input type="number" step="0.01" value="${f.weightG}" placeholder="peso (g)" oninput="quoteFilaments[${i}].weightG=parseFloat(this.value)||0; updateQuickQuotePreview();">
       ${formRowX(`removeQuoteFilamentRow(${i})`)}
@@ -1559,7 +1603,7 @@ function renderQuoteLaborActionRows(){
   el.innerHTML = formRowsHtml('minmax(0,1.6fr) minmax(0,1fr)', ['Ação','Minutos'],
     quoteLaborActions.map((a,i)=>`
     <div class="form-row">
-      <input list="laborActionOptions" value="${a.action}" placeholder="Ação (ex: Lixar)" oninput="quoteLaborActions[${i}].action=this.value; updateQuickQuotePreview();">
+      <input list="laborActionOptions" value="${esc(a.action)}" placeholder="Ação (ex: Lixar)" oninput="quoteLaborActions[${i}].action=this.value; updateQuickQuotePreview();">
       <input type="number" step="1" value="${a.minutes}" placeholder="minutos" oninput="quoteLaborActions[${i}].minutes=parseFloat(this.value)||0; updateQuickQuotePreview();">
       ${formRowX(`removeQuoteLaborActionRow(${i})`)}
     </div>
@@ -1606,7 +1650,7 @@ function updateQuickQuotePreview(){
     <div class="calc-line" style="color:var(--text-faint);"><span>↳ Mercado Livre (já com a taxa)</span><span>${brl(c.suggestedPriceMl)}</span></div>
     <div class="calc-line" style="color:var(--text-faint);"><span>↳ Shopee (já com a taxa)</span><span>${brl(c.suggestedPriceShopee)}</span></div>
     ${c.estimatedShopeeFreightCap!=null ? `<div class="calc-line" style="color:var(--text-faint);"><span>↳ Shopee — custo estimado de frete (teto do cupom)</span><span>${brl(c.estimatedShopeeFreightCap)}</span></div>` : ''}
-    ${extraListingPlatforms().map(plat=>`<div class="calc-line" style="color:var(--text-faint);"><span>↳ ${plat.name} (já com a taxa)</span><span>${brl(c.suggestedPriceExtra[plat.id])}</span></div>`).join('')}
+    ${extraListingPlatforms().map(plat=>`<div class="calc-line" style="color:var(--text-faint);"><span>↳ ${esc(plat.name)} (já com a taxa)</span><span>${brl(c.suggestedPriceExtra[plat.id])}</span></div>`).join('')}
   `;
 }
 function saveQuoteAsProduct(){
@@ -1648,14 +1692,14 @@ function renderOpenOrdersList(){
   const open = state.orders.filter(o=>o.status!=='Enviado').sort((a,b)=>(a.dueDate||'9999').localeCompare(b.dueDate||'9999')).slice(0,6);
   if(open.length===0) return emptyState('Nenhuma encomenda em aberto');
   return `<div class="tbl-wrap tbl-responsive"><table><thead><tr><th>Cliente</th><th>Produto</th><th>Status</th></tr></thead><tbody>
-    ${open.map(o=>`<tr><td data-label="Cliente">${orderCustomerName(o)||'—'}</td><td data-label="Produto">${o.qty}x ${o.productName}</td><td data-label="Status"><span class="badge info">${o.status}</span></td></tr>`).join('')}
+    ${open.map(o=>`<tr><td data-label="Cliente">${orderCustomerName(o)||'—'}</td><td data-label="Produto">${o.qty}x ${esc(o.productName)}</td><td data-label="Status"><span class="badge info">${esc(o.status)}</span></td></tr>`).join('')}
   </tbody></table></div>`;
 }
 function renderLowStockList(low){
   if(!state.materials.length) return emptyState('Nenhuma matéria-prima cadastrada');
   const rows = state.materials.slice().sort((a,b)=> (a.stock-a.lowStock) - (b.stock-b.lowStock)).slice(0,8);
   return `<div class="tbl-wrap tbl-responsive"><table><thead><tr><th>Material</th><th class="right">Estoque</th><th class="right">Mínimo</th><th>Status</th></tr></thead><tbody>
-    ${rows.map(m=>`<tr><td data-label="Material">${m.name}</td><td class="right num" data-label="Estoque">${num(m.stock,0)} ${m.unit}</td><td class="right num" data-label="Mínimo">${num(m.lowStock,0)} ${m.unit}</td><td data-label="Status">${stockBadge(m)}</td></tr>`).join('')}
+    ${rows.map(m=>`<tr><td data-label="Material">${esc(m.name)}</td><td class="right num" data-label="Estoque">${num(m.stock,0)} ${esc(m.unit)}</td><td class="right num" data-label="Mínimo">${num(m.lowStock,0)} ${esc(m.unit)}</td><td data-label="Status">${stockBadge(m)}</td></tr>`).join('')}
   </tbody></table></div>`;
 }
 function stockBadge(m){
@@ -1665,7 +1709,7 @@ function stockBadge(m){
 }
 function renderRecentSalesTable(sales){
   return `<div class="tbl-wrap tbl-responsive"><table><thead><tr><th>Data</th><th>Produto</th><th>Plataforma</th><th class="right">Líquido</th></tr></thead><tbody>
-    ${sales.map(s=>`<tr><td class="num" data-label="Data">${fmtDate(s.date)}</td><td data-label="Produto">${s.productName}</td><td data-label="Plataforma">${platformBadge(s.platform)}</td><td class="right num" data-label="Líquido">${brl(s.netReceipt)}</td></tr>`).join('')}
+    ${sales.map(s=>`<tr><td class="num" data-label="Data">${fmtDate(s.date)}</td><td data-label="Produto">${esc(s.productName)}</td><td data-label="Plataforma">${esc(platformBadge(s.platform))}</td><td class="right num" data-label="Líquido">${brl(s.netReceipt)}</td></tr>`).join('')}
   </tbody></table></div>`;
 }
 function fmtDate(d){ if(!d) return '-'; const [y,m,day]=d.split('-'); return `${day}/${m}/${y}`; }
@@ -1747,7 +1791,7 @@ function renderCapacityPanel(){
     const pctUsed = Math.min(150, (neededHours/availableHours)*100);
     const overloaded = neededHours>availableHours;
     return `<div class="card">
-      <div style="font-weight:600;font-size:13px;">${m.name}</div>
+      <div style="font-weight:600;font-size:13px;">${esc(m.name)}</div>
       <div style="font-family:var(--font-mono);font-size:16px;font-weight:600;margin:6px 0 4px;">${num(neededHours,1)}h <span style="font-size:11.5px;color:var(--text-faint);font-weight:400;">necessárias / ${num(availableHours,0)}h disponíveis até o fim do mês</span></div>
       <div class="progress"><div style="width:${pctUsed}%;background:${overloaded?'var(--red)':'var(--teal)'};"></div></div>
       <div style="margin-top:6px;">${overloaded ? `<span class="badge bad">Sobrecarregada — faltam ${num(neededHours-availableHours,1)}h</span>` : `<span class="badge ok">Dá tempo</span>`}</div>
@@ -1800,11 +1844,11 @@ function orderCard(o){
       <div style="font-weight:600;font-size:13px;">${orderCustomerName(o) || 'Sem cliente'}</div>
       <button class="btn ghost sm" style="padding:2px 7px;" title="Excluir" onclick="deleteOrder('${o.id}')">×</button>
     </div>
-    <div style="font-size:12.5px;color:var(--text-dim);margin-top:3px;">${o.qty}x ${o.productName}</div>
+    <div style="font-size:12.5px;color:var(--text-dim);margin-top:3px;">${o.qty}x ${esc(o.productName)}</div>
     ${o.dueDate ? `<div style="font-size:11px;margin-top:5px;color:${overdue?'var(--red)':'var(--text-faint)'}">${overdue?'Atrasado — ':'Prazo: '}${fmtDate(o.dueDate)}</div>` : ''}
-    ${o.notes ? `<div style="font-size:11.5px;color:var(--text-dim);margin-top:6px;background:var(--bg-alt);border-radius:6px;padding:6px 8px;">${o.notes}</div>` : ''}
+    ${o.notes ? `<div style="font-size:11.5px;color:var(--text-dim);margin-top:6px;background:var(--bg-alt);border-radius:6px;padding:6px 8px;">${esc(o.notes)}</div>` : ''}
     <select style="margin-top:10px;width:100%;" onchange="changeOrderStatus('${o.id}', this.value)">
-      ${ORDER_STATUSES.map(s=>`<option value="${s}" ${s===o.status?'selected':''}>${s}</option>`).join('')}
+      ${ORDER_STATUSES.map(s=>`<option value="${esc(s)}" ${esc(s===o.status?'selected':'')}>${esc(s)}</option>`).join('')}
     </select>
     <div style="display:flex;gap:6px;margin-top:8px;">
       ${o.status!=='Enviado' ? `<button class="btn sm" style="flex:1;" onclick="openPrintJobModal('${o.productId}', ${o.qty})">Produzir</button>` : ''}
@@ -1842,10 +1886,10 @@ function openOrderModal(){
   showModal('Nova encomenda', `
     <div class="field"><label>Cliente (opcional)</label><select id="oCust">
       <option value="">Avulso / sem cadastro</option>
-      ${state.customers.map(cu=>`<option value="${cu.id}">${cu.name}</option>`).join('')}
+      ${state.customers.map(cu=>`<option value="${cu.id}">${esc(cu.name)}</option>`).join('')}
     </select></div>
     <div class="row2">
-      <div class="field"><label>Produto</label><select id="oProd">${state.products.map(p=>`<option value="${p.id}">${p.name}</option>`).join('')}</select></div>
+      <div class="field"><label>Produto</label><select id="oProd">${state.products.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select></div>
       <div class="field"><label>Quantidade</label><input type="number" id="oQty" value="1" min="1"></div>
     </div>
     <div class="field"><label>Prazo de entrega (opcional)</label><input type="date" id="oDue"></div>
@@ -1993,7 +2037,7 @@ function renderAnual(){
               ? `${brl(prog.parcelValue)}/mês — ${prog.paid}/${prog.total}${prog.quitado?' <span class="badge ok">Quitado</span>':''}`
               : 'À vista';
           return `<tr>
-          <td data-label="Item">${inv.name}</td><td data-label="Categoria"><span class="chip">${inv.category||'Outros'}</span></td><td class="num" data-label="Data">${fmtDate(inv.date)}</td><td data-label="Pagamento">${payLabel}</td><td class="right num" data-label="Valor">${brl(inv.value)}</td>
+          <td data-label="Item">${esc(inv.name)}</td><td data-label="Categoria"><span class="chip">${esc(inv.category||'Outros')}</span></td><td class="num" data-label="Data">${fmtDate(inv.date)}</td><td data-label="Pagamento">${payLabel}</td><td class="right num" data-label="Valor">${brl(inv.value)}</td>
           <td class="right"><button class="btn ghost sm" onclick="deleteInvestment('${inv.id}')">Excluir</button></td>
         </tr>`;}).join('')}</tbody>
       </table></div>` : emptyState('Nenhum investimento cadastrado ainda')}
@@ -2092,7 +2136,7 @@ function updateInvestmentFormVisibility(){
     const matSelect = document.getElementById('invMaterial');
     const opts = state.materials.filter(m=>m.category===cat);
     matSelect.innerHTML = opts.length
-      ? opts.map(m=>`<option value="${m.id}">${m.name}</option>`).join('')
+      ? opts.map(m=>`<option value="${m.id}">${esc(m.name)}</option>`).join('')
       : `<option value="">Nenhum material dessa categoria — cadastre em Estoque primeiro</option>`;
   }
 }
@@ -2131,7 +2175,7 @@ function confirmInvestment(){
       mat.stock += qty;
       mat.purchasePrice = value; mat.purchaseQty = qty; mat.costPerUnit = value/qty;
       saveMaterials();
-      extras.push(`${num(qty,1)} ${mat.unit} adicionados ao estoque de "${mat.name}"`);
+      extras.push(`${num(qty,1)} ${esc(mat.unit)} adicionados ao estoque de "${esc(mat.name)}"`);
     }
   }
   currentYear = yearToShow;
@@ -2248,7 +2292,7 @@ function prepararImpressaoDaTela(){
   cab.dataset.printTemp = '1';
   const aba = tabTitle();
   const periodo = currentTab==='anual' ? currentYear : monthLabel(currentMonth);
-  cab.innerHTML = `<div class="print-biz">${bizName()}</div>
+  cab.innerHTML = `<div class="print-biz">${esc(bizName())}</div>
     <div class="print-doc">${aba} — ${periodo}</div>
     <div class="print-meta">Gerado em ${new Date().toLocaleString('pt-BR')} · ${PRODUCT_NAME}</div>`;
   content.insertBefore(cab, content.firstChild);
@@ -2284,17 +2328,17 @@ function printSaleReceipt(saleId){
   const lines = s.groupId ? state.sales.filter(x=>x.groupId===s.groupId) : [s];
   const cuName = s.customerId ? ((state.customers.find(cu=>cu.id===s.customerId)||{}).name || 'Cliente avulso') : 'Cliente avulso';
   const total = lines.reduce((a,l)=>a+l.grossPrice,0);
-  const rows = lines.map((l,i)=>`<tr style="${i%2===0?'background:#F6F7F9;':''}"><td style="padding:8px 10px;">${l.productName}</td><td style="text-align:center;padding:8px 10px;">${l.qty}</td><td style="text-align:right;padding:8px 10px;">${brl(l.grossPrice/l.qty)}</td><td style="text-align:right;padding:8px 10px;">${brl(l.grossPrice)}</td></tr>`).join('');
+  const rows = lines.map((l,i)=>`<tr style="${i%2===0?'background:#F6F7F9;':''}"><td style="padding:8px 10px;">${esc(l.productName)}</td><td style="text-align:center;padding:8px 10px;">${l.qty}</td><td style="text-align:right;padding:8px 10px;">${brl(l.grossPrice/l.qty)}</td><td style="text-align:right;padding:8px 10px;">${brl(l.grossPrice)}</td></tr>`).join('');
   printHTML(`
     <div class="catalog-summary" style="max-width:480px;margin:0 auto;">
       <div style="text-align:center;margin-bottom:24px;">
-        <h1 style="font-size:22px;margin:0 0 4px;color:#BD4119;">${bizName()}</h1>
+        <h1 style="font-size:22px;margin:0 0 4px;color:#BD4119;">${esc(bizName())}</h1>
         <div style="color:#5D6270;font-size:12.5px;">Recibo de venda</div>
       </div>
       <div style="border-top:1px solid #E2E4E9;border-bottom:1px solid #E2E4E9;padding:14px 0;margin-bottom:18px;font-size:13px;color:#1A1D23;">
         <div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:#5D6270;">Data</span><span>${fmtDate(s.date)}</span></div>
         <div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:#5D6270;">Cliente</span><span>${cuName}</span></div>
-        <div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:#5D6270;">Forma</span><span>${s.platform}</span></div>
+        <div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:#5D6270;">Forma</span><span>${esc(s.platform)}</span></div>
       </div>
       <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:18px;color:#1A1D23;">
         <thead><tr style="border-bottom:1px solid #E2E4E9;color:#5D6270;"><th style="text-align:left;padding:6px 10px;">Produto</th><th style="text-align:center;padding:6px 10px;">Qtd</th><th style="text-align:right;padding:6px 10px;">Valor unit.</th><th style="text-align:right;padding:6px 10px;">Subtotal</th></tr></thead>
@@ -2315,8 +2359,8 @@ const INSTAGRAM_ICON_SVG = '<svg width="15" height="15" viewBox="0 0 24 24" styl
 function catalogContactLine(){
   const s = state.settings;
   const parts = [];
-  if(s.whatsapp) parts.push(`<span style="white-space:nowrap;">${WHATSAPP_ICON_SVG}${s.whatsapp}</span>`);
-  if(s.instagram) parts.push(`<span style="white-space:nowrap;">${INSTAGRAM_ICON_SVG}@${s.instagram}</span>`);
+  if(s.whatsapp) parts.push(`<span style="white-space:nowrap;">${WHATSAPP_ICON_SVG}${esc(s.whatsapp)}</span>`);
+  if(s.instagram) parts.push(`<span style="white-space:nowrap;">${INSTAGRAM_ICON_SVG}@${esc(s.instagram)}</span>`);
   return parts.join(' &nbsp;&nbsp; ');
 }
 function exportCatalogPDF(){
@@ -2328,11 +2372,11 @@ function exportCatalogPDF(){
     return `<div style="page-break-inside:avoid;border:1px solid #E2E4E9;border-radius:16px;overflow:hidden;background:#fff;">
       <div style="position:relative;width:100%;padding-top:100%;background:#F6F7F9;">
         <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;overflow:hidden;">
-          ${p.photo ? `<img src="${p.photo}" alt="${p.name}" style="width:100%;height:100%;object-fit:cover;">` : `<span style="font-family:var(--font-body);font-size:11px;font-weight:700;letter-spacing:.05em;color:#B9BEC9;">SEM FOTO</span>`}
+          ${p.photo ? `<img src="${p.photo}" alt="${esc(p.name)}" style="width:100%;height:100%;object-fit:cover;">` : `<span style="font-family:var(--font-body);font-size:11px;font-weight:700;letter-spacing:.05em;color:#B9BEC9;">SEM FOTO</span>`}
         </div>
       </div>
       <div style="padding:14px 16px;">
-        <div style="font-family:var(--font-display);font-weight:600;font-size:14.5px;color:#1A1D23;margin-bottom:10px;line-height:1.3;">${p.name}</div>
+        <div style="font-family:var(--font-display);font-weight:600;font-size:14.5px;color:#1A1D23;margin-bottom:10px;line-height:1.3;">${esc(p.name)}</div>
         <span style="display:inline-block;background:#E1F5F0;color:#0B7A6B;font-family:var(--font-mono);font-weight:700;font-size:13px;padding:5px 12px;border-radius:20px;">${brl(price)}</span>
       </div>
     </div>`;
@@ -2340,15 +2384,15 @@ function exportCatalogPDF(){
 
   const productPages = items.map(p=>{
     const c = calcProduct(p);
-    const filSummary = (p.filaments||[]).map(f=>`${f.materialName} ${num(f.weightG,0)}g`).join(' + ');
+    const filSummary = (p.filaments||[]).map(f=>`${esc(f.materialName)} ${num(f.weightG,0)}g`).join(' + ');
     return `<div class="catalog-page" style="display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;">
-      ${p.photo ? `<img src="${p.photo}" alt="${p.name}" style="max-width:320px;max-height:320px;object-fit:cover;border-radius:14px;margin-bottom:26px;box-shadow:0 4px 16px rgba(0,0,0,0.15);">` : ''}
-      <h1 style="font-family:var(--font-display);font-size:30px;margin:0 0 12px;color:#1A1D23;">${p.name}</h1>
+      ${p.photo ? `<img src="${p.photo}" alt="${esc(p.name)}" style="max-width:320px;max-height:320px;object-fit:cover;border-radius:14px;margin-bottom:26px;box-shadow:0 4px 16px rgba(0,0,0,0.15);">` : ''}
+      <h1 style="font-family:var(--font-display);font-size:30px;margin:0 0 12px;color:#1A1D23;">${esc(p.name)}</h1>
       <div style="font-family:var(--font-mono);font-size:34px;font-weight:bold;margin-bottom:22px;color:#0B7A6B;">${brl(c.practicedPrice)}</div>
       <div style="font-size:13.5px;color:#5D6270;line-height:2;max-width:420px;">
         ${filSummary ? `Filamento: ${filSummary}<br>` : ''}
         Peso total: ${num(totalWeight(p),0)}g &nbsp;·&nbsp; Tempo de impressão: ${num(p.timeH,1)}h
-        ${p.kitComponents && p.kitComponents.length ? `<br>Composição: ${p.kitComponents.map(kc=>`${kc.qty>1?kc.qty+'x ':''}${kc.productName}`).join(' + ')}` : ''}
+        ${p.kitComponents && p.kitComponents.length ? `<br>Composição: ${p.kitComponents.map(kc=>`${kc.qty>1?kc.qty+'x ':''}${esc(kc.productName)}`).join(' + ')}` : ''}
       </div>
     </div>`;
   }).join('');
@@ -2356,9 +2400,9 @@ function exportCatalogPDF(){
   printHTML(`
     <div class="catalog-summary">
       <div style="display:flex;align-items:center;gap:14px;margin-bottom:18px;">
-        <img src="${bizLogoSrc()}" alt="${bizName()}" style="width:52px;height:52px;object-fit:cover;border-radius:14px;box-shadow:0 4px 10px rgba(189,65,25,0.28);">
+        <img src="${bizLogoSrc()}" alt="${esc(bizName())}" style="width:52px;height:52px;object-fit:cover;border-radius:14px;box-shadow:0 4px 10px rgba(189,65,25,0.28);">
         <div>
-          <h1 style="font-family:var(--font-display);font-size:26px;margin:0;color:#1A1D23;">${bizName()}</h1>
+          <h1 style="font-family:var(--font-display);font-size:26px;margin:0;color:#1A1D23;">${esc(bizName())}</h1>
           <div style="font-family:var(--font-body);font-weight:700;letter-spacing:.05em;text-transform:uppercase;font-size:11.5px;color:#5D6270;margin-top:2px;">Catálogo de produtos</div>
         </div>
       </div>
@@ -2564,13 +2608,15 @@ function packagingLabelFor(prod){
   const extras = [];
   if((prod.bubbleWrapM||0)>0) extras.push('bolha');
   if((prod.tapeM||0)>0) extras.push('fita');
-  const base = prod.boxType || 'nenhuma';
+  // Escapa aqui, na origem: o retorno é texto de exibição e vai direto pra
+  // template string em 3 lugares — igual componentsLabelFor logo abaixo.
+  const base = esc(prod.boxType || 'nenhuma');
   return extras.length ? `${base} + ${extras.join(' + ')}` : base;
 }
 function componentsLabelFor(prod){
   return (prod.components||[]).map(comp=>{
     const mat = state.materials.find(x=>x.id===comp.materialId);
-    return `${num(comp.qty||0,0)}x ${mat?mat.name:'?'}`;
+    return `${num(comp.qty||0,0)}x ${esc(mat?mat.name:'?')}`;
   }).join(' + ');
 }
 function renderImpressao(){
@@ -2601,16 +2647,16 @@ function renderImpressao(){
       ${recent.length ? `<div class="tbl-wrap tbl-responsive"><table>
         <thead><tr><th>Data</th><th>Produto</th><th class="right">Qtd</th><th class="right">Tempo</th><th>Filamento gasto</th><th>Resultado</th><th class="right">Prejuízo</th><th>Obs.</th><th></th></tr></thead>
         <tbody>${recent.map(f=>{
-          const filamentSummary = (f.filamentUsage||[]).map(u=>`${u.materialName} ${num(u.qty,1)}${u.unit}`).join(' + ') || '—';
+          const filamentSummary = (f.filamentUsage||[]).map(u=>`${esc(u.materialName)} ${num(u.qty,1)}${esc(u.unit)}`).join(' + ') || '—';
           return `<tr>
           <td class="num" data-label="Data">${fmtDate(f.date)}</td>
-          <td data-label="Produto">${f.productName}</td>
+          <td data-label="Produto">${esc(f.productName)}</td>
           <td class="right num" data-label="Qtd">${num(f.qty||1,0)}${f.outcome==='failure'&&f.pctComplete<100?` (${num(f.pctComplete,0)}%)`:''}</td>
           <td class="right num" data-label="Tempo">${f.hoursUsed>0?fmtHm(f.hoursUsed):'—'}</td>
           <td data-label="Filamento gasto" title="${filamentSummary}">${filamentSummary}</td>
           <td data-label="Resultado">${outcomeBadge(f.outcome)}</td>
           <td class="right num" data-label="Prejuízo" style="color:var(--red)">${f.totalLoss?brl(f.totalLoss):'—'}</td>
-          <td data-label="Obs.">${f.notes||'—'}</td>
+          <td data-label="Obs.">${esc(f.notes||'—')}</td>
           <td class="right"><button class="btn ghost sm" onclick="openPrintJobModal('${f.productId}', ${f.qty||1}, '${f.outcome}', '${f.id}')">Editar</button> <button class="btn ghost sm" onclick="deletePrintJob('${f.id}')">Excluir</button></td>
         </tr>`;
         }).join('')}</tbody>
@@ -2641,7 +2687,7 @@ function openPrintJobModal(productId, presetQty, presetOutcome, editId){
   const outcomeVal = editing ? editing.outcome : (presetOutcome||'success');
   showModal(editing?'Editar impressão':'Nova impressão', `
     <div class="field"><label>Produto</label><select id="pjProd" onchange="updatePrintJobPreview()">
-      ${state.products.map(p=>`<option value="${p.id}" ${p.id===selId?'selected':''}>${p.name}</option>`).join('')}
+      ${state.products.map(p=>`<option value="${p.id}" ${p.id===selId?'selected':''}>${esc(p.name)}</option>`).join('')}
     </select></div>
     <div class="row3">
       <div class="field"><label>Quantidade</label><input type="number" id="pjQty" value="${editing?editing.qty:(presetQty||1)}" min="1" oninput="updatePrintJobPreview()"></div>
@@ -2657,7 +2703,7 @@ function openPrintJobModal(productId, presetQty, presetOutcome, editId){
       <input type="number" id="pjHours" step="0.1" min="0" value="${editing?num(editing.hoursUsed||0,1).replace(',','.'):'0'}" oninput="printJobHoursTouched=true; updatePrintJobPreview()">
       <div class="field hint" id="pjHoursHint" style="margin-top:4px;"></div>
     </div>
-    <div class="field"><label>Observações (opcional)</label><input id="pjNotes" value="${editing?(editing.notes||''):''}" placeholder="Ex: descolou da mesa, entupiu o bico..."></div>
+    <div class="field"><label>Observações (opcional)</label><input id="pjNotes" value="${esc(editing?(editing.notes||''):'')}" placeholder="Ex: descolou da mesa, entupiu o bico..."></div>
     <div class="field hint" style="margin-top:-8px;">Caixa e plástico bolha não são descontados aqui — só saem do estoque na hora da venda. Só o filamento sai agora.</div>
     <div class="helper-block" id="pjPreview"></div>
     <div class="modal-actions">
@@ -2682,8 +2728,8 @@ function updatePrintJobPreview(){
     const storedU = useStored ? editing.filamentUsage.find(u=>u.materialName===r.materialName) : null;
     const need = storedU ? storedU.qty : calcNeed;
     return `<div class="calc-line" style="align-items:center;">
-      <span>${r.materialName} <span style="color:var(--text-faint);font-size:11px;">(estoque: ${mat?num(mat.stock,1):'0'}${mat?mat.unit:'g'})</span></span>
-      <span><input type="number" id="pjFil_${i}" value="${(need||0).toFixed(1)}" step="0.1" style="width:80px;padding:4px 6px;text-align:right;"> ${mat?mat.unit:'g'}</span>
+      <span>${esc(r.materialName)} <span style="color:var(--text-faint);font-size:11px;">(estoque: ${mat?num(mat.stock,1):'0'}${esc(mat?mat.unit:'g')})</span></span>
+      <span><input type="number" id="pjFil_${i}" value="${(need||0).toFixed(1)}" step="0.1" style="width:80px;padding:4px 6px;text-align:right;"> ${esc(mat?mat.unit:'g')}</span>
     </div>`;
   }).join('');
   // Horas: acompanha o cadastro do produto até o usuário mexer no campo.
@@ -2699,7 +2745,7 @@ function updatePrintJobPreview(){
     const hintEl = document.getElementById('pjHoursHint');
     if(hintEl){
       hintEl.innerHTML = (prod.timeH||0)===0
-        ? `O produto "${prod.name}" está sem tempo de impressão cadastrado — informe aqui quanto essa leva levou.`
+        ? `O produto "${esc(prod.name)}" está sem tempo de impressão cadastrado — informe aqui quanto essa leva levou.`
         : `Cadastro do produto: ${num(prod.timeH,2)}h × ${num(qty,0)} = <strong>${num(horasPrevistas,1)}h</strong>${pct<100?` (${pct}% concluído)`:''}.`
           + (Math.abs(dif) > 0.05 ? ` Você informou <strong>${dif>0?'+':''}${num(dif,1)}h</strong> de diferença — vale só pra esta leva, não altera o cadastro.` : ' Ajuste se a leva levou mais ou menos que isso.');
     }
@@ -2707,7 +2753,7 @@ function updatePrintJobPreview(){
 
   const printUnits = printUnitsOf(prod);
   const stockLine = outcome==='success'
-    ? `<div class="calc-line total"><span>Estoque de "${prod.name}" após produção</span><span>${num(prod.stock,0)} → ${num(prod.stock+qty*printUnits,0)}</span></div>${printUnits>1?`<div class="field hint" style="margin-top:-6px;">${qty} impressão${qty>1?'ões':''} × ${printUnits} peças/leva = ${qty*printUnits} peças</div>`:''}`
+    ? `<div class="calc-line total"><span>Estoque de "${esc(prod.name)}" após produção</span><span>${num(prod.stock,0)} → ${num(prod.stock+qty*printUnits,0)}</span></div>${printUnits>1?`<div class="field hint" style="margin-top:-6px;">${qty} impressão${qty>1?'ões':''} × ${printUnits} peças/leva = ${qty*printUnits} peças</div>`:''}`
     : `<div class="field hint" style="margin-top:6px;">${outcome==='test'?'Teste não soma no estoque disponível pra venda.':'Falha não soma no estoque.'}</div>`;
   document.getElementById('pjPreview').innerHTML = `<div class="field hint" style="margin:0 0 6px;">Quantidade de filamento — já calculada pela receita do produto, edite se o valor real foi diferente:</div>` + lines + stockLine;
   printJobFirstRender = false;
@@ -2825,7 +2871,7 @@ function renderCalculo(){
     ${machines.length ? `<div class="card"><div class="tbl-wrap tbl-responsive"><table>
       <thead><tr><th>Impressora</th><th class="right">Potência</th><th class="right">Energia/h</th><th class="right">Preço − residual</th><th class="right">Vida útil</th><th class="right">Depreciação/h</th></tr></thead>
       <tbody>${machines.map(m=>`<tr>
-        <td data-label="Impressora">${m.name}</td>
+        <td data-label="Impressora">${esc(m.name)}</td>
         <td class="right num" data-label="Potência">${m.powerConsumptionKw>0 ? num(m.powerConsumptionKw,2)+' kW' : '<span class="chip">manual</span>'}</td>
         <td class="right num" data-label="Energia/h">${brl(machineEnergyCostPerHour(m))}</td>
         <td class="right num" data-label="Preço − residual">${brl(m.price)} − ${brl(m.residual||0)}</td>
@@ -2847,7 +2893,7 @@ function renderCalculo(){
         const log = m.maintenanceLog||[];
         const last = log.length ? log.slice().sort((a,b)=>b.date.localeCompare(a.date))[0] : null;
         return `<div class="card">
-          <div style="font-weight:600;font-size:13px;">${m.name}</div>
+          <div style="font-weight:600;font-size:13px;">${esc(m.name)}</div>
           <div style="font-family:var(--font-mono);font-size:18px;font-weight:600;margin:8px 0 4px;">${num(used,0)}h <span style="font-size:12px;color:var(--text-faint);font-weight:400;">/ ${num(life,0)}h</span></div>
           <div class="progress"><div style="width:${pctUsed}%;background:${color};"></div></div>
           <div style="margin-top:8px;">${badge}</div>
@@ -2917,7 +2963,7 @@ function renderCalculo(){
     <div class="section-title">Veja aplicado num produto real</div>
     <div class="card">
       <div class="field"><label>Ver exemplo com o produto</label><select id="calcProdSelect" onchange="updateCalculoExample()">
-        ${state.products.map(p=>`<option value="${p.id}">${p.name}</option>`).join('')}
+        ${state.products.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('')}
       </select></div>
       <div id="calculoExample"></div>
     </div>
@@ -2940,12 +2986,12 @@ function updateCalculoExample(){
   box.innerHTML = `
     <div class="helper-block" style="margin-top:12px;">
       ${c.printUnits>1 ? `<div class="field hint" style="margin:0 0 4px;">Valores por peça — essa leva rende ${c.printUnits} un. (${num(totalWeight(prod),0)}g / ${fmtHm(prod.timeH)} no total).</div>` : ''}
-      <div class="calc-line"><span>Material (${(prod.filaments||[]).map(f=>`${f.materialName} ${num((f.weightG||0)/c.printUnits,1)}g`).join(' + ')})</span><span>${brl(c.materialCost)}</span></div>
-      <div class="calc-line"><span>Energia (${fmtHm(c.unitTimeH)} × ${brl(c.machine?machineEnergyCostPerHour(c.machine):0)}/h em ${c.machine?c.machine.name:'—'})</span><span>${brl(c.energyCost)}</span></div>
-      <div class="calc-line"><span>Depreciação (${fmtHm(c.unitTimeH)} × ${brl(c.machine?machineDeprCostPerHour(c.machine):0)}/h em ${c.machine?c.machine.name:'—'})</span><span>${brl(c.depreciation)}</span></div>
+      <div class="calc-line"><span>Material (${(prod.filaments||[]).map(f=>`${esc(f.materialName)} ${num((f.weightG||0)/c.printUnits,1)}g`).join(' + ')})</span><span>${brl(c.materialCost)}</span></div>
+      <div class="calc-line"><span>Energia (${fmtHm(c.unitTimeH)} × ${brl(c.machine?machineEnergyCostPerHour(c.machine):0)}/h em ${esc(c.machine?c.machine.name:'—')})</span><span>${brl(c.energyCost)}</span></div>
+      <div class="calc-line"><span>Depreciação (${fmtHm(c.unitTimeH)} × ${brl(c.machine?machineDeprCostPerHour(c.machine):0)}/h em ${esc(c.machine?c.machine.name:'—')})</span><span>${brl(c.depreciation)}</span></div>
       <div class="calc-line"><span>Manutenção (${fmtHm(c.unitTimeH)} × ${brl(c.machine?machineMaintenanceCostPerHour(c.machine):0)}/h)</span><span>${brl(c.maintenance)}</span></div>
-      <div class="calc-line"><span>Mão de obra (${(prod.laborActions||[]).length ? (prod.laborActions||[]).map(a=>`${a.action||'(sem nome)'} ${a.minutes}min`).join(' + ') : 'nenhuma ação cadastrada'} × ${brl(state.settings.laborHourlyRate||0)}/h)</span><span>${brl(c.laborCost)}</span></div>
-      ${(prod.toolsUsed||[]).length ? `<div class="calc-line"><span>Ferramentas (${(prod.toolsUsed||[]).map(t=>{ const tool=state.materials.find(x=>x.id===t.toolId); return `${tool?tool.name:'?'} ${t.uses}x`; }).join(' + ')})</span><span>${brl(c.toolsCost)}</span></div>` : ''}
+      <div class="calc-line"><span>Mão de obra (${(prod.laborActions||[]).length ? (prod.laborActions||[]).map(a=>`${esc(a.action||'(sem nome)')} ${a.minutes}min`).join(' + ') : 'nenhuma ação cadastrada'} × ${brl(state.settings.laborHourlyRate||0)}/h)</span><span>${brl(c.laborCost)}</span></div>
+      ${(prod.toolsUsed||[]).length ? `<div class="calc-line"><span>Ferramentas (${(prod.toolsUsed||[]).map(t=>{ const tool=state.materials.find(x=>x.id===t.toolId); return `${esc(tool?tool.name:'?')} ${t.uses}x`; }).join(' + ')})</span><span>${brl(c.toolsCost)}</span></div>` : ''}
       <div class="calc-line"><span>Custo de falha (${num(prod.failureMarginPct*100,0)}% sobre material+energia+depreciação+50% da mão de obra)</span><span>${brl(c.failureCost)}</span></div>
       <div class="calc-line"><span>Embalagem por venda (${packagingLabelFor(prod)} — uma vez, não por peça)</span><span>${brl(c.embalagemCost)}</span></div>
       ${c.componentsCost>0 ? `<div class="calc-line"><span>Componentes por venda (${componentsLabelFor(prod)})</span><span>${brl(c.componentsCost)}</span></div>` : ''}
@@ -2953,7 +2999,7 @@ function updateCalculoExample(){
       <div class="calc-line total"><span>Preço sugerido${c.saleUnits>1?` — venda de ${c.saleUnits} un`:' — venda própria'} (margem de ${num(c.desiredMarginPct,0)}%)</span><span>${brl(c.suggestedPrice)}</span></div>
       ${platformBreakdownHtml('Mercado Livre', c.suggestedPriceMl, c.mlFeeAmount, c.mlFeePct, prod.mlRealFeePct!=null?'real':'estimada', c.effectiveFreightMl, 'Frete estimado', c.netReceiptMl)}
       ${platformBreakdownHtml('Shopee', c.suggestedPriceShopee, c.shopeeFeeAmount, c.shopeeFeePct, 'estimada', c.effectiveFreightShopee, 'Frete acima do subsídio (sai do seu bolso)', c.netReceiptShopee, c.estimatedShopeeFreightCap!=null ? `Shopee subsidia o frete até ${brl(c.estimatedShopeeFreightCap)} nessa faixa de preço — você só paga o que passar disso.` : null)}
-      ${extraListingPlatforms().map(plat=>`<div class="calc-line" style="color:var(--text-faint);"><span>↳ ${plat.name} (já com a taxa)</span><span>${brl(c.suggestedPriceExtra[plat.id])}</span></div>`).join('')}
+      ${extraListingPlatforms().map(plat=>`<div class="calc-line" style="color:var(--text-faint);"><span>↳ ${esc(plat.name)} (já com a taxa)</span><span>${brl(c.suggestedPriceExtra[plat.id])}</span></div>`).join('')}
       <div class="calc-line" style="margin-top:8px;"><span>Preço praticado</span><span>${brl(c.practicedPrice)}</span></div>
       <div class="calc-line"><span>Margem — venda própria / ML / Shopee</span><span style="color:${c.marginValue<0?'var(--red)':'var(--green)'}">${pct(c.marginPct)} · ${pct(c.marginMlPct)} · ${pct(c.marginShopeePct)}</span></div>
     </div>
@@ -2975,11 +3021,11 @@ function renderVendas(){
     <div class="filter-bar">
       <div class="field"><label>Plataforma</label><select onchange="salesFilter.platform=this.value; renderContent();">
         <option value="">Todas</option>
-        ${state.settings.platforms.map(p=>`<option value="${p.name}" ${salesFilter.platform===p.name?'selected':''}>${p.name}</option>`).join('')}
+        ${state.settings.platforms.map(p=>`<option value="${esc(p.name)}" ${esc(salesFilter.platform===p.name?'selected':'')}>${esc(p.name)}</option>`).join('')}
       </select></div>
       <div class="field"><label>Produto</label><select onchange="salesFilter.product=this.value; renderContent();">
         <option value="">Todos</option>
-        ${state.products.map(p=>`<option value="${p.id}" ${salesFilter.product===p.id?'selected':''}>${p.name}</option>`).join('')}
+        ${state.products.map(p=>`<option value="${p.id}" ${salesFilter.product===p.id?'selected':''}>${esc(p.name)}</option>`).join('')}
       </select></div>
       <div class="field"><label>De</label><input type="date" value="${salesFilter.from}" onchange="salesFilter.from=this.value; renderContent();"></div>
       <div class="field"><label>Até</label><input type="date" value="${salesFilter.to}" onchange="salesFilter.to=this.value; renderContent();"></div>
@@ -3001,9 +3047,9 @@ function renderVendas(){
         <tbody>
           ${list.map(s=>`<tr>
             <td class="num" data-label="Data">${fmtDate(s.date)}${s.groupId?' <span class="chip" title="Faz parte de uma venda com vários itens">🧾</span>':''}</td>
-            <td data-label="Produto">${s.productName}</td>
+            <td data-label="Produto">${esc(s.productName)}</td>
             <td data-label="Cliente">${s.customerId ? ((state.customers.find(cu=>cu.id===s.customerId)||{}).name || '—') : '<span class="chip">avulso</span>'}</td>
-            <td data-label="Plataforma">${platformBadge(s.platform)}</td>
+            <td data-label="Plataforma">${esc(platformBadge(s.platform))}</td>
             <td class="right num" data-label="Qtd">${s.qty}</td>
             <td class="right num" data-label="Preço bruto">${brl(s.grossPrice)}</td>
             <td class="right num" data-label="Taxa" style="color:var(--text-faint)">${brl(s.feeTotal)}</td>
@@ -3011,7 +3057,7 @@ function renderVendas(){
             <td class="right num" data-label="Custo prod." style="color:var(--text-faint)">${brl(s.productionCost)}</td>
             <td class="right num" data-label="Frete" style="color:var(--text-faint)">${s.shippingCost ? brl(s.shippingCost) : '—'}</td>
             <td class="right num ${s.profit<0?'neg':''}" data-label="Lucro" style="${s.profit>=0?'color:var(--green)':''}">${brl(s.profit)}</td>
-            <td data-label="Rastreio">${s.trackingCode ? `<span class="chip" style="cursor:pointer;font-family:var(--font-mono);" title="Clique para editar" onclick="openTrackingModal('${s.id}')">${s.trackingCode}</span>` : `<button class="btn ghost sm" onclick="openTrackingModal('${s.id}')">+ rastreio</button>`}</td>
+            <td data-label="Rastreio">${s.trackingCode ? `<span class="chip" style="cursor:pointer;font-family:var(--font-mono);" title="Clique para editar" onclick="openTrackingModal('${s.id}')">${esc(s.trackingCode)}</span>` : `<button class="btn ghost sm" onclick="openTrackingModal('${s.id}')">+ rastreio</button>`}</td>
             <td class="right"><button class="btn ghost sm" onclick="printSaleReceipt('${s.id}')">Recibo</button> <button class="btn ghost sm" onclick="deleteSale('${s.id}')">Excluir</button></td>
           </tr>`).join('')}
         </tbody>
@@ -3053,8 +3099,8 @@ function openTrackingModal(saleId){
   const s = state.sales.find(x=>x.id===saleId);
   if(!s) return;
   showModal('Código de rastreio', `
-    <div class="field"><label>Produto</label><input value="${s.productName}" disabled></div>
-    <div class="field"><label>Código de rastreio</label><input id="trkCode" value="${s.trackingCode||''}" placeholder="Ex: BR123456789BR"></div>
+    <div class="field"><label>Produto</label><input value="${esc(s.productName)}" disabled></div>
+    <div class="field"><label>Código de rastreio</label><input id="trkCode" value="${esc(s.trackingCode||'')}" placeholder="Ex: BR123456789BR"></div>
     ${s.groupId ? `<div class="field hint" style="margin-top:-8px;">Essa venda faz parte de um carrinho com vários itens — o código vai ser aplicado a todos eles, já que normalmente vão no mesmo pacote.</div>` : ''}
     <div class="modal-actions">
       <button class="btn ghost" onclick="closeModal()">Cancelar</button>
@@ -3076,7 +3122,7 @@ function deleteSale(id){
   const s = state.sales.find(x=>x.id===id);
   if(!s) return;
   const linkedOrder = s.linkedOrderId ? state.orders.find(o=>o.id===s.linkedOrderId && o.status==='Enviado') : null;
-  let msg = `Excluir a venda de "${s.productName}" em ${fmtDate(s.date)}? O estoque do produto e as reservas alimentadas por ela serão ajustados.`;
+  let msg = `Excluir a venda de "${esc(s.productName)}" em ${fmtDate(s.date)}? O estoque do produto e as reservas alimentadas por ela serão ajustados.`;
   if(linkedOrder) msg += ` A encomenda vinculada volta pro status "Pronto para envio".`;
   if(!confirm(msg)) return;
   const prod = state.products.find(p=>p.id===s.productId);
@@ -3163,12 +3209,12 @@ function openSaleModal(presetProductId, presetQty, presetOrderId){
       <div class="field"><label>Data</label><input type="date" id="sDate" value="${todayStr()}"></div>
       <div class="field"><label>Cliente (opcional)</label><select id="sCustomer">
         <option value="">Avulso / sem cadastro</option>
-        ${state.customers.map(cu=>`<option value="${cu.id}">${cu.name}</option>`).join('')}
+        ${state.customers.map(cu=>`<option value="${cu.id}">${esc(cu.name)}</option>`).join('')}
       </select></div>
     </div>
     <div class="row3">
       <div class="field"><label>Plataforma</label><select id="sPlat" onchange="onSalePlatformChange()">
-        ${state.settings.platforms.map(p=>`<option value="${p.name}">${p.name} (${num(p.pct,0)}%${p.fixed?' + '+brl(p.fixed):''})</option>`).join('')}
+        ${state.settings.platforms.map(p=>`<option value="${esc(p.name)}">${esc(p.name)} (${num(p.pct,0)}%${p.fixed?' + '+brl(p.fixed):''})</option>`).join('')}
       </select></div>
       <div class="field"><label>Taxa nessa venda (%)</label><input type="number" id="sFeePct" step="0.01" oninput="this.dataset.touched='1'; updateSalePreview()"></div>
       <div class="field"><label>Taxa fixa por unidade vendida (R$)</label><input type="number" id="sFeeFixed" step="0.01" oninput="this.dataset.touched='1'; updateSalePreview()"></div>
@@ -3266,7 +3312,7 @@ function renderCartItemsList(){
     return `<div class="cart-item">
     <div class="cart-item-row">
       <div class="field" style="margin-bottom:0;"><label>Produto</label><select onchange="updateCartItem('${item.rowId}','productId',this.value)">
-        ${state.products.map(p=>`<option value="${p.id}" ${p.id===item.productId?'selected':''}>${p.name}</option>`).join('')}
+        ${state.products.map(p=>`<option value="${p.id}" ${p.id===item.productId?'selected':''}>${esc(p.name)}</option>`).join('')}
       </select></div>
       <div class="field" style="margin-bottom:0;"><label>${qtyLabel}</label><input type="number" min="1" step="1" value="${item.qty}" oninput="updateCartItem('${item.rowId}','qty',this.value)"></div>
       <div class="field" style="margin-bottom:0;"><label>Preço/venda</label><input type="number" step="0.01" value="${item.unitPrice.toFixed(2)}" oninput="updateCartItem('${item.rowId}','unitPrice',this.value)"></div>
@@ -3350,7 +3396,7 @@ function updateFeeDefaults(){
         origem = `${teto}: ${num(tier.pct,0)}%${tier.fixed?' + '+brl(tier.fixed)+'/un':''}`;
       }
       return `<div style="display:flex;justify-content:space-between;gap:10px;">
-        <span>${prod?prod.name:'—'} <span style="color:var(--text-faint);">(${origem})</span></span>
+        <span>${esc(prod?prod.name:'—')} <span style="color:var(--text-faint);">(${origem})</span></span>
         <span class="num">${num(pctLinha,1)}% · ${brl(f)}</span>
       </div>`;
     }).join('');
@@ -3422,14 +3468,14 @@ function updateSalePreview(){
         </select>
       </div>`;
     }
-    return `<div class="calc-line"><span>${item.qty}x ${prod.name}</span><span>${brl(itemGross)}</span></div>
+    return `<div class="calc-line"><span>${item.qty}x ${esc(prod.name)}</span><span>${brl(itemGross)}</span></div>
       <div style="font-size:11px;color:${stockAfter<0?'var(--red)':'var(--text-faint)'};margin:-2px 0 4px;">Estoque após venda: ${num(stockAfter,0)} peças${stockAfter<0?` (faltam ${num(-stockAfter,0)} — venda será bloqueada)`:''}</div>
       ${matchBlock}`;
   }).join('');
 
   const allocLines = Object.entries(allAllocations).map(([gid,amt])=>{
     const g = state.settings.reserveGoals.find(x=>x.id===gid);
-    return g ? `<div class="calc-line" style="color:var(--text-faint)"><span>↳ reserva automática: ${g.name}</span><span>${brl(amt)}</span></div>` : '';
+    return g ? `<div class="calc-line" style="color:var(--text-faint)"><span>↳ reserva automática: ${esc(g.name)}</span><span>${brl(amt)}</span></div>` : '';
   }).join('');
 
   document.getElementById('salePreview').innerHTML = `
@@ -3456,7 +3502,7 @@ function confirmSale(){
     const saleUnits = saleUnitsOf(prod);
     const needed = piecesForSale(saleUnits, item.qty);
     if(prod.stock < needed){
-      toast(`Estoque insuficiente: ${num(prod.stock,0)} peças, a venda de "${prod.name}" precisa de ${needed}`,'err');
+      toast(`Estoque insuficiente: ${num(prod.stock,0)} peças, a venda de "${esc(prod.name)}" precisa de ${needed}`,'err');
       return;
     }
   }
@@ -3620,7 +3666,7 @@ function renderClientes(){
       <th></th>
     </tr></thead>
     <tbody>${list.length ? list.map(({cu,st})=>{ const as = activityStatus(st); return `<tr>
-      <td data-label="Nome">${cu.name}</td>
+      <td data-label="Nome">${esc(cu.name)}</td>
       <td data-label="Contato">${cu.contact||'—'}</td>
       <td class="right num" data-label="Compras">${st.qtd}</td>
       <td class="right num" data-label="Total gasto">${brl(st.total)}</td>
@@ -3634,9 +3680,9 @@ function openCustomerModal(id){
   const editing = !!id;
   const cu = editing ? state.customers.find(x=>x.id===id) : { name:'', contact:'', notes:'' };
   showModal(editing?'Editar cliente':'Novo cliente', `
-    <div class="field"><label>Nome</label><input id="cuName" value="${cu.name}" placeholder="Ex: Maria Silva"></div>
+    <div class="field"><label>Nome</label><input id="cuName" value="${esc(cu.name)}" placeholder="Ex: Maria Silva"></div>
     <div class="field"><label>Contato (WhatsApp, e-mail...)</label><input id="cuContact" value="${cu.contact||''}" placeholder="Ex: (11) 99999-9999"></div>
-    <div class="field"><label>Observações</label><textarea id="cuNotes" rows="2" placeholder="Preferências, combinados, etc.">${cu.notes||''}</textarea></div>
+    <div class="field"><label>Observações</label><textarea id="cuNotes" rows="2" placeholder="Preferências, combinados, etc.">${esc(cu.notes||'')}</textarea></div>
     <div class="modal-actions">
       <button class="btn ghost" onclick="closeModal()">Cancelar</button>
       <button class="btn primary" onclick="confirmCustomer(${editing?`'${id}'`:'null'})">${editing?'Salvar':'Criar'}</button>
@@ -3647,7 +3693,7 @@ function confirmCustomer(id){
   const name = document.getElementById('cuName').value.trim();
   if(!name){ toast('Informe o nome do cliente','err'); return; }
   const dup = state.customers.find(x=>x.id!==id && x.name.trim().toLowerCase()===name.toLowerCase());
-  if(dup && !confirm(`Já existe um cliente chamado "${dup.name}". Cadastrar outro com o mesmo nome mesmo assim?`)) return;
+  if(dup && !confirm(`Já existe um cliente chamado "${esc(dup.name)}". Cadastrar outro com o mesmo nome mesmo assim?`)) return;
   const data = { name, contact: document.getElementById('cuContact').value.trim(), notes: document.getElementById('cuNotes').value.trim() };
   if(id){ Object.assign(state.customers.find(x=>x.id===id), data); }
   else { state.customers.push({ id:uid(), ...data }); }
@@ -3658,7 +3704,7 @@ function confirmCustomer(id){
 function deleteCustomer(id){
   const cu = state.customers.find(x=>x.id===id);
   const st = customerStats(id);
-  let msg = `Excluir "${cu.name}"?`;
+  let msg = `Excluir "${esc(cu.name)}"?`;
   if(st.qtd>0) msg += ` As ${st.qtd} venda(s) já registradas continuam no histórico, só ficam sem cliente vinculado.`;
   if(!confirm(msg)) return;
   state.customers = state.customers.filter(x=>x.id!==id);
@@ -3683,13 +3729,13 @@ function openKitModal(){
     <div class="field"><label>Nome do kit</label><input id="kitName" placeholder="Ex: Kit Dino Trio" oninput="this.dataset.touched='1'"></div>
     <div class="row2">
       <div class="field"><label>Caixa do kit</label><select id="kitBox" onchange="updateKitPreview()">
-        ${boxOpts.map(b=>`<option value="${b.name}">${b.name}</option>`).join('')}
+        ${boxOpts.map(b=>`<option value="${esc(b.name)}">${esc(b.name)}</option>`).join('')}
       </select></div>
       <div class="field"><label>Plástico bolha (m)</label><input type="number" id="kitBubble" value="0.5" step="0.1" oninput="updateKitPreview()"></div>
     </div>
     <div class="row2">
       <div class="field"><label>Impressora</label><select id="kitMachine" onchange="updateKitPreview()">
-        ${machineOpts.map(m=>`<option value="${m.id}">${m.name}</option>`).join('')}
+        ${machineOpts.map(m=>`<option value="${m.id}">${esc(m.name)}</option>`).join('')}
       </select></div>
       <div class="field"><label>Fita adesiva usada (m)</label><input type="number" id="kitTape" value="0.5" step="0.1" oninput="updateKitPreview()"></div>
     </div>
@@ -3712,7 +3758,7 @@ function renderKitItemsList(){
     const c = calcProduct(p);
     return `<div style="display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:center;padding:5px 0;">
       <input type="checkbox" style="width:auto;" ${checked?'checked':''} onchange="toggleKitItem('${p.id}', this.checked)">
-      <div style="font-size:13px;">${p.name} <span style="color:var(--text-faint);font-size:11.5px;">(${brl(c.totalCost/c.saleUnits)} custo unit.)</span></div>
+      <div style="font-size:13px;">${esc(p.name)} <span style="color:var(--text-faint);font-size:11.5px;">(${brl(c.totalCost/c.saleUnits)} custo unit.)</span></div>
       <input type="number" min="1" value="${checked?editingKitItems[p.id]:1}" style="width:60px;" ${checked?'':'disabled'} oninput="updateKitItemQty('${p.id}', this.value)">
     </div>`;
   }).join('');
@@ -3773,7 +3819,7 @@ function updateKitPreview(){
     <div class="calc-line" style="color:var(--text-faint);"><span>↳ Mercado Livre (já com a taxa)</span><span>${brl(c.suggestedPriceMl)}</span></div>
     <div class="calc-line" style="color:var(--text-faint);"><span>↳ Shopee (já com a taxa)</span><span>${brl(c.suggestedPriceShopee)}</span></div>
     ${c.estimatedShopeeFreightCap!=null ? `<div class="calc-line" style="color:var(--text-faint);"><span>↳ Shopee — custo estimado de frete (teto do cupom)</span><span>${brl(c.estimatedShopeeFreightCap)}</span></div>` : ''}
-    ${extraListingPlatforms().map(plat=>`<div class="calc-line" style="color:var(--text-faint);"><span>↳ ${plat.name} (já com a taxa)</span><span>${brl(c.suggestedPriceExtra[plat.id])}</span></div>`).join('')}
+    ${extraListingPlatforms().map(plat=>`<div class="calc-line" style="color:var(--text-faint);"><span>↳ ${esc(plat.name)} (já com a taxa)</span><span>${brl(c.suggestedPriceExtra[plat.id])}</span></div>`).join('')}
     <div class="calc-line" style="color:var(--text-faint);"><span>Soma se vendido separado (embalagem individual de cada um)</span><span>${brl(sumIndividual)}</span></div>
     <div class="calc-line total"><span>Preço final do kit${priceField && priceField.value ? ' (definido por você)' : ''}</span><span style="color:${finalMarginPct<0?'var(--red)':'var(--green)'}">${brl(finalPrice)} — margem real ${num(finalMarginPct,1)}%</span></div>
   `;
@@ -3851,20 +3897,20 @@ function renderProdutos(){
       <th></th>
     </tr></thead>`;
   const rowHtml = ({p,c}) => {
-    const filSummary = (p.filaments||[]).map(f=>`${f.materialName} ${num(f.weightG,0)}g`).join(' + ');
+    const filSummary = (p.filaments||[]).map(f=>`${esc(f.materialName)} ${num(f.weightG,0)}g`).join(' + ');
     const floorMl = minPriceForTarget(c, 'Mercado Livre', p);
     const floorShopee = minPriceForTarget(c, 'Shopee', p);
     return `<tr>
-      <td data-label="Foto">${p.photo ? `<img src="${p.photo}" alt="${p.name}" style="width:36px;height:36px;object-fit:cover;border-radius:6px;">` : `<div style="width:36px;height:36px;border-radius:6px;background:var(--panel-2);"></div>`}</td>
-      <td data-label="Produto">${p.name}${p.kitComponents && p.kitComponents.length ? `<div style="font-size:11px;font-style:italic;color:var(--text-faint);margin-top:2px;">${p.kitComponents.map(kc=>`${kc.qty>1?kc.qty+'x ':''}${kc.productName}`).join(' + ')}</div>` : ''}${(!p.laborActions || !p.laborActions.length) ? `<div style="margin-top:3px;"><span class="badge warn" title="Nenhuma ação de mão de obra cadastrada — o custo de mão de obra desse produto está zerado, o que deixa a margem otimista demais">sem mão de obra</span></div>` : ''}${(p.modelOrigin==='terceiro' && !p.modelLicense) ? `<div style="margin-top:3px;"><span class="badge bad" title="Modelo de terceiro sem licença registrada — confira se pode vender antes de anunciar em ML/Shopee">sem licença do modelo</span></div>` : ''}</td>
+      <td data-label="Foto">${p.photo ? `<img src="${p.photo}" alt="${esc(p.name)}" style="width:36px;height:36px;object-fit:cover;border-radius:6px;">` : `<div style="width:36px;height:36px;border-radius:6px;background:var(--panel-2);"></div>`}</td>
+      <td data-label="Produto">${esc(p.name)}${p.kitComponents && p.kitComponents.length ? `<div style="font-size:11px;font-style:italic;color:var(--text-faint);margin-top:2px;">${p.kitComponents.map(kc=>`${kc.qty>1?kc.qty+'x ':''}${esc(kc.productName)}`).join(' + ')}</div>` : ''}${(!p.laborActions || !p.laborActions.length) ? `<div style="margin-top:3px;"><span class="badge warn" title="Nenhuma ação de mão de obra cadastrada — o custo de mão de obra desse produto está zerado, o que deixa a margem otimista demais">sem mão de obra</span></div>` : ''}${(p.modelOrigin==='terceiro' && !p.modelLicense) ? `<div style="margin-top:3px;"><span class="badge bad" title="Modelo de terceiro sem licença registrada — confira se pode vender antes de anunciar em ML/Shopee">sem licença do modelo</span></div>` : ''}</td>
       <td title="${filSummary}" data-label="Filamentos">${filSummary}</td>
-      <td data-label="Impressora">${c.machine ? c.machine.name : '<span class="badge bad">nenhuma</span>'}</td>
-      <td data-label="Embalagem">${p.boxType || '<span class="badge mut">nenhuma</span>'}</td>
+      <td data-label="Impressora">${c.machine ? esc(c.machine.name) : '<span class="badge bad">nenhuma</span>'}</td>
+      <td data-label="Embalagem">${esc(p.boxType || '<span class="badge mut">nenhuma</span>')}</td>
       <td class="right num" data-label="Peso/un">${num(c.unitWeightG,1)}g${c.printUnits>1?`<div style="font-size:10px;font-weight:400;color:var(--text-faint);white-space:nowrap;">leva: ${num(totalWeight(p),0)}g / ${c.printUnits}un</div>`:''}</td>
       <td class="right num" data-label="Tempo/un">${fmtHm(c.unitTimeH)}${c.printUnits>1?`<div style="font-size:10px;font-weight:400;color:var(--text-faint);white-space:nowrap;">leva: ${num(p.timeH,1)}h</div>`:''}</td>
       <td class="right num" data-label="Custo/venda">${brl(c.totalCost)}${c.saleUnits>1?`<div style="font-size:10px;font-weight:400;color:var(--text-faint);white-space:nowrap;">venda de ${c.saleUnits}un</div>`:''}</td>
       <td class="right num" data-label="Piso p/ meta R$/hora">${floorMl!=null?brl(floorMl):'—'}<div style="font-size:10px;font-weight:400;color:var(--text-faint);white-space:nowrap;">Shopee ${floorShopee!=null?brl(floorShopee):'—'}</div></td>
-      <td class="right num" data-label="Preço praticado/venda">${brl(c.practicedPriceMl)}<div style="font-size:10px;font-weight:400;color:var(--text-faint);white-space:nowrap;">Shopee ${brl(c.practicedPriceShopee)}${extraListingPlatforms().map(plat=>` · ${plat.name} ${brl(c.practicedPriceExtra[plat.id])}`).join('')}</div></td>
+      <td class="right num" data-label="Preço praticado/venda">${brl(c.practicedPriceMl)}<div style="font-size:10px;font-weight:400;color:var(--text-faint);white-space:nowrap;">Shopee ${brl(c.practicedPriceShopee)}${extraListingPlatforms().map(plat=>` · ${esc(plat.name)} ${brl(c.practicedPriceExtra[plat.id])}`).join('')}</div></td>
       <td class="right num" data-label="Margem" style="color:${c.marginMlValue<0?'var(--red)':'var(--green)'}">${pct(c.marginMlPct)}<div style="font-size:10px;font-weight:400;white-space:nowrap;">Shopee <span style="color:${c.marginShopeePct<(state.settings.minMarginPct!=null?state.settings.minMarginPct:25)?'var(--red)':'var(--text-faint)'}">${pct(c.marginShopeePct)}</span></div></td>
       <td class="right num" data-label="Estoque">${p.stock<=0?`<span class="badge mut">0</span>`:num(p.stock,0)}</td>
       <td class="right"><button class="btn ghost sm" onclick="openProductModal('${p.id}')">Editar</button> <button class="btn ghost sm" onclick="duplicateProduct('${p.id}')">Duplicar</button> <button class="btn ghost sm" onclick="deleteProduct('${p.id}')">Excluir</button></td>
@@ -3875,7 +3921,7 @@ function renderProdutos(){
       <div class="field"><label>Buscar</label><input value="${produtosFilter.search}" placeholder="Nome ou filamento..." oninput="produtosFilter.search=this.value; renderContent();"></div>
       <div class="field"><label>Impressora</label><select onchange="produtosFilter.machineId=this.value; renderContent();">
         <option value="">Todas</option>
-        ${machines.map(m=>`<option value="${m.id}" ${produtosFilter.machineId===m.id?'selected':''}>${m.name}</option>`).join('')}
+        ${machines.map(m=>`<option value="${m.id}" ${produtosFilter.machineId===m.id?'selected':''}>${esc(m.name)}</option>`).join('')}
       </select></div>
       <div class="field hint" style="padding-top:9px;">${list.length} de ${state.products.length} produto(s) · clique no cabeçalho pra ordenar</div>
       ${(produtosFilter.search||produtosFilter.machineId) ? `<button class="btn ghost sm" onclick="produtosFilter.search=''; produtosFilter.machineId=''; renderContent();">Limpar filtros</button>` : ''}
@@ -3892,7 +3938,7 @@ function renderProdutos(){
   const catKeys = Object.keys(groups).filter(k=>k!=='Kits' && k!=='Sem categoria').sort((a,b)=>a.localeCompare(b,'pt-BR'));
   if(groups['Kits']) catKeys.unshift('Kits');
   if(groups['Sem categoria']) catKeys.push('Sem categoria');
-  const sections = catKeys.map(cat=>`<div class="section-title">${cat}</div><div class="card"><div class="tbl-wrap tbl-responsive tbl-compact-mobile"><table>${theadHtml}<tbody>${groups[cat].map(rowHtml).join('')}</tbody></table></div></div>`).join('');
+  const sections = catKeys.map(cat=>`<div class="section-title">${esc(cat)}</div><div class="card"><div class="tbl-wrap tbl-responsive tbl-compact-mobile"><table>${theadHtml}<tbody>${groups[cat].map(rowHtml).join('')}</tbody></table></div></div>`).join('');
   return filterBar + sections;
 }
 // Diagnóstico do catálogo — ordena pelo recurso escasso (R$/hora-máquina), não
@@ -3965,7 +4011,7 @@ function renderProdutosDiagnostico(){
       ${canibalizacao.length ? `<div style="margin-top:10px;">${canibalizacao.map(w=>`<div class="calc-line" style="font-size:12.5px;"><span class="badge warn">Canibalização</span> <span style="margin-left:6px;">${w}</span></div>`).join('')}</div>` : ''}
     </div>`;
   const rows = sorted.map(({p,c,hourlyMl,hourlyShopee,profit,verdict,better})=>`<tr>
-    <td data-label="Produto">${p.name}${p.category?`<div style="font-size:11px;color:var(--text-faint);">${p.category}</div>`:''}</td>
+    <td data-label="Produto">${esc(p.name)}${p.category?`<div style="font-size:11px;color:var(--text-faint);">${esc(p.category)}</div>`:''}</td>
     <td class="right num" data-label="Peso/un">${num(c.unitWeightG,1)}g</td>
     <td class="right num" data-label="Tempo/un">${fmtHm(c.unitTimeH)}</td>
     <td class="right num" data-label="Lucro/venda (${channel==='Mercado Livre'?'ML':'Shopee'})" style="color:${profit!=null&&profit<0?'var(--red)':'inherit'}">${profit!=null?brl(profit):'—'}</td>
@@ -4208,7 +4254,7 @@ function renderAnunciosLista(){
         : complete ? `<span class="badge ok">Pronto</span> ${updatedTag}`
         : `<span class="badge warn">Incompleto</span> ${updatedTag}`;
       return `<tr>
-        <td data-label="Produto">${p.name}</td>
+        <td data-label="Produto">${esc(p.name)}</td>
         <td data-label="Preço" class="right num">${hasContent ? listingPriceDisplay(l,p) : brl(calcProduct(p).practicedPrice)}</td>
         <td data-label="Status">${status}</td>
         <td class="right">
@@ -4220,7 +4266,7 @@ function renderAnunciosLista(){
     // .tbl-cols-fixed: uma tabela por categoria, e sem largura fixa cada uma
     // dimensionava as colunas pelo próprio conteúdo — "Preço" e "Status"
     // caíam num x diferente em cada quadro. Ver o comentário no CSS.
-    return `<div class="section-title">${category}</div><div class="card"><div class="tbl-wrap tbl-responsive"><table class="tbl-cols-fixed" style="--c2:240px;--c3:235px;--c4:210px;">
+    return `<div class="section-title">${esc(category)}</div><div class="card"><div class="tbl-wrap tbl-responsive"><table class="tbl-cols-fixed" style="--c2:240px;--c3:235px;--c4:210px;">
       <thead><tr><th>Produto</th><th class="right">Preço</th><th>Status</th><th></th></tr></thead>
       <tbody>${rows}</tbody>
     </table></div></div>`;
@@ -4248,7 +4294,7 @@ function renderAnunciosProntos(){
       const thumbs = photos.length>1 ? `<div style="display:flex;gap:4px;padding:0 16px;">${photos.slice(1,5).map(ph=>`<img src="${ph}" style="width:28px;height:28px;object-fit:cover;border-radius:4px;border:1px solid var(--line);">`).join('')}</div>` : '';
       return `<div class="card" style="padding:0;overflow:hidden;display:flex;flex-direction:column;">
         <div style="aspect-ratio:1/1;background:var(--panel-2);display:flex;align-items:center;justify-content:center;">
-          ${cover ? `<img src="${cover}" alt="${p.name}" style="width:100%;height:100%;object-fit:cover;">` : `<span style="color:var(--text-faint);font-size:11px;">Sem foto</span>`}
+          ${cover ? `<img src="${cover}" alt="${esc(p.name)}" style="width:100%;height:100%;object-fit:cover;">` : `<span style="color:var(--text-faint);font-size:11px;">Sem foto</span>`}
         </div>
         ${thumbs}
         <div style="padding:14px 16px;display:flex;flex-direction:column;gap:6px;flex:1;">
@@ -4257,9 +4303,9 @@ function renderAnunciosProntos(){
           <div style="font-size:12px;color:var(--text-dim);">Estoque: ${estoque}</div>
           ${descricao ? `<div style="font-size:12px;color:var(--text-dim);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;">${descricao}</div>` : ''}
           ${(l.ml.link||l.shopee.link||extras.some(plat=>listingPlatformData(l,plat.id).link)) ? `<div style="display:flex;gap:6px;flex-wrap:wrap;">
-            ${l.ml.link?`<a href="${l.ml.link}" target="_blank" rel="noopener noreferrer" style="font-size:11px;">ML ↗</a>`:''}
-            ${l.shopee.link?`<a href="${l.shopee.link}" target="_blank" rel="noopener noreferrer" style="font-size:11px;">Shopee ↗</a>`:''}
-            ${extras.map(plat=>{ const link = listingPlatformData(l,plat.id).link; return link ? `<a href="${link}" target="_blank" rel="noopener noreferrer" style="font-size:11px;">${plat.name} ↗</a>` : ''; }).join('')}
+            ${l.ml.link?`<a href="${safeUrl(l.ml.link)}" target="_blank" rel="noopener noreferrer" style="font-size:11px;">ML ↗</a>`:''}
+            ${l.shopee.link?`<a href="${safeUrl(l.shopee.link)}" target="_blank" rel="noopener noreferrer" style="font-size:11px;">Shopee ↗</a>`:''}
+            ${extras.map(plat=>{ const link = listingPlatformData(l,plat.id).link; return link ? `<a href="${safeUrl(link)}" target="_blank" rel="noopener noreferrer" style="font-size:11px;">${esc(plat.name)} ↗</a>` : ''; }).join('')}
           </div>` : ''}
           <div style="margin-top:auto;display:flex;gap:6px;flex-wrap:wrap;">
             <button class="btn ghost sm" style="flex:1;" onclick="openListingViewModal('${p.id}')">Ver anúncio</button>
@@ -4269,7 +4315,7 @@ function renderAnunciosProntos(){
         </div>
       </div>`;
     }).join('');
-    return `<div class="section-title">${category}</div><div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(190px,1fr));">${cards}</div>`;
+    return `<div class="section-title">${esc(category)}</div><div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(190px,1fr));">${cards}</div>`;
   }).join('');
   return toolbar + grouped;
 }
@@ -4278,7 +4324,7 @@ function renderAnunciosProntos(){
 // entra no Excel exportado (é só referência interna, não um dado do anúncio).
 function renderListingLinkField(platform, val){
   const platName = listingPlatformDisplayName(platform);
-  const openLink = val ? `<a href="${val}" target="_blank" rel="noopener noreferrer" class="btn ghost sm" style="margin-top:6px;display:inline-flex;">Abrir anúncio ↗</a>` : '';
+  const openLink = val ? `<a href="${safeUrl(val)}" target="_blank" rel="noopener noreferrer" class="btn ghost sm" style="margin-top:6px;display:inline-flex;">Abrir anúncio ↗</a>` : '';
   return `<div class="field"><label>Link do anúncio publicado na ${platName} (opcional)</label><input id="lst_${platform}_link" type="url" value="${val||''}" placeholder="Cole aqui depois de publicar">${openLink}</div>`;
 }
 function renderListingField(idKey, f, val, isNa){
@@ -4380,15 +4426,15 @@ function openListingModal(id){
     else if(platKey==='ml'||platKey==='shopee'){ draft[platKey][fieldKey] = ''; }
     else if(draft.extra[platKey]) draft.extra[platKey][fieldKey] = '';
   });
-  const extraTabsHtml = extras.map(plat=>`<button type="button" class="tabbtn" id="lstTabBtn_${plat.id}" onclick="switchListingTab('${plat.id}')">${plat.name}</button>`).join('');
+  const extraTabsHtml = extras.map(plat=>`<button type="button" class="tabbtn" id="lstTabBtn_${plat.id}" onclick="switchListingTab('${plat.id}')">${esc(plat.name)}</button>`).join('');
   const extraPanelsHtml = extras.map(plat=>{
     const fields = platformListingFields(plat.id).filter(f=>!SHARED_LISTING_KEYS.includes(f.key));
     return `<div id="lstPanel_${plat.id}" style="display:none;">${renderListingLinkField(plat.id, draft.extra[plat.id].link)}${fields.map(f=>renderListingField(plat.id, f, (draft.extra[plat.id]||{})[f.key], !!editingNaFields[`${plat.id}_${f.key}`])).join('')}</div>`;
   }).join('');
-  showModal(`Anúncio — ${p.name}`, `
+  showModal(`Anúncio — ${esc(p.name)}`, `
     <div class="field hint" style="margin-top:-4px;margin-bottom:12px;">Campos iguais aos da planilha de exportação — preencha, salve o rascunho e exporte o Excel pra colar no formulário de cada marketplace. Marque "não se aplica" pra um campo não contar como pendente.</div>
     <div style="display:flex;gap:12px;align-items:center;margin-bottom:14px;">
-      ${p.photo ? `<img src="${p.photo}" alt="${p.name}" style="width:64px;height:64px;object-fit:cover;border-radius:8px;flex-shrink:0;">` : `<div style="width:64px;height:64px;border-radius:8px;background:var(--panel-2);flex-shrink:0;"></div>`}
+      ${p.photo ? `<img src="${p.photo}" alt="${esc(p.name)}" style="width:64px;height:64px;object-fit:cover;border-radius:8px;flex-shrink:0;">` : `<div style="width:64px;height:64px;border-radius:8px;background:var(--panel-2);flex-shrink:0;"></div>`}
       <div class="field hint" style="margin:0;">${p.photo ? 'Foto (capa) puxada do cadastro em Produtos.' : 'Esse produto não tem foto cadastrada — adicione uma em Produtos → Editar pra ela aparecer aqui e nos anúncios prontos.'}</div>
     </div>
     <div class="field">
@@ -4523,7 +4569,7 @@ function exportListingXlsx(id){
     const rows = [fields.map(f=>f.label), fields.map(f=>data[f.key]||'')];
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), sanitizeSheetName(plat.name));
   });
-  XLSX.writeFile(wb, `anuncio-${p.name.toLowerCase().replace(/[^a-z0-9]+/g,'-')}.xlsx`);
+  XLSX.writeFile(wb, `anuncio-${esc(p.name.toLowerCase().replace(/[^a-z0-9]+/g,'-'))}.xlsx`);
   toast('Excel exportado');
 }
 function exportAllReadyListingsXlsx(){
@@ -4557,10 +4603,10 @@ function openDuplicateListingModal(sourceId){
   if(!source || !sourceProduct) return;
   const others = state.products.filter(x=>x.id!==sourceId);
   if(others.length===0){ toast('Não há outro produto pra duplicar esse anúncio','err'); return; }
-  showModal(`Duplicar anúncio de "${sourceProduct.name}"`, `
+  showModal(`Duplicar anúncio de "${esc(sourceProduct.name)}"`, `
     <div class="field hint" style="margin-top:-4px;">Copia categoria, condição, garantia, tipo de anúncio, variações, pré-venda e opções de envio. Título, preço, estoque, peso e SKU são gerados do zero pro produto escolhido; modelo, GTIN, dimensões, descrição e fotos ficam em branco pra você preencher.</div>
     <div class="field"><label>Duplicar para</label><select id="dupTargetProduct">
-      ${others.map(p=>`<option value="${p.id}">${p.name}${listingHasContent(listingFor(p.id))?' (já tem anúncio)':''}</option>`).join('')}
+      ${others.map(p=>`<option value="${p.id}">${esc(p.name)}${listingHasContent(listingFor(p.id))?' (já tem anúncio)':''}</option>`).join('')}
     </select></div>
     <div class="modal-actions">
       <button class="btn ghost" onclick="closeModal()">Cancelar</button>
@@ -4604,9 +4650,9 @@ function openListingViewModal(id){
   const l = listingFor(id);
   if(!p || !l) return;
   const extras = extraListingPlatforms();
-  const extraTabsHtml = extras.map(plat=>`<button type="button" class="tabbtn" id="viewTabBtn_${plat.id}" onclick="switchListingViewTab('${plat.id}')">${plat.name}</button>`).join('');
+  const extraTabsHtml = extras.map(plat=>`<button type="button" class="tabbtn" id="viewTabBtn_${plat.id}" onclick="switchListingViewTab('${plat.id}')">${esc(plat.name)}</button>`).join('');
   const extraPanelsHtml = extras.map(plat=>`<div id="viewPanel_${plat.id}" style="display:none;">${renderListingViewPanel(p, l, plat.id)}</div>`).join('');
-  showModal(`Anúncio — ${p.name}`, `
+  showModal(`Anúncio — ${esc(p.name)}`, `
     <div class="tabbar">
       <button type="button" class="tabbtn active" id="viewTabBtn_ml" onclick="switchListingViewTab('ml')">Mercado Livre</button>
       <button type="button" class="tabbtn" id="viewTabBtn_shopee" onclick="switchListingViewTab('shopee')">Shopee</button>
@@ -4645,27 +4691,27 @@ function renderListingViewPanel(p, l, platform){
     <div style="display:flex;gap:20px;flex-wrap:wrap;margin-top:14px;">
       <div style="flex:0 0 220px;">
         <div style="width:220px;height:220px;background:var(--panel-2);border-radius:10px;overflow:hidden;display:flex;align-items:center;justify-content:center;">
-          ${cover?`<img src="${cover}" alt="${p.name}" style="width:100%;height:100%;object-fit:cover;">`:`<span style="color:var(--text-faint);font-size:12px;">Sem foto</span>`}
+          ${cover?`<img src="${cover}" alt="${esc(p.name)}" style="width:100%;height:100%;object-fit:cover;">`:`<span style="color:var(--text-faint);font-size:12px;">Sem foto</span>`}
         </div>
         ${thumbs}
       </div>
       <div style="flex:1;min-width:240px;">
         <h2 style="font-family:var(--font-display);font-size:19px;margin:0 0 8px;">${titulo}</h2>
         <div style="font-family:var(--font-mono);font-size:25px;font-weight:700;color:var(--nozzle);margin-bottom:12px;">${preco?'R$ '+preco:'—'}</div>
-        ${data.link ? `<a href="${data.link}" target="_blank" rel="noopener noreferrer" class="btn ghost sm" style="margin-bottom:12px;display:inline-flex;">Abrir anúncio publicado ↗</a>` : ''}
+        ${data.link ? `<a href="${safeUrl(data.link)}" target="_blank" rel="noopener noreferrer" class="btn ghost sm" style="margin-bottom:12px;display:inline-flex;">Abrir anúncio publicado ↗</a>` : ''}
         ${specsHtml || `<div class="field hint" style="margin:0;">Nenhuma informação adicional preenchida.</div>`}
       </div>
     </div>
     <div style="margin-top:18px;">
       <div style="font-weight:600;font-size:13px;margin-bottom:6px;">Descrição</div>
-      <div style="white-space:pre-wrap;font-size:13.5px;color:var(--text-dim);line-height:1.6;">${data.descricao || 'Sem descrição.'}</div>
+      <div style="white-space:pre-wrap;font-size:13.5px;color:var(--text-dim);line-height:1.6;">${esc(data.descricao || 'Sem descrição.')}</div>
     </div>
   `;
 }
 function deleteProduct(id){
   const p = state.products.find(x=>x.id===id);
   const openOrders = state.orders.filter(o=>o.productId===id && o.status!=='Enviado');
-  let msg = `Excluir "${p.name}"? Vendas já registradas não serão afetadas.`;
+  let msg = `Excluir "${esc(p.name)}"? Vendas já registradas não serão afetadas.`;
   if(openOrders.length){
     msg += ` Atenção: ${openOrders.length} encomenda(s) em aberto usam esse produto — elas continuam na fila, mas os botões "Produzir"/"Vender" delas vão passar a apontar pro primeiro produto da lista, o que pode confundir. Considere cancelar ou concluir essas encomendas antes.`;
   }
@@ -4702,14 +4748,14 @@ function openProductModal(id){
   editingProductMlFeeUpdatedAtPrice = p.mlRealFeeUpdatedAtPrice || null;
   const boxes = boxOpts;
   showModal(editing?'Editar produto':'Novo produto', `
-    <div class="field"><label>Nome do produto</label><input id="pName" value="${p.name}" placeholder="Ex: Kit Escritório"></div>
+    <div class="field"><label>Nome do produto</label><input id="pName" value="${esc(p.name)}" placeholder="Ex: Kit Escritório"></div>
     <div class="field"><label>Categoria (opcional)</label>
       <select id="pCategory" onchange="toggleNewCategoryInput(this.value)">
         <option value="">Sem categoria</option>
-        ${productCategorySuggestions().map(c=>`<option value="${c}" ${p.category===c?'selected':''}>${c}</option>`).join('')}
-        <option value="__new__" ${p.category && !productCategorySuggestions().includes(p.category)?'selected':''}>+ Nova categoria...</option>
+        ${productCategorySuggestions().map(c=>`<option value="${esc(c)}" ${esc(p.category===c?'selected':'')}>${esc(c)}</option>`).join('')}
+        <option value="__new__" ${esc(p.category && !productCategorySuggestions().includes(p.category)?'selected':'')}>+ Nova categoria...</option>
       </select>
-      <input id="pCategoryNew" placeholder="Nome da nova categoria" style="margin-top:6px;display:${p.category && !productCategorySuggestions().includes(p.category)?'block':'none'};" value="${p.category && !productCategorySuggestions().includes(p.category)?p.category:''}" oninput="updateMarketHint()">
+      <input id="pCategoryNew" placeholder="Nome da nova categoria" style="margin-top:6px;display:${esc(p.category && !productCategorySuggestions().includes(p.category)?'block':'none')};" value="${esc(p.category && !productCategorySuggestions().includes(p.category)?p.category:'')}" oninput="updateMarketHint()">
     </div>
     ${state.settings.mlConnected ? `
     <div class="field hint" style="margin:4px 0 4px;font-weight:600;color:var(--text-dim);">Categoria no Mercado Livre — taxa real (opcional)</div>
@@ -4717,7 +4763,7 @@ function openProductModal(id){
       <div class="field" style="position:relative;"><label>Categoria no ML</label>
         <input id="pMlCategorySearch" placeholder="Digite o nome do produto pra buscar..." value="${p.mlCategoryName||''}" oninput="searchMlCategory(this.value)" autocomplete="off">
         <div id="pMlCategoryResults"></div>
-        <input type="hidden" id="pMlCategoryId" value="${p.mlCategoryId||''}">
+        <input type="hidden" id="pMlCategoryId" value="${esc(p.mlCategoryId||'')}">
       </div>
       <div class="field"><label>Tipo de anúncio (pra essa taxa)</label>
         <select id="pMlListingType">
@@ -4759,10 +4805,10 @@ function openProductModal(id){
 
     <div class="row2">
       <div class="field"><label>Impressora usada</label><select id="pMachine" onchange="updateProductPreview()">
-        ${machineOpts.map(m=>`<option value="${m.id}" ${(p.machineId||machineOpts[0].id)===m.id?'selected':''}>${m.name}</option>`).join('')}
+        ${machineOpts.map(m=>`<option value="${m.id}" ${(p.machineId||machineOpts[0].id)===m.id?'selected':''}>${esc(m.name)}</option>`).join('')}
       </select></div>
       <div class="field"><label>Embalagem</label><select id="pBox" onchange="updateBoxFitStatus(); updateProductPreview()">
-        ${boxes.map(b=>`<option value="${b.name}" ${p.boxType===b.name?'selected':''}>${b.name}</option>`).join('')}
+        ${boxes.map(b=>`<option value="${esc(b.name)}" ${esc(p.boxType===b.name?'selected':'')}>${esc(b.name)}</option>`).join('')}
       </select></div>
     </div>
     <div class="field hint" id="pBoxFitStatus" style="margin-top:-8px;"></div>
@@ -4811,7 +4857,7 @@ function openProductModal(id){
       <div class="field"><label id="pPriceMlLabel">Preço praticado — Mercado Livre</label><input type="number" id="pPriceMl" value="${p.practicedPriceMl||''}" step="0.01" placeholder="deixe em branco = preço sugerido" oninput="this.dataset.touched='1'"></div>
       <div class="field"><label id="pPriceShopeeLabel">Preço praticado — Shopee</label><input type="number" id="pPriceShopee" value="${p.practicedPriceShopee||''}" step="0.01" placeholder="deixe em branco = preço sugerido" oninput="this.dataset.touched='1'"></div>
     </div>
-    ${extraListingPlatforms().map(plat=>`<div class="field"><label id="pPriceExtraLabel_${plat.id}">Preço praticado — ${plat.name}</label><input type="number" id="pPriceExtra_${plat.id}" value="${(p.practicedPriceExtra||{})[plat.id]||''}" step="0.01" placeholder="deixe em branco = preço sugerido" oninput="this.dataset.touched='1'"></div>`).join('')}
+    ${extraListingPlatforms().map(plat=>`<div class="field"><label id="pPriceExtraLabel_${plat.id}">Preço praticado — ${esc(plat.name)}</label><input type="number" id="pPriceExtra_${plat.id}" value="${(p.practicedPriceExtra||{})[plat.id]||''}" step="0.01" placeholder="deixe em branco = preço sugerido" oninput="this.dataset.touched='1'"></div>`).join('')}
     <div class="field"><label>Estoque inicial (un)</label><input type="number" id="pStock" value="${p.stock}" step="1"></div>
     <div class="helper-block" id="productPreview"></div>
     <div class="modal-actions">
@@ -4910,7 +4956,7 @@ function renderFilamentRows(){
     editingFilaments.map((f,i)=>`
     <div class="form-row">
       <select onchange="editingFilaments[${i}].materialName=this.value; refreshCurrentPreview();">
-        ${filamentOptions.map(fo=>`<option value="${fo.name}" ${f.materialName===fo.name?'selected':''}>${fo.name}</option>`).join('')}
+        ${filamentOptions.map(fo=>`<option value="${esc(fo.name)}" ${esc(f.materialName===fo.name?'selected':'')}>${esc(fo.name)}</option>`).join('')}
       </select>
       <input type="number" step="0.01" value="${f.weightG}" placeholder="peso (g)" oninput="editingFilaments[${i}].weightG=parseFloat(this.value)||0; refreshCurrentPreview();">
       ${formRowX(`removeFilamentRow(${i})`)}
@@ -4935,7 +4981,7 @@ function renderLaborActionRows(){
   el.innerHTML = formRowsHtml('minmax(0,1.6fr) minmax(0,1fr)', ['Ação','Minutos'],
     editingLaborActions.map((a,i)=>`
     <div class="form-row">
-      <input list="laborActionOptions" value="${a.action}" placeholder="Ação (ex: Lixar)" oninput="editingLaborActions[${i}].action=this.value; refreshCurrentPreview();">
+      <input list="laborActionOptions" value="${esc(a.action)}" placeholder="Ação (ex: Lixar)" oninput="editingLaborActions[${i}].action=this.value; refreshCurrentPreview();">
       <input type="number" step="1" value="${a.minutes}" placeholder="minutos" oninput="editingLaborActions[${i}].minutes=parseFloat(this.value)||0; refreshCurrentPreview();">
       ${formRowX(`removeLaborActionRow(${i})`)}
     </div>
@@ -4963,7 +5009,7 @@ function renderToolsUsedRows(){
     editingToolsUsed.map((t,i)=>`
     <div class="form-row">
       <select onchange="editingToolsUsed[${i}].toolId=this.value; refreshCurrentPreview();">
-        ${toolOptions.map(to=>`<option value="${to.id}" ${t.toolId===to.id?'selected':''}>${to.name}</option>`).join('')}
+        ${toolOptions.map(to=>`<option value="${to.id}" ${t.toolId===to.id?'selected':''}>${esc(to.name)}</option>`).join('')}
       </select>
       <input type="number" step="1" value="${t.uses}" placeholder="usos" oninput="editingToolsUsed[${i}].uses=parseFloat(this.value)||0; refreshCurrentPreview();">
       ${formRowX(`removeToolsUsedRow(${i})`)}
@@ -4994,7 +5040,7 @@ function renderComponentsRows(){
     editingComponents.map((comp,i)=>`
     <div class="form-row">
       <select onchange="editingComponents[${i}].materialId=this.value; refreshCurrentPreview();">
-        ${compOptions.map(co=>`<option value="${co.id}" ${comp.materialId===co.id?'selected':''}>${co.name}</option>`).join('')}
+        ${compOptions.map(co=>`<option value="${co.id}" ${comp.materialId===co.id?'selected':''}>${esc(co.name)}</option>`).join('')}
       </select>
       <input type="number" step="1" value="${comp.qty}" placeholder="qtd" oninput="editingComponents[${i}].qty=parseFloat(this.value)||0; refreshCurrentPreview();">
       <select onchange="editingComponents[${i}].scope=this.value; refreshCurrentPreview();">
@@ -5132,7 +5178,7 @@ function updateBoxFitStatus(){
   } else if(fits===false){
     const best = bestFittingBox(lengthCm, widthCm, heightCm);
     statusEl.innerHTML = best
-      ? `<span style="color:var(--red);">⚠️ Não cabe nessa embalagem — sugerido: ${best.name}</span>`
+      ? `<span style="color:var(--red);">⚠️ Não cabe nessa embalagem — sugerido: ${esc(best.name)}</span>`
       : `<span style="color:var(--red);">⚠️ Nenhuma embalagem cadastrada é grande o suficiente — cadastre as medidas de uma embalagem maior em Estoque</span>`;
   } else {
     statusEl.textContent = '';
@@ -5162,8 +5208,8 @@ function updateProductPreview(){
         : `faixa por unidade${c.saleUnits>1?`, escalada pra sua venda de ${c.saleUnits}`:''}`)
     : null;
   const marketRangeLine = marketInfo.source==='none'
-    ? `<div class="calc-line"><span>Preço de mercado${form.category?` (${form.category})`:''}</span><span class="badge mut">Não pesquisado</span></div>`
-    : `<div class="calc-line"><span>Mercado${form.category?` (${form.category})`:''}${marketInfo.source==='override'?' — exceção':''}</span><span>${marketInfo.min>0?brl(marketInfo.min):'—'} / ${marketInfo.avg>0?brl(marketInfo.avg):'—'} / ${marketInfo.max>0?brl(marketInfo.max):'—'}</span></div>
+    ? `<div class="calc-line"><span>Preço de mercado${form.category?` (${esc(form.category)})`:''}</span><span class="badge mut">Não pesquisado</span></div>`
+    : `<div class="calc-line"><span>Mercado${form.category?` (${esc(form.category)})`:''}${marketInfo.source==='override'?' — exceção':''}</span><span>${marketInfo.min>0?brl(marketInfo.min):'—'} / ${marketInfo.avg>0?brl(marketInfo.avg):'—'} / ${marketInfo.max>0?brl(marketInfo.max):'—'}</span></div>
        ${marketBasisNote?`<div class="field hint" style="margin:-4px 0 0;">${marketBasisNote}</div>`:''}`;
   // "(por venda de N un)" quando a peça é vendida em kit, "(por unidade)"
   // quando é avulsa — evita a ambiguidade de não saber se o preço cobre 1
@@ -5175,7 +5221,7 @@ function updateProductPreview(){
   if(priceShopeeLabelEl) priceShopeeLabelEl.textContent = `Preço praticado — Shopee ${saleQualifier}`;
   extraListingPlatforms().forEach(plat=>{
     const labelEl = document.getElementById(`pPriceExtraLabel_${plat.id}`);
-    if(labelEl) labelEl.textContent = `Preço praticado — ${plat.name} ${saleQualifier}`;
+    if(labelEl) labelEl.textContent = `Preço praticado — ${esc(plat.name)} ${saleQualifier}`;
   });
 
   const saleSummary = `
@@ -5192,7 +5238,7 @@ function updateProductPreview(){
     <div class="calc-line"><span>Custo material (por peça)</span><span>${brl(c.materialCost)}</span></div>
     <div class="calc-line"><span>Custo energia (por peça)</span><span>${brl(c.energyCost)}</span></div>
     <div class="calc-line"><span>Embalagem (${packagingLabelFor(form)}) — por venda</span><span>${brl(c.embalagemCost)}</span></div>
-    <div class="calc-line"><span>Depreciação (por peça, ${c.machine?c.machine.name:'sem impressora'})</span><span>${brl(c.depreciation)}</span></div>
+    <div class="calc-line"><span>Depreciação (por peça, ${esc(c.machine?c.machine.name:'sem impressora')})</span><span>${brl(c.depreciation)}</span></div>
     <div class="calc-line"><span>Manutenção (por peça)</span><span>${brl(c.maintenance)}</span></div>
     <div class="calc-line"><span>Mão de obra (por peça)</span><span>${brl(c.laborCost)}</span></div>
     ${c.toolsCost>0 ? `<div class="calc-line"><span>Ferramentas (por peça)</span><span>${brl(c.toolsCost)}</span></div>` : ''}
@@ -5202,7 +5248,7 @@ function updateProductPreview(){
     ${marketRangeLine}
     ${pricingChannelBlockHtml('Mercado Livre', 'Mercado Livre', c.practicedPriceMl, c, marketInfo, form)}
     ${pricingChannelBlockHtml('Shopee', 'Shopee', c.practicedPriceShopee, c, marketInfo, form)}
-    ${extraListingPlatforms().map(plat=>pricingChannelBlockHtml(plat.name, plat.name, c.practicedPriceExtra[plat.id], c, marketInfo, form)).join('')}
+    ${esc(extraListingPlatforms().map(plat=>pricingChannelBlockHtml(plat.name, plat.name, c.practicedPriceExtra[plat.id], c, marketInfo, form)).join(''))}
   `;
   const priceMlInput = document.getElementById('pPriceMl');
   if(priceMlInput && !priceMlInput.dataset.touched && document.activeElement!==priceMlInput){
@@ -5227,7 +5273,7 @@ function confirmProduct(id){
   const form = readProductForm();
   if(!form.name){ toast('Informe o nome do produto','err'); return; }
   const dup = state.products.find(x=>x.id!==id && x.name.trim().toLowerCase()===form.name.trim().toLowerCase());
-  if(dup){ toast(`Já existe um produto chamado "${dup.name}" — use outro nome`,'err'); return; }
+  if(dup){ toast(`Já existe um produto chamado "${esc(dup.name)}" — use outro nome`,'err'); return; }
   if(form.lengthCm>0 && form.widthCm>0 && form.heightCm>0){
     const fits = boxFitsDimensions(materialByName(form.boxType), form.lengthCm, form.widthCm, form.heightCm);
     if(fits===false){ toast('Esse produto não cabe na embalagem selecionada — escolha outra ou ajuste as medidas','err'); return; }
@@ -5370,7 +5416,7 @@ function renderPersonalizados(){
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
         <div style="min-width:0;">
           <div style="font-weight:600;font-size:13.5px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-            ${o.name||orderTypeLabel(o.orderType)}
+            ${esc(o.name||orderTypeLabel(o.orderType))}
             <span class="badge info">${orderTypeLabel(o.orderType)}</span>
           </div>
           <div style="font-size:11.5px;color:var(--text-faint);margin-top:3px;">Pedido ${o.orderNumber||'—'} · ${customerNameFor(o)}${wa?` · <a href="${wa}" target="_blank" rel="noopener noreferrer">${o.contact}</a>`:(o.contact?' · '+o.contact:'')}</div>
@@ -5390,7 +5436,7 @@ function renderPersonalizados(){
           : `<span class="badge warn">Falta preencher · ${completeness.missing.length} campo${completeness.missing.length>1?'s':''}</span><div style="font-size:10.5px;color:var(--amber);margin-top:3px;">${completeness.missing.join(', ')}</div>`}
       </div>
       <select style="margin-top:10px;width:100%;" onchange="changeCustomOrderStatus('${o.id}', this.value)">
-        ${CUSTOM_ORDER_STATUSES.map(s=>`<option value="${s}" ${s===o.status?'selected':''}>${s}</option>`).join('')}
+        ${CUSTOM_ORDER_STATUSES.map(s=>`<option value="${esc(s)}" ${esc(s===o.status?'selected':'')}>${esc(s)}</option>`).join('')}
       </select>
       <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">
         <button class="btn ghost sm" onclick="openCustomOrderModal('${o.id}')">Abrir</button>
@@ -5497,7 +5543,7 @@ function renderPersonalizadosDiagnostico(){
 function deleteCustomOrder(id){
   const o = state.customOrders.find(x=>x.id===id);
   if(!o) return;
-  if(!confirm(`Excluir a encomenda "${o.name}"${o.orderNumber?' (Pedido '+o.orderNumber+')':''}? Essa ação não pode ser desfeita.`)) return;
+  if(!confirm(`Excluir a encomenda "${esc(o.name)}"${o.orderNumber?' (Pedido '+o.orderNumber+')':''}? Essa ação não pode ser desfeita.`)) return;
   state.customOrders = state.customOrders.filter(x=>x.id!==id);
   saveCustomOrders(); toast('Encomenda excluída'); renderContent();
 }
@@ -5511,7 +5557,7 @@ function openQuickCustomOrderModal(){
   showModal('Nova encomenda personalizada', `
     <div class="field"><label>Nome do cliente</label>
       <input id="qcoClientName" list="qcoClientNames" placeholder="Ex: Maria Silva" oninput="autofillQcoContact(this.value)">
-      <datalist id="qcoClientNames">${state.customers.map(cu=>`<option value="${cu.name}">`).join('')}</datalist>
+      <datalist id="qcoClientNames">${state.customers.map(cu=>`<option value="${esc(cu.name)}">`).join('')}</datalist>
     </div>
     <div class="field"><label>Contato</label><input id="qcoContact" placeholder="(11) 99999-9999" oninput="this.dataset.touched='1'"></div>
     <div class="field"><label>Tipo</label>
@@ -5581,7 +5627,7 @@ function openCustomOrderModal(id){
   const completeness = orderCompleteness(o);
   const missingKeys = new Set(completeness.missingKeys);
   const reqBorder = (key) => missingKeys.has(key) ? 'border-color:var(--amber);' : '';
-  showModal(`Pedido ${o.orderNumber||''} — ${o.name||orderTypeLabel(o.orderType)}`, `
+  showModal(`Pedido ${o.orderNumber||''} — ${esc(o.name||orderTypeLabel(o.orderType))}`, `
     <div class="tabbar">
       <button class="tabbtn active" id="coTabBtn_pedido" onclick="switchCustomOrderTab('pedido')">Pedido</button>
       <button class="tabbtn" id="coTabBtn_producao" onclick="switchCustomOrderTab('producao')">Produção</button>
@@ -5597,12 +5643,12 @@ function openCustomOrderModal(id){
         <div class="field"><label>Cliente</label>
           <select id="coCustomerId" onchange="toggleCoCustomerField(this.value)">
             <option value="">Avulso / digitar nome</option>
-            ${state.customers.map(cu=>`<option value="${cu.id}" ${o.customerId===cu.id?'selected':''}>${cu.name}</option>`).join('')}
+            ${state.customers.map(cu=>`<option value="${cu.id}" ${o.customerId===cu.id?'selected':''}>${esc(cu.name)}</option>`).join('')}
           </select>
         </div>
         <div class="field"><label>Contato</label><input id="coContact" value="${o.contact||''}" placeholder="(11) 99999-9999" style="${reqBorder('contact')}"></div>
       </div>
-      <div class="field" id="coCustomerNameWrap" style="display:${o.customerId?'none':'block'};margin-top:-8px;"><label>Nome do cliente (se avulso)</label><input id="coCustomerName" value="${o.customerName||''}" style="${reqBorder('customerName')}"></div>
+      <div class="field" id="coCustomerNameWrap" style="display:${o.customerId?'none':'block'};margin-top:-8px;"><label>Nome do cliente (se avulso)</label><input id="coCustomerName" value="${esc(o.customerName||'')}" style="${reqBorder('customerName')}"></div>
       <div class="field hint" style="margin-top:-8px;">${o.customerId?'Cliente cadastrado':'Cliente avulso — sem cadastro'}</div>
 
       <div class="section-title">Item</div>
@@ -5613,10 +5659,10 @@ function openCustomOrderModal(id){
         <div class="field"><label>Quantidade</label><input type="number" id="coQty" value="${o.qty||1}" min="1" step="1" style="${reqBorder('qty')}"></div>
         <div class="field"><label>Produto do catálogo (opcional)</label><select id="coLinkedProductId">
           <option value="">Nenhum</option>
-          ${state.products.map(p=>`<option value="${p.id}" ${o.linkedProductId===p.id?'selected':''}>${p.name}</option>`).join('')}
+          ${state.products.map(p=>`<option value="${p.id}" ${o.linkedProductId===p.id?'selected':''}>${esc(p.name)}</option>`).join('')}
         </select></div>
       </div>
-      <div class="field"><label>Nome da peça</label><input id="pName" value="${o.name||''}" placeholder="Ex: Chaveiro Goku"></div>
+      <div class="field"><label>Nome da peça</label><input id="pName" value="${esc(o.name||'')}" placeholder="Ex: Chaveiro Goku"></div>
 
       <div class="section-title">Personalização</div>
       <div style="background:var(--nozzle-dim);border-left:3px solid var(--nozzle);border-radius:8px;padding:14px 16px 2px;">
@@ -5678,11 +5724,11 @@ function openCustomOrderModal(id){
       <div class="row2">
         <div class="field"><label>Impressora usada</label><select id="pMachine" onchange="refreshCurrentPreview()">
           <option value="">Selecione...</option>
-          ${machineOpts.map(m=>`<option value="${m.id}" ${o.machineId===m.id?'selected':''}>${m.name}</option>`).join('')}
+          ${machineOpts.map(m=>`<option value="${m.id}" ${o.machineId===m.id?'selected':''}>${esc(m.name)}</option>`).join('')}
         </select></div>
         <div class="field"><label>Tipo de caixa</label><select id="pBox" onchange="refreshCurrentPreview()">
           <option value="">Nenhuma</option>
-          ${boxOpts.map(b=>`<option value="${b.name}" ${o.boxType===b.name?'selected':''}>${b.name}</option>`).join('')}
+          ${boxOpts.map(b=>`<option value="${esc(b.name)}" ${esc(o.boxType===b.name?'selected':'')}>${esc(b.name)}</option>`).join('')}
         </select></div>
       </div>
       <div class="row2">
@@ -5862,7 +5908,7 @@ function updateCustomOrderPreview(){
     <div class="calc-line"><span>Custo material</span><span>${brl(c.materialCost)}</span></div>
     <div class="calc-line"><span>Custo energia</span><span>${brl(c.energyCost)}</span></div>
     <div class="calc-line"><span>Embalagem (${packagingLabelFor(form)})</span><span>${brl(c.embalagemCost)}</span></div>
-    <div class="calc-line"><span>Depreciação (${c.machine?c.machine.name:'sem impressora'})</span><span>${brl(c.depreciation)}</span></div>
+    <div class="calc-line"><span>Depreciação (${esc(c.machine?c.machine.name:'sem impressora')})</span><span>${brl(c.depreciation)}</span></div>
     <div class="calc-line"><span>Manutenção</span><span>${brl(c.maintenance)}</span></div>
     <div class="calc-line"><span>Mão de obra</span><span>${brl(c.laborCost)}</span></div>
     ${c.toolsCost>0 ? `<div class="calc-line"><span>Ferramentas</span><span>${brl(c.toolsCost)}</span></div>` : ''}
@@ -5916,12 +5962,12 @@ function exportCustomOrderPDF(id){
   if(!o) return;
   const c = calcProduct(o);
   const cuName = customerNameFor(o);
-  const filSummary = (o.filaments||[]).map(f=>`${f.materialName} ${num(f.weightG,0)}g`).join(' + ');
+  const filSummary = (o.filaments||[]).map(f=>`${esc(f.materialName)} ${num(f.weightG,0)}g`).join(' + ');
   const filFirst = (o.filaments||[])[0];
   const pageHeader = (title, tag) => `
     <div style="display:flex;align-items:center;justify-content:space-between;background:#1A1D23;color:#fff;padding:16px 20px;border-radius:10px 10px 0 0;">
       <div style="display:flex;align-items:center;gap:12px;">
-        <img src="${bizLogoSrc()}" alt="${bizName()}" style="width:40px;height:40px;object-fit:cover;border-radius:8px;">
+        <img src="${bizLogoSrc()}" alt="${esc(bizName())}" style="width:40px;height:40px;object-fit:cover;border-radius:8px;">
         <div>
           <div style="font-family:var(--font-display);font-weight:700;font-size:17px;">${title}</div>
           <div style="font-size:11px;color:#B9BEC9;">${tag==='cliente'?'Confira os dados abaixo antes de autorizarmos a impressão':'Uso interno — bancada, fatiador e registro de resultado'}</div>
@@ -5943,7 +5989,7 @@ function exportCustomOrderPDF(id){
         ${row(field('Pedido nº',o.orderNumber), field('Data',fmtDate(o.orderDate)), field('Cliente',cuName))}
         <div style="background:#FDF1EC;border-radius:10px;padding:16px 18px;margin:14px 0;">
           <div style="font-weight:700;font-size:12px;color:#BD4119;margin-bottom:2px;">O QUE SERÁ IMPRESSO <span style="font-weight:400;color:#8A8F9C;font-size:10.5px;">— confira letra por letra, depois de impresso não há como corrigir</span></div>
-          ${row(field('Produto',o.name), field('Quantidade',o.qty), field('Tamanho (mm)',o.sizeLabel))}
+          ${esc(row(field('Produto',o.name), field('Quantidade',o.qty), field('Tamanho (mm)',o.sizeLabel)))}
           ${row(field('Texto que vai na peça', (o.pieceText||'—').replace(/\n/g,'<br>')))}
           ${row(field('Cor da base',o.baseColor), field('Cor do texto/detalhe',o.detailColor), field('Acabamento',o.finish))}
         </div>
@@ -5964,7 +6010,7 @@ function exportCustomOrderPDF(id){
     <div class="catalog-summary" style="padding:0;">
       ${pageHeader('Ficha Técnica de Impressão','interno')}
       <div style="padding:22px 26px;">
-        ${row(field('Pedido nº',o.orderNumber), field('Produto / SKU',o.name), field('Data de impressão',fmtDate(o.printDate)))}
+        ${esc(row(field('Pedido nº',o.orderNumber), field('Produto / SKU',o.name), field('Data de impressão',fmtDate(o.printDate))))}
         ${sectionTitle(1,'Arquivo e licença')}
         ${row(field('Nome do arquivo',o.modelFileName), field('Origem',o.modelOrigin==='terceiro'?'Terceiro':'Próprio'), field('Licença',o.modelOrigin==='terceiro'?o.modelLicense:'—'))}
         ${o.modelOrigin==='terceiro' ? row(field('URL do modelo',o.modelSourceUrl)) : ''}
@@ -6042,10 +6088,10 @@ function renderMaterialsStock(){
       <div class="tbl-wrap tbl-responsive"><table>
         <thead><tr><th>Material</th><th class="right">Consumo médio/mês</th><th class="right">Estoque atual</th><th class="right">Comprar aprox.</th><th class="right">Custo estimado</th></tr></thead>
         <tbody>${suggestions.map(({m,s})=>`<tr>
-          <td data-label="Material">${m.name}</td>
-          <td class="right num" data-label="Consumo médio/mês">${num(s.monthly,m.unit==='un'?0:1)} ${m.unit}</td>
-          <td class="right num" data-label="Estoque atual">${num(m.stock,m.unit==='un'?0:1)} ${m.unit}</td>
-          <td class="right num" data-label="Comprar aprox." style="color:var(--amber)">${num(s.suggested,m.unit==='un'?0:1)} ${m.unit}</td>
+          <td data-label="Material">${esc(m.name)}</td>
+          <td class="right num" data-label="Consumo médio/mês">${num(s.monthly,m.unit==='un'?0:1)} ${esc(m.unit)}</td>
+          <td class="right num" data-label="Estoque atual">${num(m.stock,m.unit==='un'?0:1)} ${esc(m.unit)}</td>
+          <td class="right num" data-label="Comprar aprox." style="color:var(--amber)">${num(s.suggested,m.unit==='un'?0:1)} ${esc(m.unit)}</td>
           <td class="right num" data-label="Custo estimado">${brl(s.cost)}</td>
         </tr>`).join('')}</tbody>
       </table></div>
@@ -6059,7 +6105,7 @@ function renderMaterialsStock(){
   if(q && filtered.length===0) return searchBar + `<div class="card">${emptyState('Nenhum material encontrado')}</div>`;
   const cats = [...new Set(filtered.map(m=>m.category))];
   return searchBar + suggestionPanel + cats.map(cat=>`
-    <div class="section-title">${cat}</div>
+    <div class="section-title">${esc(cat)}</div>
     <div class="grid g-3">
       ${filtered.filter(m=>m.category===cat).map(m=>materialCard(m)).join('')}
     </div>
@@ -6073,23 +6119,23 @@ function materialCard(m){
     <div style="display:flex;justify-content:space-between;align-items:flex-start;">
       <div>
         <div style="font-weight:600;font-size:13.5px;display:flex;align-items:center;gap:6px;">
-          ${m.category==='Filamento' && m.colorName ? `<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:${m.color||'#ccc'};border:1px solid var(--line);flex:none;"></span>` : ''}
-          ${m.category==='Filamento' && m.isDualColor && m.colorName2 ? `<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:${m.color2||'#ccc'};border:1px solid var(--line);flex:none;margin-left:-8px;"></span>` : ''}
-          ${m.name}
+          ${m.category==='Filamento' && m.colorName ? `<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:${esc(m.color||'#ccc')};border:1px solid var(--line);flex:none;"></span>` : ''}
+          ${m.category==='Filamento' && m.isDualColor && m.colorName2 ? `<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:${esc(m.color2||'#ccc')};border:1px solid var(--line);flex:none;margin-left:-8px;"></span>` : ''}
+          ${esc(m.name)}
         </div>
-        <div style="color:var(--text-faint);font-size:11.5px;margin-top:2px;">${brl(m.costPerUnit)}/${m.unit}${m.category==='Filamento' && m.brand ? ` · ${m.brand}` : ''}${m.category==='Ferramentas' && m.toolType ? ` · ${m.toolType}` : ''}</div>
+        <div style="color:var(--text-faint);font-size:11.5px;margin-top:2px;">${brl(m.costPerUnit)}/${esc(m.unit)}${m.category==='Filamento' && m.brand ? ` · ${esc(m.brand)}` : ''}${m.category==='Ferramentas' && m.toolType ? ` · ${esc(m.toolType)}` : ''}</div>
         ${!(m.costPerUnit>0) ? `<div style="font-size:11px;color:var(--amber);margin-top:3px;" title="Todo produto que usa esse material está com o custo subestimado até você informar quanto pagou">⚠️ Sem preço cadastrado</div>` : ''}
       </div>
       ${stockBadge(m)}
     </div>
-    <div style="margin:12px 0 6px;font-family:var(--font-mono);font-size:20px;font-weight:600;">${num(m.stock,m.unit==='un'?0:1)} <span style="font-size:12px;color:var(--text-faint);font-weight:400;">${m.unit}</span></div>
+    <div style="margin:12px 0 6px;font-family:var(--font-mono);font-size:20px;font-weight:600;">${num(m.stock,m.unit==='un'?0:1)} <span style="font-size:12px;color:var(--text-faint);font-weight:400;">${esc(m.unit)}</span></div>
     <div class="progress"><div style="width:${p}%;background:${color};"></div></div>
-    <div style="font-size:11px;color:var(--text-faint);margin-top:5px;">Mínimo: ${num(m.lowStock,0)} ${m.unit}</div>
+    <div style="font-size:11px;color:var(--text-faint);margin-top:5px;">Mínimo: ${num(m.lowStock,0)} ${esc(m.unit)}</div>
     ${m.isBox && m.lengthCm>0 && m.widthCm>0 && m.heightCm>0 ? `<div style="font-size:11px;color:var(--text-faint);margin-top:2px;">Medidas internas: ${num(m.lengthCm,1)}×${num(m.widthCm,1)}×${num(m.heightCm,1)} cm</div>` : ''}
     ${(m.isEnvelope||m.isSaquinho) && m.lengthCm>0 && m.widthCm>0 ? `<div style="font-size:11px;color:var(--text-faint);margin-top:2px;">Medidas internas: ${num(m.lengthCm,1)}×${num(m.widthCm,1)} cm (até ${FLAT_PACKAGING_MAX_HEIGHT_CM}cm de altura)</div>` : ''}
     ${(m.isBubbleWrap||m.isTape) && m.widthCm>0 ? `<div style="font-size:11px;color:var(--text-faint);margin-top:2px;">Largura do rolo: ${num(m.widthCm,1)} cm</div>` : ''}
     ${m.category==='Ferramentas' && m.usefulLifeUses>0 ? `<div style="font-size:11px;color:var(--text-faint);margin-top:2px;">Vida útil estimada: ${num(m.usefulLifeUses,0)} usos</div>` : ''}
-    ${sugg ? `<div style="font-size:11px;color:var(--amber);margin-top:4px;">Sugestão: comprar ~${num(sugg.suggested,m.unit==='un'?0:1)} ${m.unit}</div>` : ''}
+    ${sugg ? `<div style="font-size:11px;color:var(--amber);margin-top:4px;">Sugestão: comprar ~${num(sugg.suggested,m.unit==='un'?0:1)} ${esc(m.unit)}</div>` : ''}
     <div style="margin-top:12px;display:flex;gap:8px;">
       <button class="btn sm" style="flex:1" onclick="openRestockModal('${m.id}')">Reabastecer</button>
       <button class="btn ghost sm" onclick="openMaterialModal('${m.id}')">Editar</button>
@@ -6123,7 +6169,7 @@ function renderFinishedStock(){
     else if(avgMonthly!=null) status = vendasDisp<avgMonthly ? `<span class="badge warn" title="Média de ${num(avgMonthly,1)} venda(s)/mês">Baixo p/ demanda</span>` : `<span class="badge ok">Ok</span>`;
     else status = vendasDisp<=3 ? `<span class="badge warn">Baixo</span>` : `<span class="badge ok">Ok</span>`;
     return `<tr>
-      <td data-label="Produto">${p.name}</td>
+      <td data-label="Produto">${esc(p.name)}</td>
       <td class="right num" data-label="Estoque">${num(p.stock,0)} peças${c.saleUnits>1?`<div style="font-size:10px;font-weight:400;color:var(--text-faint);white-space:nowrap;">${vendasDisp} venda${vendasDisp!==1?'s':''} disponíve${vendasDisp!==1?'is':'l'}${avgMonthly!=null?` (média ${num(avgMonthly,1)}/mês)`:''}</div>`:''}</td>
       <td class="right num" data-label="Custo unitário">${brl(unitCost)}</td>
       <td class="right num" data-label="Valor em estoque">${brl(p.stock*unitCost)}</td>
@@ -6154,7 +6200,7 @@ function deleteMaterial(id){
   if(m.category==='Ferramentas'){
     usedBy = usedBy.concat(state.products.filter(p=>!usedBy.includes(p) && (p.toolsUsed||[]).some(t=>t.toolId===m.id)));
   }
-  let msg = `Excluir "${m.name}" do estoque?`;
+  let msg = `Excluir "${esc(m.name)}" do estoque?`;
   if(m.isBubbleWrap){
     msg += ` Atenção: esse é o material marcado como plástico bolha — depois de excluir, nenhum produto vai ter custo de plástico bolha calculado até você marcar outro material com esse papel.`;
   }
@@ -6162,7 +6208,7 @@ function deleteMaterial(id){
     msg += ` Atenção: essa é a fita adesiva cadastrada — depois de excluir, nenhum produto vai ter custo de fita calculado até você marcar outro material com esse papel.`;
   }
   if(usedBy.length){
-    msg += ` ${usedBy.length} produto(s) usam esse material no cálculo de custo (${usedBy.map(p=>p.name).slice(0,3).join(', ')}${usedBy.length>3?'...':''}) — o custo deles vai ficar incorreto até você ajustar.`;
+    msg += ` ${usedBy.length} produto(s) usam esse material no cálculo de custo (${esc(usedBy.map(p=>p.name).slice(0,3).join(', '))}${usedBy.length>3?'...':''}) — o custo deles vai ficar incorreto até você ajustar.`;
   }
   if(!confirm(msg)) return;
   state.materials = state.materials.filter(x=>x.id!==id);
@@ -6176,52 +6222,52 @@ function openMaterialModal(id){
   const packagingType = m.isBox ? 'caixa' : m.isEnvelope ? 'envelope' : m.isSaquinho ? 'saquinho' : m.isBubbleWrap ? 'bolha' : m.isTape ? 'fita' : '';
   const hideName = m.category==='Filamento' || (m.category==='Embalagem' && packagingType==='caixa');
   showModal(editing?'Editar matéria-prima':'Nova matéria-prima', `
-    <div class="field" id="mNameField" style="display:${hideName?'none':'block'};"><label>Nome</label><input id="mName" value="${m.name}" placeholder="Ex: Envelope 15x25, Parafuso 3,5x40..."></div>
+    <div class="field" id="mNameField" style="display:${hideName?'none':'block'};"><label>Nome</label><input id="mName" value="${esc(m.name)}" placeholder="Ex: Envelope 15x25, Parafuso 3,5x40..."></div>
     <div class="row2">
       <div class="field"><label>Categoria</label><select id="mCat" onchange="onMaterialCategoryChange()">
-        ${['Filamento','Embalagem','Ferramentas','Componentes','Outros'].map(c=>`<option ${m.category===c?'selected':''}>${c}</option>`).join('')}
+        ${['Filamento','Embalagem','Ferramentas','Componentes','Outros'].map(c=>`<option ${esc(m.category===c?'selected':'')}>${esc(c)}</option>`).join('')}
       </select></div>
       <div class="field"><label>Unidade de estoque</label><select id="mUnit">
-        ${['g','kg','un','m'].map(u=>`<option ${m.unit===u?'selected':''}>${u}</option>`).join('')}
+        ${['g','kg','un','m'].map(u=>`<option ${esc(m.unit===u?'selected':'')}>${esc(u)}</option>`).join('')}
       </select></div>
     </div>
 
-    <div id="mFilamentBlock" style="display:${m.category==='Filamento'?'block':'none'};margin-bottom:12px;">
+    <div id="mFilamentBlock" style="display:${esc(m.category==='Filamento'?'block':'none')};margin-bottom:12px;">
       <div class="row2">
         <div class="field"><label>Material</label>
           <select id="mMaterialType" onchange="toggleNewMaterialTypeInput(this.value); updateFilamentNamePreview();">
             <option value="">Selecione...</option>
-            ${materialTypeSuggestions().map(t=>`<option value="${t}" ${m.materialType===t?'selected':''}>${t}</option>`).join('')}
-            <option value="__new__" ${m.materialType && !materialTypeSuggestions().includes(m.materialType)?'selected':''}>+ Novo material...</option>
+            ${materialTypeSuggestions().map(t=>`<option value="${esc(t)}" ${esc(m.materialType===t?'selected':'')}>${esc(t)}</option>`).join('')}
+            <option value="__new__" ${esc(m.materialType && !materialTypeSuggestions().includes(m.materialType)?'selected':'')}>+ Novo material...</option>
           </select>
-          <input id="mMaterialTypeNew" placeholder="Nome do novo material" style="margin-top:6px;display:${m.materialType && !materialTypeSuggestions().includes(m.materialType)?'block':'none'};" value="${m.materialType && !materialTypeSuggestions().includes(m.materialType)?m.materialType:''}" oninput="updateFilamentNamePreview()">
+          <input id="mMaterialTypeNew" placeholder="Nome do novo material" style="margin-top:6px;display:${esc(m.materialType && !materialTypeSuggestions().includes(m.materialType)?'block':'none')};" value="${esc(m.materialType && !materialTypeSuggestions().includes(m.materialType)?m.materialType:'')}" oninput="updateFilamentNamePreview()">
         </div>
         <div class="field"><label>Marca (opcional)</label>
           <select id="mBrand" onchange="toggleNewBrandInput(this.value)">
             <option value="">Sem marca</option>
-            ${brandSuggestions().map(b=>`<option value="${b}" ${m.brand===b?'selected':''}>${b}</option>`).join('')}
-            <option value="__new__" ${m.brand && !brandSuggestions().includes(m.brand)?'selected':''}>+ Nova marca...</option>
+            ${brandSuggestions().map(b=>`<option value="${esc(b)}" ${esc(m.brand===b?'selected':'')}>${esc(b)}</option>`).join('')}
+            <option value="__new__" ${esc(m.brand && !brandSuggestions().includes(m.brand)?'selected':'')}>+ Nova marca...</option>
           </select>
-          <input id="mBrandNew" placeholder="Nome da nova marca" style="margin-top:6px;display:${m.brand && !brandSuggestions().includes(m.brand)?'block':'none'};" value="${m.brand && !brandSuggestions().includes(m.brand)?m.brand:''}">
+          <input id="mBrandNew" placeholder="Nome da nova marca" style="margin-top:6px;display:${esc(m.brand && !brandSuggestions().includes(m.brand)?'block':'none')};" value="${esc(m.brand && !brandSuggestions().includes(m.brand)?m.brand:'')}">
         </div>
       </div>
       <div class="row2">
         <div class="field"><label>Cor</label>
           <div style="display:flex;gap:8px;align-items:center;">
             <input type="color" id="mColor" value="${m.color||'#cccccc'}" style="width:44px;padding:2px;height:36px;flex:none;" oninput="updateFilamentNamePreview()">
-            <input id="mColorName" placeholder="Nome da cor (ex: Vermelho)" value="${m.colorName||''}" oninput="updateFilamentNamePreview()">
+            <input id="mColorName" placeholder="Nome da cor (ex: Vermelho)" value="${esc(m.colorName||'')}" oninput="updateFilamentNamePreview()">
           </div>
         </div>
         <div class="field"><label class="field-checkbox"><input type="checkbox" id="mIsDualColor" ${m.isDualColor?'checked':''} onchange="document.getElementById('mColor2Block').style.display=this.checked?'flex':'none'; updateFilamentNamePreview();"> É bicolor</label></div>
       </div>
       <div id="mColor2Block" style="display:${m.isDualColor?'flex':'none'};gap:8px;align-items:center;margin-bottom:12px;">
         <input type="color" id="mColor2" value="${m.color2||'#cccccc'}" style="width:44px;padding:2px;height:36px;flex:none;" oninput="updateFilamentNamePreview()">
-        <input id="mColorName2" placeholder="Nome da 2ª cor" value="${m.colorName2||''}" oninput="updateFilamentNamePreview()" style="flex:1;">
+        <input id="mColorName2" placeholder="Nome da 2ª cor" value="${esc(m.colorName2||'')}" oninput="updateFilamentNamePreview()" style="flex:1;">
       </div>
-      <div class="field"><label>Nome do material (calculado)</label><input id="mFilamentNamePreview" value="${m.name||''}" disabled></div>
+      <div class="field"><label>Nome do material (calculado)</label><input id="mFilamentNamePreview" value="${esc(m.name||'')}" disabled></div>
     </div>
 
-    <div id="mRoleBlock" style="display:${m.category==='Embalagem'?'block':'none'};margin-bottom:12px;">
+    <div id="mRoleBlock" style="display:${esc(m.category==='Embalagem'?'block':'none')};margin-bottom:12px;">
       <div class="field"><label>Tipo de embalagem</label><select id="mPackagingType" onchange="onPackagingTypeChange()">
         <option value="">Selecione...</option>
         <option value="caixa" ${packagingType==='caixa'?'selected':''}>Caixa</option>
@@ -6233,7 +6279,7 @@ function openMaterialModal(id){
       <div id="mBoxDimsBlock" style="display:${packagingType==='caixa'?'block':'none'};margin:0 0 10px;">
         <div class="field"><label>Tamanho</label><select id="mBoxSize">
           <option value="">Selecione...</option>
-          ${['Pequena','Média','Grande'].map(s=>`<option value="${s}" ${m.name===('Caixa '+s)?'selected':''}>${s}</option>`).join('')}
+          ${['Pequena','Média','Grande'].map(s=>`<option value="${esc(s)}" ${esc(m.name===('Caixa '+s)?'selected':'')}>${esc(s)}</option>`).join('')}
         </select></div>
         <div class="row3">
           <div class="field"><label>Comprimento interno (cm)</label><input type="number" id="mLengthCm" value="${m.lengthCm||''}" step="0.1" placeholder="opcional"></div>
@@ -6253,15 +6299,15 @@ function openMaterialModal(id){
       </div>
     </div>
 
-    <div id="mToolBlock" style="display:${m.category==='Ferramentas'?'block':'none'};margin-bottom:12px;">
+    <div id="mToolBlock" style="display:${esc(m.category==='Ferramentas'?'block':'none')};margin-bottom:12px;">
       <div class="row2">
         <div class="field"><label>Tipo de ferramenta</label>
           <select id="mToolType" onchange="toggleNewToolTypeInput(this.value)">
             <option value="">Selecione...</option>
-            ${toolTypeSuggestions().map(t=>`<option value="${t}" ${m.toolType===t?'selected':''}>${t}</option>`).join('')}
-            <option value="__new__" ${m.toolType && !toolTypeSuggestions().includes(m.toolType)?'selected':''}>+ Novo tipo...</option>
+            ${toolTypeSuggestions().map(t=>`<option value="${esc(t)}" ${esc(m.toolType===t?'selected':'')}>${esc(t)}</option>`).join('')}
+            <option value="__new__" ${esc(m.toolType && !toolTypeSuggestions().includes(m.toolType)?'selected':'')}>+ Novo tipo...</option>
           </select>
-          <input id="mToolTypeNew" placeholder="Nome do novo tipo" style="margin-top:6px;display:${m.toolType && !toolTypeSuggestions().includes(m.toolType)?'block':'none'};" value="${m.toolType && !toolTypeSuggestions().includes(m.toolType)?m.toolType:''}">
+          <input id="mToolTypeNew" placeholder="Nome do novo tipo" style="margin-top:6px;display:${esc(m.toolType && !toolTypeSuggestions().includes(m.toolType)?'block':'none')};" value="${esc(m.toolType && !toolTypeSuggestions().includes(m.toolType)?m.toolType:'')}">
         </div>
         <div class="field"><label>Vida útil estimada (usos)</label><input type="number" id="mUsefulLifeUses" value="${m.usefulLifeUses||''}" step="1" placeholder="Ex: 50"></div>
       </div>
@@ -6273,8 +6319,8 @@ function openMaterialModal(id){
     </div>
     <div class="field"><label>Custo unitário calculado</label><input id="mUnitCost" value="${brl(m.costPerUnit)}" disabled></div>
     <div class="row2">
-      <div class="field"><label>Estoque atual</label><input type="number" id="mStock" value="${qtyInputValue(m.stock, m.unit)}" step="${stepForUnit(m.unit)}" min="0"></div>
-      <div class="field"><label>Estoque mínimo (alerta)</label><input type="number" id="mLow" value="${qtyInputValue(m.lowStock, m.unit)}" step="${stepForUnit(m.unit)}" min="0"></div>
+      <div class="field"><label>Estoque atual</label><input type="number" id="mStock" value="${esc(qtyInputValue(m.stock, m.unit))}" step="${esc(stepForUnit(m.unit))}" min="0"></div>
+      <div class="field"><label>Estoque mínimo (alerta)</label><input type="number" id="mLow" value="${esc(qtyInputValue(m.lowStock, m.unit))}" step="${esc(stepForUnit(m.unit))}" min="0"></div>
     </div>
     ${!editing ? `<label class="field-checkbox" style="margin:-6px 0 12px;"><input type="checkbox" id="mAddInvestment" style="width:auto;" checked> Registrar essa compra como investimento em Anual</label>` : ''}
     <div class="modal-actions">
@@ -6400,7 +6446,7 @@ function confirmMaterial(id){
     }
   }
   const dup = state.materials.find(x=>x.id!==id && x.name.trim().toLowerCase()===name.toLowerCase());
-  if(dup){ toast(`Já existe uma matéria-prima chamada "${dup.name}" — use outro nome`,'err'); return; }
+  if(dup){ toast(`Já existe uma matéria-prima chamada "${esc(dup.name)}" — use outro nome`,'err'); return; }
   const purchasePrice = parseFloat(document.getElementById('mPPrice').value)||0;
   const purchaseQty = parseFloat(document.getElementById('mPQty').value)||1;
   // Arredonda conforme a unidade: 'un' é contável, não guarda 24,01 caixas.
@@ -6457,7 +6503,7 @@ function confirmMaterial(id){
       (p.filaments||[]).some(f=>f.materialName===name) || p.boxType===name || (isBubbleWrap && (p.bubbleWrapM||0)>0) || (isTape && (p.tapeM||0)>0)
     ).filter(p=>{ const c = calcProduct(p); return c.marginPct < c.desiredMarginPct; });
     if(affected.length){
-      marginMsg = ` — atenção: ${affected.length} produto(s) ficaram com margem abaixo do desejado (${affected.slice(0,3).map(p=>p.name).join(', ')})`;
+      marginMsg = ` — atenção: ${affected.length} produto(s) ficaram com margem abaixo do desejado (${esc(affected.slice(0,3).map(p=>p.name).join(', '))})`;
     }
   }
   toast((id?'Matéria-prima atualizada':'Matéria-prima criada') + investMsg + marginMsg, marginMsg?'err':'');
@@ -6465,9 +6511,9 @@ function confirmMaterial(id){
 }
 function openRestockModal(id){
   const m = state.materials.find(x=>x.id===id);
-  showModal(`Reabastecer: ${m.name}`, `
-    <div class="field"><label>Estoque atual</label><input value="${num(m.stock,1)} ${m.unit}" disabled></div>
-    <div class="field"><label>Quantidade a adicionar (${m.unit})</label><input type="number" id="rQty" step="${stepForUnit(m.unit)}" min="0" placeholder="Ex: ${m.purchaseQty}"></div>
+  showModal(`Reabastecer: ${esc(m.name)}`, `
+    <div class="field"><label>Estoque atual</label><input value="${num(m.stock,1)} ${esc(m.unit)}" disabled></div>
+    <div class="field"><label>Quantidade a adicionar (${esc(m.unit)})</label><input type="number" id="rQty" step="${esc(stepForUnit(m.unit))}" min="0" placeholder="Ex: ${m.purchaseQty}"></div>
     <div class="field"><label>Custo total da compra (opcional — recalcula custo unitário)</label><input type="number" id="rCost" step="0.01" placeholder="Ex: ${m.purchasePrice}"></div>
     <label class="field-checkbox" style="margin:-6px 0 12px;"><input type="checkbox" id="rAddInvestment" style="width:auto;" checked> Também registrar como investimento em Anual (se informar o custo acima)</label>
     <div class="modal-actions">
@@ -6493,7 +6539,7 @@ function confirmRestock(id){
     // investimento também, some do Caixa/Anual (motivo real do pedido).
     if(document.getElementById('rAddInvestment').checked){
       if(!state.settings.investments) state.settings.investments = [];
-      state.settings.investments.push({ id:uid(), name:`Reabastecimento: ${m.name}`, value:cost, date: todayStr(), paymentType:'avista', category: m.category });
+      state.settings.investments.push({ id:uid(), name:`Reabastecimento: ${esc(m.name)}`, value:cost, date: todayStr(), paymentType:'avista', category: m.category });
       saveSettings();
       investMsg = ' — registrado como investimento em Anual';
     }
@@ -6546,7 +6592,7 @@ function renderCaixa(){
       ${b.rows.length ? `<div class="tbl-wrap tbl-responsive"><table>
         <thead><tr><th>Impressora</th><th class="right">Parcela mensal</th><th class="right">Parcelas restantes</th><th class="right">Total a pagar</th><th class="right">Status ${monthLabel(currentMonth)}</th></tr></thead>
         <tbody>
-          ${b.rows.map(r=>`<tr><td data-label="Impressora">${r.machine.name||'(sem nome)'}</td><td class="right num" data-label="Parcela mensal">${brl(r.parcela)}</td><td class="right num" data-label="Parcelas restantes">${r.restantes}</td><td class="right num" data-label="Total a pagar">${brl(r.totalPagar)}</td><td class="right" data-label="Status">${r.naoConfigurada?'<span class="badge mut">Não configurada</span>':r.quitada?'<span class="badge ok">Quitada</span>':r.dueThisMonth?'<span class="badge info">Devida este mês</span>':'<span class="badge mut">Fora do período</span>'}</td></tr>`).join('')}
+          ${b.rows.map(r=>`<tr><td data-label="Impressora">${esc(r.machine.name||'(sem nome)')}</td><td class="right num" data-label="Parcela mensal">${brl(r.parcela)}</td><td class="right num" data-label="Parcelas restantes">${r.restantes}</td><td class="right num" data-label="Total a pagar">${brl(r.totalPagar)}</td><td class="right" data-label="Status">${r.naoConfigurada?'<span class="badge mut">Não configurada</span>':r.quitada?'<span class="badge ok">Quitada</span>':r.dueThisMonth?'<span class="badge info">Devida este mês</span>':'<span class="badge mut">Fora do período</span>'}</td></tr>`).join('')}
           ${b.rows.length>1 ? `<tr><td style="font-weight:600;" data-label="Total">Total</td><td class="right num" style="font-weight:600;" data-label="Parcela mensal">${brl(b.rows.reduce((a,r)=>a+r.parcela,0))}</td><td></td><td class="right num" style="font-weight:600;" data-label="Total a pagar">${brl(b.totalPagar)}</td><td></td></tr>` : ''}
         </tbody>
       </table></div>` : emptyState('Nenhuma impressora cadastrada ainda')}
@@ -6567,7 +6613,7 @@ function renderCaixa(){
         const isAutoPct = g.autoMode==='pct_profit' && g.autoPct>0;
         return `<div class="card">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;">
-            <div style="font-weight:600;font-size:13px;">${g.name}</div>
+            <div style="font-weight:600;font-size:13px;">${esc(g.name)}</div>
             ${isDepreciation?'<span class="badge info" title="Recebe automaticamente parte do custo de cada venda">Auto</span>':''}
             ${isAutoPct?`<span class="badge info" title="Recebe ${g.autoPct}% do lucro de cada venda automaticamente">Auto ${g.autoPct}%</span>`:''}
           </div>
@@ -6607,7 +6653,7 @@ function breakdownTable(items, ym){
     ${items.map(i=>{
       const futuro = ym && i.startMonth && i.startMonth > ym;
       return `<tr${futuro?' style="opacity:.5;"':''}>
-        <td>${i.name}${futuro?` <span class="sub">a partir de ${monthLabel(i.startMonth)}</span>`:''}</td>
+        <td>${esc(i.name)}${futuro?` <span class="sub">a partir de ${monthLabel(i.startMonth)}</span>`:''}</td>
         <td class="right num">${futuro ? '—' : brl(i.value)}</td>
       </tr>`;
     }).join('')}
@@ -6681,10 +6727,10 @@ function renderConfiguracoes(){
 
     <div class="section-title">PIX</div>
     <div class="card">
-      <div class="field"><label>Chave PIX</label><input id="cfgPixKey" value="${s.pixKey||''}" placeholder="CPF/CNPJ, e-mail, telefone ou chave aleatória"></div>
+      <div class="field"><label>Chave PIX</label><input id="cfgPixKey" value="${esc(s.pixKey||'')}" placeholder="CPF/CNPJ, e-mail, telefone ou chave aleatória"></div>
       <div class="row2">
-        <div class="field"><label>Nome do recebedor</label><input id="cfgPixName" value="${s.pixMerchantName||''}" maxlength="25"></div>
-        <div class="field"><label>Cidade</label><input id="cfgPixCity" value="${s.pixMerchantCity||''}" maxlength="15"></div>
+        <div class="field"><label>Nome do recebedor</label><input id="cfgPixName" value="${esc(s.pixMerchantName||'')}" maxlength="25"></div>
+        <div class="field"><label>Cidade</label><input id="cfgPixCity" value="${esc(s.pixMerchantCity||'')}" maxlength="15"></div>
       </div>
       <div class="field hint" style="margin-top:-8px;">Preencha pra poder gerar cobrança PIX (QR Code + copia e cola) direto na hora de registrar uma venda.</div>
     </div>
@@ -6692,8 +6738,8 @@ function renderConfiguracoes(){
     <div class="section-title">Contato (aparece no catálogo)</div>
     <div class="card">
       <div class="row2">
-        <div class="field"><label>WhatsApp</label><input id="cfgWhatsapp" value="${s.whatsapp||''}" placeholder="(11) 99999-9999"></div>
-        <div class="field"><label>Instagram</label><input id="cfgInstagram" value="${s.instagram||''}" placeholder="seu.usuario (sem @)"></div>
+        <div class="field"><label>WhatsApp</label><input id="cfgWhatsapp" value="${esc(s.whatsapp||'')}" placeholder="(11) 99999-9999"></div>
+        <div class="field"><label>Instagram</label><input id="cfgInstagram" value="${esc(s.instagram||'')}" placeholder="seu.usuario (sem @)"></div>
       </div>
     </div>
 
@@ -6761,7 +6807,7 @@ function renderReserveRows(){
   if(!el) return;
   el.innerHTML = editingReserveGoals.map((g,i)=>`
     <div class="row3" style="align-items:end;">
-      <div class="field"><label>${i===0?'Nome':''}</label><input value="${g.name}" oninput="editingReserveGoals[${i}].name=this.value"></div>
+      <div class="field"><label>${i===0?'Nome':''}</label><input value="${esc(g.name)}" oninput="editingReserveGoals[${i}].name=this.value"></div>
       <div class="field"><label>${i===0?'Meta mensal (R$)':''}</label><input type="number" value="${g.goal}" step="0.01" placeholder="meta mensal R$" oninput="editingReserveGoals[${i}].goal=parseFloat(this.value)||0"></div>
       ${g.autoMode==='cost_depreciation'
         ? `<div class="field"><label>${i===0?'Alocação automática':''}</label><input value="Automático — via custo de depreciação" disabled></div>`
@@ -6779,7 +6825,7 @@ function addReserveRow(){
 function removeReserveRow(i){
   if(editingReserveGoals[i].autoMode==='cost_depreciation') return;
   const removed = editingReserveGoals[i];
-  if(removed.balance>0 && !confirm(`"${removed.name}" tem ${brl(removed.balance)} guardado. Remover mesmo assim? Esse saldo deixa de aparecer em Caixa (não é devolvido a lugar nenhum).`)) return;
+  if(removed.balance>0 && !confirm(`"${esc(removed.name)}" tem ${brl(removed.balance)} guardado. Remover mesmo assim? Esse saldo deixa de aparecer em Caixa (não é devolvido a lugar nenhum).`)) return;
   editingReserveGoals.splice(i,1);
   renderReserveRows();
 }
@@ -6790,7 +6836,7 @@ function renderMarketGroupRows(){
   el.innerHTML = editingMarketGroups.map((g,i)=>`
     <div class="card" style="margin-bottom:10px;padding:12px 14px;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-        <div style="font-weight:600;font-size:13px;">${g.category}</div>
+        <div style="font-weight:600;font-size:13px;">${esc(g.category)}</div>
         <button class="btn ghost sm" title="Remover" onclick="removeMarketGroupRow(${i})">Remover</button>
       </div>
       <div class="row3">
@@ -6820,7 +6866,7 @@ function renderMarketGroupRows(){
 function removeMarketGroupRow(i){
   const g = editingMarketGroups[i];
   const stillInUse = productCategorySuggestions().includes(g.category);
-  if(stillInUse && !confirm(`"${g.category}" ainda é usada por algum produto — remover só apaga a faixa de preço cadastrada (a categoria continua existindo, e essa linha volta vazia se você reabrir Configurações). Continuar?`)) return;
+  if(stillInUse && !confirm(`"${esc(g.category)}" ainda é usada por algum produto — remover só apaga a faixa de preço cadastrada (a categoria continua existindo, e essa linha volta vazia se você reabrir Configurações). Continuar?`)) return;
   editingMarketGroups.splice(i,1);
   renderMarketGroupRows();
 }
@@ -6853,7 +6899,7 @@ function renderMachineRows(){
   el.innerHTML = editingMachines.length ? editingMachines.map((m,i)=>`
     <div class="card" style="margin-bottom:10px;padding:14px 16px;">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;">
-        <input value="${m.name}" placeholder="Nome da impressora" oninput="editingMachines[${i}].name=this.value" style="font-weight:600;">
+        <input value="${esc(m.name)}" placeholder="Nome da impressora" oninput="editingMachines[${i}].name=this.value" style="font-weight:600;">
         <button class="btn ghost sm" title="Remover" onclick="removeMachineRow(${i})">Remover</button>
       </div>
       <div class="row3">
@@ -6881,7 +6927,7 @@ function openMaintenanceModal(machineId){
   const m = (state.settings.machines||[]).find(x=>x.id===machineId);
   if(!m) return;
   const log = (m.maintenanceLog||[]).slice().sort((a,b)=>b.date.localeCompare(a.date));
-  showModal(`Manutenção — ${m.name}`, `
+  showModal(`Manutenção — ${esc(m.name)}`, `
     <div class="row2">
       <div class="field"><label>Data</label><input type="date" id="mtDate" value="${todayStr()}"></div>
       <div class="field"><label>Custo (R$, opcional)</label><input type="number" id="mtCost" step="0.01" value="0"></div>
@@ -6929,7 +6975,7 @@ function addMachineRow(){
 function removeMachineRow(i){
   const m = editingMachines[i];
   const usedBy = state.products.filter(p=>p.machineId===m.id);
-  if(usedBy.length && !confirm(`${usedBy.length} produto(s) usam "${m.name}" (${usedBy.slice(0,3).map(p=>p.name).join(', ')}${usedBy.length>3?'...':''}). Ao remover, eles passam a usar a primeira impressora da lista pro cálculo de custo. Continuar?`)) return;
+  if(usedBy.length && !confirm(`${usedBy.length} produto(s) usam "${esc(m.name)}" (${esc(usedBy.slice(0,3).map(p=>p.name).join(', '))}${usedBy.length>3?'...':''}). Ao remover, eles passam a usar a primeira impressora da lista pro cálculo de custo. Continuar?`)) return;
   editingMachines.splice(i,1);
   renderMachineRows();
 }
@@ -6945,7 +6991,7 @@ function renderNameValueRows(containerId, list, updateFn, removeFn){
     ['Nome','Valor mensal','A partir de'],
     list.map((item,i)=>`
     <div class="form-row">
-      <input value="${item.name}" placeholder="Nome" oninput="${updateFn}(${i},'name',this.value)">
+      <input value="${esc(item.name)}" placeholder="Nome" oninput="${updateFn}(${i},'name',this.value)">
       <input type="number" step="0.01" min="0" value="${item.value}" placeholder="R$" oninput="${updateFn}(${i},'value',this.value)">
       <input type="month" value="${item.startMonth||''}" title="Mês da primeira cobrança — em branco vale desde sempre" onchange="${updateFn}(${i},'startMonth',this.value)">
       ${formRowX(`${removeFn}(${i})`)}
@@ -7036,7 +7082,7 @@ function renderPlatformRows(){
     const otherTemplateOptions = canHaveListing ? editingPlatforms.filter((op,oi)=>oi!==i && op.listingTemplate && !/mercado\s*livre/i.test(op.name) && !(/shopee/i.test(op.name)&&op.tiers)) : [];
     return `
     <div class="form-row" style="margin-bottom:4px;">
-      <input value="${p.name}" oninput="editingPlatforms[${i}].name=this.value">
+      <input value="${esc(p.name)}" oninput="editingPlatforms[${i}].name=this.value">
       ${formRowX(`removePlatformRow(${i})`)}
     </div>
     ${isML ? mlCategoryTable(i) : ''}
@@ -7045,12 +7091,12 @@ function renderPlatformRows(){
       <div class="field"><label>Taxa %</label><input type="number" step="0.01" value="${p.pct}" oninput="editingPlatforms[${i}].pct=parseFloat(this.value)||0"></div>
       <div class="field"><label>Taxa fixa por unidade vendida (R$)</label><input type="number" step="0.01" value="${p.fixed}" oninput="editingPlatforms[${i}].fixed=parseFloat(this.value)||0"></div>
     </div>` : ''}
-    ${canHaveListing ? `<div class="field" style="margin-bottom:12px;"><label>Aba de Anúncios pra "${p.name}"</label>
+    ${canHaveListing ? `<div class="field" style="margin-bottom:12px;"><label>Aba de Anúncios pra "${esc(p.name)}"</label>
       <select onchange="editingPlatforms[${i}].listingTemplate=this.value||null; renderPlatformRows();">
         <option value="">Sem aba de Anúncios (só taxa pra Vendas)</option>
         <option value="ml" ${p.listingTemplate==='ml'?'selected':''}>Copiar campos do Mercado Livre</option>
         <option value="shopee" ${p.listingTemplate==='shopee'?'selected':''}>Copiar campos da Shopee</option>
-        ${otherTemplateOptions.map(op=>`<option value="${op.id}" ${p.listingTemplate===op.id?'selected':''}>Copiar campos de "${op.name}"</option>`).join('')}
+        ${otherTemplateOptions.map(op=>`<option value="${op.id}" ${p.listingTemplate===op.id?'selected':''}>Copiar campos de "${esc(op.name)}"</option>`).join('')}
       </select>
       <div class="field hint" style="margin-top:4px;">${p.listingTemplate?'Produtos ganha um preço próprio pra essa plataforma, e Anúncios ganha uma aba com os mesmos campos da plataforma copiada.':'Sem aba de Anúncios, essa plataforma entra só no cálculo de taxa das vendas.'}</div>
     </div>` : ''}
@@ -7072,7 +7118,7 @@ function mlCategoryTable(platIndex){
   const linhas = visiveis.map(c=>`
     <tr>
       <td data-label="Categoria" style="min-width:150px;">
-        <input value="${c.nome}" style="width:100%;min-width:0;" oninput="updateMlCategory('${c.id}','nome',this.value)">
+        <input value="${esc(c.nome)}" style="width:100%;min-width:0;" oninput="updateMlCategory('${c.id}','nome',this.value)">
         <div style="margin-top:4px;">${selo(c)}</div>
       </td>
       <td data-label="Clássico" class="right">
@@ -7291,7 +7337,7 @@ function openCloseMonthModal(){
   const { plan, leftover } = previewCloseMonth(currentMonth);
   const rows = plan.map(({goal,alreadyForGoal,need,toAllocate})=>`
     <tr>
-      <td data-label="Reserva">${goal.name}</td>
+      <td data-label="Reserva">${esc(goal.name)}</td>
       <td class="right num" data-label="Já alimentado" style="color:var(--text-faint)">${brl(alreadyForGoal)}</td>
       <td class="right num" data-label="Falta p/ meta" style="color:var(--text-faint)">${brl(need)}</td>
       <td class="right num" data-label="Vai alocar agora" style="color:${toAllocate>0?'var(--green)':'var(--text-faint)'}">${brl(toAllocate)}</td>
@@ -7318,7 +7364,7 @@ function confirmCloseMonth(){
 }
 function openReserveModal(id){
   const g = state.settings.reserveGoals.find(x=>x.id===id);
-  showModal(`Movimentar: ${g.name}`, `
+  showModal(`Movimentar: ${esc(g.name)}`, `
     <div class="field"><label>Saldo acumulado atual</label><input value="${brl(g.balance)}" disabled></div>
     <div class="field"><label>Valor a adicionar (use negativo para retirar)</label><input type="number" id="resDelta" step="0.01" placeholder="Ex: ${g.goal || 100}"></div>
     <div class="modal-actions">
@@ -7473,7 +7519,7 @@ function openOnboardingModal(){
 function syncStatusLabel(){
   if(!syncStatus.configured) return '☁️ Sincronizar entre dispositivos';
   if(!syncStatus.email) return '☁️ Fazer login na sincronização';
-  return `☁️ ${syncStatus.email}`;
+  return `☁️ ${esc(syncStatus.email)}`;
 }
 function openSyncModal(){
   if(!syncStatus.configured){
@@ -7534,7 +7580,7 @@ alter publication supabase_realtime add table app_data;</textarea>
   // que faz sentido pra quem assina — de qual conta está logado e como sair.
   const embutido = hasEmbeddedBackend();
   showModal('Sincronização', `
-    <div class="field">Conectado como <strong>${syncStatus.email}</strong>. Os dados são compartilhados entre todos os dispositivos onde você fizer login com essa conta.</div>
+    <div class="field">Conectado como <strong>${esc(syncStatus.email)}</strong>. Os dados são compartilhados entre todos os dispositivos onde você fizer login com essa conta.</div>
     ${embutido ? '' : `
     <div class="field hint" style="margin-top:-4px;">Se você conectou esse projeto antes desta versão, as mudanças de outro dispositivo só aparecem depois de recarregar a página. Pra ativar a atualização automática, rode uma vez no <strong>SQL Editor</strong> do seu projeto Supabase:</div>
     <textarea readonly style="width:100%;height:32px;font-family:var(--font-mono);font-size:10px;margin:0 0 12px;resize:vertical;" onclick="this.select()">alter publication supabase_realtime add table app_data;</textarea>`}

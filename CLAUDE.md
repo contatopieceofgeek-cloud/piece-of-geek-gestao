@@ -101,6 +101,22 @@ Todos os grids (`.g-2`…`.g-5`, `.row2`, `.row3`) usam `minmax(0,1fr)`. `1fr` s
 
 `.card` é coluna flex, e `.card-actions` (`margin-top:auto`) gruda o rodapé de botões embaixo — é o que faz dois cartões lado a lado terem os botões na mesma linha. `align-items:start` num grid é opt-out consciente: sobrou só nos quadros Kanban (Pedidos, Personalizados), onde as colunas não têm fundo e esticar não mudaria nada.
 
+## ⚠️ Escape: todo texto do usuário passa por `esc()`
+
+O app monta HTML com template string e joga no `innerHTML`. **Sem escapar, o que o usuário digita vira MARCAÇÃO** — um produto chamado `<img src=x onerror=...>` executava script ao abrir a aba Produtos (verificado, não era teórico). Não é só "ataca a si mesmo": importar backup aceita arquivo de qualquer origem e valida só o formato, e com a sincronização ligada o token da sessão fica no `localStorage`, ao alcance do script injetado.
+
+Três funções, e a escolha depende de ONDE o valor cai:
+
+- **`esc(v)`** — conteúdo e atributo. Escapa `& < > "`. A apóstrofe fica, que é legítima em português (D'Ávila) — por isso **atributo tem que usar aspas duplas**.
+- **`safeUrl(v)`** — qualquer `href`. Escapar aspas não basta ali: `javascript:alert(1)` não tem aspa nenhuma. Só passa `http(s)`/`mailto`; sem esquema assume `https://`; o resto vira link morto.
+- **`escJs(v)`** — texto que entra numa string JS dentro de `onclick="fn('...')"`, onde a apóstrofe fecha o argumento.
+
+⚠️ **Nunca envolva em `esc()` uma expressão que PRODUZ HTML.** Já aconteceu duas vezes ao aplicar em massa: `esc(materialCard(m))` e `esc(renderListingLinkField(...))` fizeram a tela mostrar a marcação como texto. Função que devolve HTML escapa por dentro; quem chama não escapa de novo. Pelo mesmo motivo, `packagingLabelFor()`/`componentsLabelFor()` escapam na origem — o retorno delas é texto de exibição, usado direto em template.
+
+Teste de regressão (o que provou a correção): sujar TODO campo de texto de TODO objeto do `state` com cinco cargas diferentes (`<img onerror>`, quebra de atributo com `"` e com `'`, `<svg onload>`, `javascript:`), percorrer as 14 abas e os modais, dar `focus`/`mouseover` em tudo, e contar execuções — tem que dar **zero**, com zero tag injetada e zero `href` `javascript:`. Depois, conferir o contrário: um nome como `Suporte "Pro" & Cia — 15" (ação)` precisa aparecer **exato**, sem `&amp;` na tela.
+
+O `<meta>` CSP em `app/index.html` é a segunda camada. `script-src` ainda precisa de `'unsafe-inline'` porque o app inteiro usa `onclick=` no HTML — tirar isso exige trocar todos os handlers por `addEventListener`, e só então o CSP passa a barrar injeção de verdade. `frame-ancestors` e `X-Frame-Options` **não funcionam em `<meta>`** (o navegador ignora e avisa no console); moram em `_headers`, formato do Netlify.
+
 ## Formulários: um jeito só de desenhar campo e linha
 
 **A aparência de campo é global, não presa ao `.field`.** Antes só `.field input` era estilizado, e as ~10 listas repetíveis do app montam inputs soltos dentro de um grid próprio — ficavam com a aparência crua do navegador ao lado de campos estilizados. Era essa a origem de "as caixas parecem aleatórias". O seletor hoje cobre `input`/`select`/`textarea` em qualquer lugar, com exceção explícita de `checkbox`/`radio`/`color`/`file`/`button`/`hidden`, que têm desenho próprio e virariam caixas de largura total.
