@@ -101,6 +101,19 @@ Todos os grids (`.g-2`…`.g-5`, `.row2`, `.row3`) usam `minmax(0,1fr)`. `1fr` s
 
 `.card` é coluna flex, e `.card-actions` (`margin-top:auto`) gruda o rodapé de botões embaixo — é o que faz dois cartões lado a lado terem os botões na mesma linha. `align-items:start` num grid é opt-out consciente: sobrou só nos quadros Kanban (Pedidos, Personalizados), onde as colunas não têm fundo e esticar não mudaria nada.
 
+## Números: nenhum campo aceita negativo
+
+Peso, tempo, preço, quantidade, percentual, estoque — nada neste app pode ser negativo, e o motor não se defendia: peso de −100g gerava custo de −R$8,70 e preço sugerido de −R$21,76, sem um aviso.
+
+⚠️ **`min="0"` no HTML não trava nada sozinho.** Ele impede a setinha de descer e marca o campo como inválido, mas quem DIGITA "−100" ainda entrega −100 pro `parseFloat` — o app lê `.value` direto, nunca passa por validação de formulário. Verificado. Os dois juntos é que fecham: o atributo pra avisar, o leitor pra travar.
+
+- **`numField(id, padrao)`** — campo com id, no lugar de `parseFloat(getElementById(id).value)||0`.
+- **`nn(valor, padrao)`** — valor solto, pras linhas repetíveis, que escrevem no array direto pelo `oninput` (`editingFilaments[2].weightG = nn(this.value)`) sem passar por id.
+
+Quantidade usa `Math.max(1, ...)`, não `nn()` — zero kit vendido ou zero peça impressa não é entrada válida, é engano.
+
+Ao aplicar em massa, cuidado com o guard: verificar `min=` pula linhas em que o `oninput` contém `.min=` (`editingMarketGroups[0].min=...`). Use `\smin="`, a forma de atributo.
+
 ## ⚠️ Escape: todo texto do usuário passa por `esc()`
 
 O app monta HTML com template string e joga no `innerHTML`. **Sem escapar, o que o usuário digita vira MARCAÇÃO** — um produto chamado `<img src=x onerror=...>` executava script ao abrir a aba Produtos (verificado, não era teórico). Não é só "ataca a si mesmo": importar backup aceita arquivo de qualquer origem e valida só o formato, e com a sincronização ligada o token da sessão fica no `localStorage`, ao alcance do script injetado.

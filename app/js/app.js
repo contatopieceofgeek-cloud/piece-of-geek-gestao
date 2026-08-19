@@ -62,13 +62,35 @@ function escJs(v){
   return String(v).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;')
     .replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\r?\n/g, ' ');
 }
+/* Leitura de campo numérico que NÃO pode ser negativo — que é o caso de
+   todos eles neste app: peso, tempo, preço, quantidade, percentual, estoque.
+
+   `min="0"` no HTML não resolve sozinho: ele impede a setinha de descer e
+   marca o campo como inválido, mas quem DIGITA "-100" ainda entrega -100 pro
+   parseFloat. E aí o motor propaga: peso de -100g gerava custo de -R$8,70 e
+   preço sugerido de -R$21,76, sem um aviso sequer. Os dois juntos é que
+   fecham — o atributo pra avisar, este leitor pra travar. */
+/* Mesma trava, pra valor que chega solto — as linhas repetíveis escrevem
+   direto no array pelo oninput (`editingFilaments[2].weightG = ...`), sem
+   passar por getElementById. */
+function nn(v, padrao){
+  const n = parseFloat(v);
+  return isFinite(n) ? Math.max(0, n) : (padrao || 0);
+}
+function numField(id, padrao){
+  const el = document.getElementById(id);
+  if(!el) return padrao || 0;
+  const v = parseFloat(el.value);
+  if(!isFinite(v)) return padrao || 0;
+  return Math.max(0, v);
+}
 const isCountableUnit = (unit) => unit === 'un';
 const stepForUnit = (unit) => isCountableUnit(unit) ? '1' : '0.01';
 const roundQty = (n, unit) => {
   const v = (typeof n==='number' && isFinite(n)) ? n : 0;
   return isCountableUnit(unit) ? Math.round(v) : Math.round(v*100)/100;
 };
-// Valor pronto pra ir num <input type="number"> (ponto decimal, sem lixo).
+// Valor pronto pra ir num <input type="number" min="0"> (ponto decimal, sem lixo).
 const qtyInputValue = (n, unit) => String(roundQty(n, unit));
 const monthLabel = (ym) => { const [y,m]=ym.split('-'); return new Date(y,m-1,1).toLocaleDateString('pt-BR',{month:'long',year:'numeric'}); };
 function monthDiff(fromYm, toYm){
@@ -1394,7 +1416,7 @@ function renderMonthlyGoalCard(a){
 function openGoalModal(){
   showModal('Meta de faturamento mensal', `
     <div class="field hint" style="margin-bottom:12px;">Quanto você quer faturar por mês. O Dashboard compara isso com o quanto já faturou e quanto do mês já passou, pra saber se está no ritmo.</div>
-    <div class="field"><label>Meta de faturamento (R$)</label><input type="number" id="goalInput" value="${state.settings.monthlyGoal||0}" step="50"></div>
+    <div class="field"><label>Meta de faturamento (R$)</label><input type="number" min="0" id="goalInput" value="${state.settings.monthlyGoal||0}" step="50"></div>
     <div class="modal-actions">
       <button class="btn ghost" onclick="closeModal()">Cancelar</button>
       <button class="btn primary" onclick="confirmGoal()">Salvar meta</button>
@@ -1402,7 +1424,7 @@ function openGoalModal(){
   `);
 }
 function confirmGoal(){
-  const val = parseFloat(document.getElementById('goalInput').value)||0;
+  const val = numField('goalInput');
   state.settings.monthlyGoal = val;
   saveSettings();
   toast(val>0 ? 'Meta atualizada' : 'Meta removida');
@@ -1528,7 +1550,7 @@ function openQuickQuoteModal(){
     <div id="qtFilamentRows"></div>
     <button class="btn ghost sm" onclick="addQuoteFilamentRow()">+ Adicionar filamento</button>
     <div class="row3" style="margin-top:14px;">
-      <div class="field"><label>Tempo de impressão (h)</label><input type="number" id="qtTimeH" value="1" step="0.1" oninput="updateQuickQuotePreview()"></div>
+      <div class="field"><label>Tempo de impressão (h)</label><input type="number" min="0" id="qtTimeH" value="1" step="0.1" oninput="updateQuickQuotePreview()"></div>
       <div class="field"><label>Impressora</label><select id="qtMachine" onchange="updateQuickQuotePreview()">
         ${machines.map(m=>`<option value="${m.id}">${esc(m.name)}</option>`).join('')}
       </select></div>
@@ -1536,7 +1558,7 @@ function openQuickQuoteModal(){
         ${boxOptions.map(b=>`<option value="${esc(b.name)}">${esc(b.name)}</option>`).join('')}
       </select></div>
     </div>
-    <div class="field"><label>Margem de lucro desejada (%)</label><input type="number" id="qtMargin" value="${((1-1/(state.settings.markupMultiplier||2.5))*100).toFixed(0)}" oninput="updateQuickQuotePreview()"></div>
+    <div class="field"><label>Margem de lucro desejada (%)</label><input type="number" min="0" id="qtMargin" value="${((1-1/(state.settings.markupMultiplier||2.5))*100).toFixed(0)}" oninput="updateQuickQuotePreview()"></div>
     <div class="field" style="margin-bottom:6px;"><label>Mão de obra (ações e minutos de cada uma)</label></div>
     <div id="qtLaborActionRows"></div>
     <button class="btn ghost sm" style="margin-bottom:14px;" onclick="addQuoteLaborActionRow()">+ Adicionar ação</button>
@@ -1580,7 +1602,7 @@ function renderQuoteFilamentRows(){
       <select onchange="quoteFilaments[${i}].materialName=this.value; updateQuickQuotePreview();">
         ${filamentOptions.map(fo=>`<option value="${esc(fo.name)}" ${esc(f.materialName===fo.name?'selected':'')}>${esc(fo.name)}</option>`).join('')}
       </select>
-      <input type="number" step="0.01" value="${f.weightG}" placeholder="peso (g)" oninput="quoteFilaments[${i}].weightG=parseFloat(this.value)||0; updateQuickQuotePreview();">
+      <input type="number" min="0" step="0.01" value="${f.weightG}" placeholder="peso (g)" oninput="quoteFilaments[${i}].weightG=nn(this.value); updateQuickQuotePreview();">
       ${formRowX(`removeQuoteFilamentRow(${i})`)}
     </div>
   `));
@@ -1604,7 +1626,7 @@ function renderQuoteLaborActionRows(){
     quoteLaborActions.map((a,i)=>`
     <div class="form-row">
       <input list="laborActionOptions" value="${esc(a.action)}" placeholder="Ação (ex: Lixar)" oninput="quoteLaborActions[${i}].action=this.value; updateQuickQuotePreview();">
-      <input type="number" step="1" value="${a.minutes}" placeholder="minutos" oninput="quoteLaborActions[${i}].minutes=parseFloat(this.value)||0; updateQuickQuotePreview();">
+      <input type="number" min="0" step="1" value="${a.minutes}" placeholder="minutos" oninput="quoteLaborActions[${i}].minutes=nn(this.value); updateQuickQuotePreview();">
       ${formRowX(`removeQuoteLaborActionRow(${i})`)}
     </div>
   `));
@@ -1623,13 +1645,13 @@ function buildQuoteDraft(){
   return {
     name: document.getElementById('qtDesc').value.trim() || 'Orçamento sem nome',
     filaments: quoteFilaments,
-    timeH: parseFloat(document.getElementById('qtTimeH').value)||0,
+    timeH: numField('qtTimeH'),
     bubbleWrapM: 0,
     boxType: document.getElementById('qtBox').value,
     failureMarginPct: 0.10,
     laborActions: quoteLaborActions,
     machineId: document.getElementById('qtMachine').value,
-    desiredMarginPct: parseFloat(document.getElementById('qtMargin').value)||0,
+    desiredMarginPct: numField('qtMargin'),
     practicedPrice: 0,
     stock: 0,
   };
@@ -1902,7 +1924,7 @@ function openOrderModal(){
 }
 function confirmOrder(){
   const prod = state.products.find(p=>p.id===document.getElementById('oProd').value);
-  const qty = parseFloat(document.getElementById('oQty').value)||0;
+  const qty = numField('oQty');
   if(qty<=0){ toast('Informe uma quantidade válida','err'); return; }
   state.orders.push({
     id:uid(), customerId: document.getElementById('oCust').value || null,
@@ -2091,7 +2113,7 @@ function openInvestmentModal(){
         <option value="Componentes">Componentes</option>
         <option value="Outros">Outros</option>
       </select></div>
-      <div class="field"><label>Valor total (R$)</label><input type="number" id="invValue" step="0.01"></div>
+      <div class="field"><label>Valor total (R$)</label><input type="number" min="0" id="invValue" step="0.01"></div>
     </div>
     <div class="row2">
       <div class="field"><label>Data da compra</label><input type="date" id="invDate" value="${todayStr()}"></div>
@@ -2115,7 +2137,7 @@ function openInvestmentModal(){
       <label class="field-checkbox" style="margin-bottom:8px;"><input type="checkbox" id="invAddStock" style="width:auto;" checked onchange="document.getElementById('invStockFields').style.display=this.checked?'grid':'none'"> Já entra no estoque de matéria-prima</label>
       <div id="invStockFields" class="row2" style="margin-bottom:0;">
         <div class="field" style="margin-bottom:0;"><label>Material</label><select id="invMaterial"></select></div>
-        <div class="field" style="margin-bottom:0;"><label>Quantidade recebida</label><input type="number" id="invQty" step="0.01" placeholder="Ex: 1000"></div>
+        <div class="field" style="margin-bottom:0;"><label>Quantidade recebida</label><input type="number" min="0" id="invQty" step="0.01" placeholder="Ex: 1000"></div>
       </div>
     </div>
     <div class="modal-actions">
@@ -2142,7 +2164,7 @@ function updateInvestmentFormVisibility(){
 }
 function confirmInvestment(){
   const name = document.getElementById('invName').value.trim();
-  const value = parseFloat(document.getElementById('invValue').value)||0;
+  const value = numField('invValue');
   const date = document.getElementById('invDate').value || todayStr();
   const paymentType = document.getElementById('invPayType').value;
   const category = document.getElementById('invCategory').value;
@@ -2169,7 +2191,7 @@ function confirmInvestment(){
   }
   if((category==='Filamento'||category==='Embalagem'||category==='Ferramentas'||category==='Componentes') && document.getElementById('invAddStock') && document.getElementById('invAddStock').checked){
     const matId = document.getElementById('invMaterial').value;
-    const qty = parseFloat(document.getElementById('invQty').value)||0;
+    const qty = numField('invQty');
     const mat = state.materials.find(m=>m.id===matId);
     if(mat && qty>0){
       mat.stock += qty;
@@ -2217,7 +2239,16 @@ function buildPixPayload({key, name, city, amount, txid}){
   return base + crc16(base);
 }
 function openPixQr(containerId, amount){
-  if(!state.settings.pixKey){ toast('Configure sua chave PIX em Configurações → Precificação primeiro','err'); return; }
+  // Botão que leva, em vez de caminho escrito: "Configurações → Precificação"
+  // apontava pra uma seção que nem existe ali (Precificação está em Taxas, e
+  // o PIX tem seção própria). Instrução escrita apodrece quando a navegação
+  // muda; botão não. Ver "Onboarding" no CLAUDE.md.
+  if(!state.settings.pixKey){
+    blockedBy('Chave PIX não cadastrada',
+      'O QR de cobrança é gerado a partir da sua chave PIX — sem ela não dá pra montar o código que o cliente escaneia.',
+      'Cadastrar chave PIX', `switchTab('configuracoes');`);
+    return;
+  }
   const payload = buildPixPayload({
     key: state.settings.pixKey, name: state.settings.pixMerchantName, city: state.settings.pixMerchantCity,
     amount, txid: 'VENDA'+Date.now().toString().slice(-8),
@@ -2471,7 +2502,7 @@ function openPrintJobModal(productId, presetQty, presetOutcome, editId){
 }
 function updatePrintJobPreview(){
   const prod = state.products.find(p=>p.id===document.getElementById('pjProd').value);
-  const qty = parseFloat(document.getElementById('pjQty').value)||0;
+  const qty = numField('pjQty');
   const outcome = document.getElementById('pjOutcome').value;
   document.getElementById('pjPctBlock').style.display = outcome==='failure' ? 'block' : 'none';
   const pct = outcome==='failure' ? Math.min(100,Math.max(1,parseFloat(document.getElementById('pjPct').value)||100)) : 100;
@@ -2485,7 +2516,7 @@ function updatePrintJobPreview(){
     const need = storedU ? storedU.qty : calcNeed;
     return `<div class="calc-line" style="align-items:center;">
       <span>${esc(r.materialName)} <span style="color:var(--text-faint);font-size:11px;">(estoque: ${mat?num(mat.stock,1):'0'}${esc(mat?mat.unit:'g')})</span></span>
-      <span><input type="number" id="pjFil_${i}" value="${(need||0).toFixed(1)}" step="0.1" style="width:80px;padding:4px 6px;text-align:right;"> ${esc(mat?mat.unit:'g')}</span>
+      <span><input type="number" min="0" id="pjFil_${i}" value="${(need||0).toFixed(1)}" step="0.1" style="width:80px;padding:4px 6px;text-align:right;"> ${esc(mat?mat.unit:'g')}</span>
     </div>`;
   }).join('');
   // Horas: acompanha o cadastro do produto até o usuário mexer no campo.
@@ -2535,7 +2566,7 @@ function reversePrintJobEffects(j){
 }
 function confirmPrintJob(){
   const prod = state.products.find(p=>p.id===document.getElementById('pjProd').value);
-  const qty = parseFloat(document.getElementById('pjQty').value)||0;
+  const qty = numField('pjQty');
   if(qty<=0){ toast('Informe uma quantidade válida','err'); return; }
   const outcome = document.getElementById('pjOutcome').value;
   const date = document.getElementById('pjDate').value || todayStr();
@@ -2618,7 +2649,7 @@ function renderCalculo(){
     <div class="section-title" style="margin-top:0;">Tarifa de energia elétrica</div>
     <div class="card">
       <div class="row2">
-        <div class="field"><label>Tarifa (R$ por kWh)</label><input type="number" id="calcTariff" value="${tariff}" step="0.001" onchange="updateEnergyTariff(this.value)"></div>
+        <div class="field"><label>Tarifa (R$ por kWh)</label><input type="number" min="0" id="calcTariff" value="${tariff}" step="0.001" onchange="updateEnergyTariff(this.value)"></div>
         <div class="field"><label class="hint" style="display:block;margin-bottom:5px;">&nbsp;</label><div class="hint" style="padding-top:9px;">Confira o valor exato na sua fatura da Enel — o número muda com reajustes anuais e bandeiras tarifárias. Assim que atualizar aqui, todas as impressoras com potência preenchida recalculam sozinhas.</div></div>
       </div>
     </div>
@@ -2727,7 +2758,7 @@ function renderCalculo(){
   `;
 }
 function updateEnergyTariff(val){
-  state.settings.energyTariffPerKwh = parseFloat(val)||0;
+  state.settings.energyTariffPerKwh = nn(val);
   saveSettings();
   toast('Tarifa de energia atualizada');
   renderContent();
@@ -2972,15 +3003,15 @@ function openSaleModal(presetProductId, presetQty, presetOrderId){
       <div class="field"><label>Plataforma</label><select id="sPlat" onchange="onSalePlatformChange()">
         ${state.settings.platforms.map(p=>`<option value="${esc(p.name)}">${esc(p.name)} (${num(p.pct,0)}%${p.fixed?' + '+brl(p.fixed):''})</option>`).join('')}
       </select></div>
-      <div class="field"><label>Taxa nessa venda (%)</label><input type="number" id="sFeePct" step="0.01" oninput="this.dataset.touched='1'; updateSalePreview()"></div>
-      <div class="field"><label>Taxa fixa por unidade vendida (R$)</label><input type="number" id="sFeeFixed" step="0.01" oninput="this.dataset.touched='1'; updateSalePreview()"></div>
+      <div class="field"><label>Taxa nessa venda (%)</label><input type="number" min="0" id="sFeePct" step="0.01" oninput="this.dataset.touched='1'; updateSalePreview()"></div>
+      <div class="field"><label>Taxa fixa por unidade vendida (R$)</label><input type="number" min="0" id="sFeeFixed" step="0.01" oninput="this.dataset.touched='1'; updateSalePreview()"></div>
     </div>
     <div class="field hint" style="margin-top:-8px;margin-bottom:12px;">Vem preenchido com a taxa cadastrada da plataforma (ou a taxa real do produto, se já buscada — ver abaixo), mas edite se o Mercado Livre/Shopee cobrou diferente. A % aplica sobre o total da venda; a taxa fixa é cobrada por unidade vendida (2 kits = 2x o valor fixo).</div>
     <div id="sFeeRealNote"></div>
     <div id="sTierNote"></div>
     <div class="row2">
-      <div class="field"><label>Frete pago por você (R$, total da venda)</label><input type="number" id="sShipping" step="0.01" value="0" placeholder="Ex: frete grátis que você bancou" oninput="updateSalePreview()"></div>
-      <div class="field"><label>Desconto de cupom/campanha (R$, opcional)</label><input type="number" id="sCoupon" step="0.01" value="0" placeholder="Quanto o ML/Shopee descontou por promoção"></div>
+      <div class="field"><label>Frete pago por você (R$, total da venda)</label><input type="number" min="0" id="sShipping" step="0.01" value="0" placeholder="Ex: frete grátis que você bancou" oninput="updateSalePreview()"></div>
+      <div class="field"><label>Desconto de cupom/campanha (R$, opcional)</label><input type="number" min="0" id="sCoupon" step="0.01" value="0" placeholder="Quanto o ML/Shopee descontou por promoção"></div>
     </div>
     <div class="field"><label>Código de rastreio (opcional)</label><input id="sTracking" placeholder="Se já tiver na hora — dá pra adicionar depois também"></div>
     <div class="helper-block" id="salePreview"></div>
@@ -3025,7 +3056,7 @@ function updateCartItem(rowId, field, val){
     item.qty = Math.max(1, parseInt(val)||1);
     refreshCartItemDerivation(rowId);
   } else if(field==='unitPrice'){
-    item.unitPrice = parseFloat(val)||0;
+    item.unitPrice = nn(val);
     item.priceTouched = true;
   }
   updateSalePreview();
@@ -3071,7 +3102,7 @@ function renderCartItemsList(){
         ${state.products.map(p=>`<option value="${p.id}" ${p.id===item.productId?'selected':''}>${esc(p.name)}</option>`).join('')}
       </select></div>
       <div class="field" style="margin-bottom:0;"><label>${qtyLabel}</label><input type="number" min="1" step="1" value="${item.qty}" oninput="updateCartItem('${item.rowId}','qty',this.value)"></div>
-      <div class="field" style="margin-bottom:0;"><label>Preço/venda</label><input type="number" step="0.01" value="${item.unitPrice.toFixed(2)}" oninput="updateCartItem('${item.rowId}','unitPrice',this.value)"></div>
+      <div class="field" style="margin-bottom:0;"><label>Preço/venda</label><input type="number" min="0" step="0.01" value="${item.unitPrice.toFixed(2)}" oninput="updateCartItem('${item.rowId}','unitPrice',this.value)"></div>
       <button class="btn ghost sm cart-item-remove" title="Remover item" onclick="removeCartItem('${item.rowId}')">×</button>
     </div>
     ${cartItemDerivationHtml(item)}
@@ -3113,8 +3144,8 @@ function saleFeeFromForm(gross, totalUnits){
   if(gross<=0) return 0;
   const units = totalUnits!=null ? totalUnits : 1;
   if(!saleFeeOverridden()) return cartTotalFee(currentSalePlatformObj(), cartFeeLines());
-  const pct = parseFloat(document.getElementById('sFeePct').value)||0;
-  const fixed = parseFloat(document.getElementById('sFeeFixed').value)||0;
+  const pct = numField('sFeePct');
+  const fixed = numField('sFeeFixed');
   return gross*(pct/100) + fixed*units;
 }
 // Se o produto já teve a taxa REAL do ML buscada (mlRealFeePct, via
@@ -3191,7 +3222,7 @@ function updateSalePreview(){
   if(tierNoteEl) tierNoteEl.innerHTML = '';
   const feeLines = cartFeeLines();
   const totalFee = saleFeeFromForm(totalGross, totalUnits);
-  const totalShipping = parseFloat(document.getElementById('sShipping').value)||0;
+  const totalShipping = numField('sShipping');
 
   let totalCost = 0, totalProfit = 0, allAllocations = {};
   const itemLines = cartItems.map((item,i)=>{
@@ -3292,8 +3323,8 @@ function confirmSale(){
     const pr = state.products.find(p=>p.id===it.productId);
     return (isMLSale && pr && pr.mlRealFeePct!=null) ? pr.mlRealFeePct : null;
   };
-  const totalShipping = parseFloat(document.getElementById('sShipping').value)||0;
-  const totalCoupon = parseFloat(document.getElementById('sCoupon').value)||0;
+  const totalShipping = numField('sShipping');
+  const totalCoupon = numField('sCoupon');
   const trackingCode = document.getElementById('sTracking').value.trim() || null;
   const groupId = cartItems.length>1 ? uid() : null;
 
@@ -4426,9 +4457,9 @@ function openProductModal(id){
 
     <div class="field" style="margin-bottom:6px;"><label>Dimensões do produto (opcional — pra checar se cabe na caixa)</label></div>
     <div class="row3">
-      <div class="field"><label>Comprimento (cm)</label><input type="number" id="pLengthCm" value="${p.lengthCm||''}" step="0.1" placeholder="opcional" oninput="suggestBoxForDimensions(); updateProductPreview();"></div>
-      <div class="field"><label>Largura (cm)</label><input type="number" id="pWidthCm" value="${p.widthCm||''}" step="0.1" placeholder="opcional" oninput="suggestBoxForDimensions(); updateProductPreview();"></div>
-      <div class="field"><label>Altura (cm)</label><input type="number" id="pHeightCm" value="${p.heightCm||''}" step="0.1" placeholder="opcional" oninput="suggestBoxForDimensions(); updateProductPreview();"></div>
+      <div class="field"><label>Comprimento (cm)</label><input type="number" min="0" id="pLengthCm" value="${p.lengthCm||''}" step="0.1" placeholder="opcional" oninput="suggestBoxForDimensions(); updateProductPreview();"></div>
+      <div class="field"><label>Largura (cm)</label><input type="number" min="0" id="pWidthCm" value="${p.widthCm||''}" step="0.1" placeholder="opcional" oninput="suggestBoxForDimensions(); updateProductPreview();"></div>
+      <div class="field"><label>Altura (cm)</label><input type="number" min="0" id="pHeightCm" value="${p.heightCm||''}" step="0.1" placeholder="opcional" oninput="suggestBoxForDimensions(); updateProductPreview();"></div>
     </div>
 
     <div class="row2">
@@ -4441,7 +4472,7 @@ function openProductModal(id){
     </div>
     <div class="field hint" id="pBoxFitStatus" style="margin-top:-8px;"></div>
     <div class="row2">
-      <div class="field"><label>Plástico bolha (m)</label><input type="number" id="pBubble" value="${p.bubbleWrapM}" step="0.1" oninput="updateProductPreview()"></div>
+      <div class="field"><label>Plástico bolha (m)</label><input type="number" min="0" id="pBubble" value="${p.bubbleWrapM}" step="0.1" oninput="updateProductPreview()"></div>
       <div class="field"><label>Tempo impressão</label>
         <div style="display:flex;gap:6px;align-items:center;">
           <input type="number" id="pTimeH" value="${Math.floor(p.timeH||0)}" min="0" step="1" placeholder="h" style="width:0;flex:1;" oninput="updateProductPreview()">
@@ -4457,8 +4488,8 @@ function openProductModal(id){
     </div>
     <div class="field hint" style="margin-top:-8px;">Por impressão = quantas peças saem de uma leva (ex: 4). Por venda = quantas vão em um anúncio/caixa/pedido (ex: 1 se vende avulso, 4 se anuncia como kit) — são conceitos diferentes e o preço abaixo passa a ser sempre da venda inteira.</div>
     <div class="row2">
-      <div class="field"><label>Fita adesiva usada (m)</label><input type="number" id="pTape" value="${p.tapeM||0}" step="0.1" oninput="updateProductPreview()"></div>
-      <div class="field"><label>Margem de falha (%)</label><input type="number" id="pFail" value="${(p.failureMarginPct*100)}" step="1" oninput="updateProductPreview()"></div>
+      <div class="field"><label>Fita adesiva usada (m)</label><input type="number" min="0" id="pTape" value="${p.tapeM||0}" step="0.1" oninput="updateProductPreview()"></div>
+      <div class="field"><label>Margem de falha (%)</label><input type="number" min="0" id="pFail" value="${(p.failureMarginPct*100)}" step="1" oninput="updateProductPreview()"></div>
     </div>
 
     <div class="field" style="margin-bottom:6px;"><label>Mão de obra (ações e minutos de cada uma)</label></div>
@@ -4475,18 +4506,18 @@ function openProductModal(id){
     <button class="btn ghost sm" style="margin-bottom:14px;" onclick="addComponentRow()">+ Adicionar componente</button>
 
     <div class="row2">
-      <div class="field"><label>Frete aproximado — Mercado Livre (R$)</label><input type="number" id="pFreightMl" value="${p.estimatedFreightMl||''}" step="0.01" placeholder="opcional" oninput="updateProductPreview()"></div>
-      <div class="field"><label>Frete aproximado — Shopee (R$)</label><input type="number" id="pFreightShopee" value="${p.estimatedFreightShopee||''}" step="0.01" placeholder="opcional" oninput="this.dataset.touched='1'; updateProductPreview()"></div>
+      <div class="field"><label>Frete aproximado — Mercado Livre (R$)</label><input type="number" min="0" id="pFreightMl" value="${p.estimatedFreightMl||''}" step="0.01" placeholder="opcional" oninput="updateProductPreview()"></div>
+      <div class="field"><label>Frete aproximado — Shopee (R$)</label><input type="number" min="0" id="pFreightShopee" value="${p.estimatedFreightShopee||''}" step="0.01" placeholder="opcional" oninput="this.dataset.touched='1'; updateProductPreview()"></div>
     </div>
 
-    <div class="field"><label>Preço de mercado — exceção deste produto (R$)</label><input type="number" id="pMarketOverride" value="${p.marketPriceOverride||''}" step="0.01" placeholder="deixe em branco = herdar da categoria" oninput="updateMarketHint()"></div>
+    <div class="field"><label>Preço de mercado — exceção deste produto (R$)</label><input type="number" min="0" id="pMarketOverride" value="${p.marketPriceOverride||''}" step="0.01" placeholder="deixe em branco = herdar da categoria" oninput="updateMarketHint()"></div>
     <div class="field hint" id="pMarketHint" style="margin-top:-8px;"></div>
     <div class="row2">
-      <div class="field"><label id="pPriceMlLabel">Preço praticado — Mercado Livre</label><input type="number" id="pPriceMl" value="${p.practicedPriceMl||''}" step="0.01" placeholder="deixe em branco = preço sugerido" oninput="this.dataset.touched='1'"></div>
-      <div class="field"><label id="pPriceShopeeLabel">Preço praticado — Shopee</label><input type="number" id="pPriceShopee" value="${p.practicedPriceShopee||''}" step="0.01" placeholder="deixe em branco = preço sugerido" oninput="this.dataset.touched='1'"></div>
+      <div class="field"><label id="pPriceMlLabel">Preço praticado — Mercado Livre</label><input type="number" min="0" id="pPriceMl" value="${p.practicedPriceMl||''}" step="0.01" placeholder="deixe em branco = preço sugerido" oninput="this.dataset.touched='1'"></div>
+      <div class="field"><label id="pPriceShopeeLabel">Preço praticado — Shopee</label><input type="number" min="0" id="pPriceShopee" value="${p.practicedPriceShopee||''}" step="0.01" placeholder="deixe em branco = preço sugerido" oninput="this.dataset.touched='1'"></div>
     </div>
-    ${extraListingPlatforms().map(plat=>`<div class="field"><label id="pPriceExtraLabel_${plat.id}">Preço praticado — ${esc(plat.name)}</label><input type="number" id="pPriceExtra_${plat.id}" value="${(p.practicedPriceExtra||{})[plat.id]||''}" step="0.01" placeholder="deixe em branco = preço sugerido" oninput="this.dataset.touched='1'"></div>`).join('')}
-    <div class="field"><label>Estoque inicial (un)</label><input type="number" id="pStock" value="${p.stock}" step="1"></div>
+    ${extraListingPlatforms().map(plat=>`<div class="field"><label id="pPriceExtraLabel_${plat.id}">Preço praticado — ${esc(plat.name)}</label><input type="number" min="0" id="pPriceExtra_${plat.id}" value="${(p.practicedPriceExtra||{})[plat.id]||''}" step="0.01" placeholder="deixe em branco = preço sugerido" oninput="this.dataset.touched='1'"></div>`).join('')}
+    <div class="field"><label>Estoque inicial (un)</label><input type="number" min="0" id="pStock" value="${p.stock}" step="1"></div>
     <div class="helper-block" id="productPreview"></div>
     <div class="modal-actions">
       <button class="btn ghost" onclick="closeModal()">Cancelar</button>
@@ -4586,7 +4617,7 @@ function renderFilamentRows(){
       <select onchange="editingFilaments[${i}].materialName=this.value; refreshCurrentPreview();">
         ${filamentOptions.map(fo=>`<option value="${esc(fo.name)}" ${esc(f.materialName===fo.name?'selected':'')}>${esc(fo.name)}</option>`).join('')}
       </select>
-      <input type="number" step="0.01" value="${f.weightG}" placeholder="peso (g)" oninput="editingFilaments[${i}].weightG=parseFloat(this.value)||0; refreshCurrentPreview();">
+      <input type="number" min="0" step="0.01" value="${f.weightG}" placeholder="peso (g)" oninput="editingFilaments[${i}].weightG=nn(this.value); refreshCurrentPreview();">
       ${formRowX(`removeFilamentRow(${i})`)}
     </div>
   `));
@@ -4610,7 +4641,7 @@ function renderLaborActionRows(){
     editingLaborActions.map((a,i)=>`
     <div class="form-row">
       <input list="laborActionOptions" value="${esc(a.action)}" placeholder="Ação (ex: Lixar)" oninput="editingLaborActions[${i}].action=this.value; refreshCurrentPreview();">
-      <input type="number" step="1" value="${a.minutes}" placeholder="minutos" oninput="editingLaborActions[${i}].minutes=parseFloat(this.value)||0; refreshCurrentPreview();">
+      <input type="number" min="0" step="1" value="${a.minutes}" placeholder="minutos" oninput="editingLaborActions[${i}].minutes=nn(this.value); refreshCurrentPreview();">
       ${formRowX(`removeLaborActionRow(${i})`)}
     </div>
   `));
@@ -4639,7 +4670,7 @@ function renderToolsUsedRows(){
       <select onchange="editingToolsUsed[${i}].toolId=this.value; refreshCurrentPreview();">
         ${toolOptions.map(to=>`<option value="${to.id}" ${t.toolId===to.id?'selected':''}>${esc(to.name)}</option>`).join('')}
       </select>
-      <input type="number" step="1" value="${t.uses}" placeholder="usos" oninput="editingToolsUsed[${i}].uses=parseFloat(this.value)||0; refreshCurrentPreview();">
+      <input type="number" min="0" step="1" value="${t.uses}" placeholder="usos" oninput="editingToolsUsed[${i}].uses=nn(this.value); refreshCurrentPreview();">
       ${formRowX(`removeToolsUsedRow(${i})`)}
     </div>
   `));
@@ -4670,7 +4701,7 @@ function renderComponentsRows(){
       <select onchange="editingComponents[${i}].materialId=this.value; refreshCurrentPreview();">
         ${compOptions.map(co=>`<option value="${co.id}" ${comp.materialId===co.id?'selected':''}>${esc(co.name)}</option>`).join('')}
       </select>
-      <input type="number" step="1" value="${comp.qty}" placeholder="qtd" oninput="editingComponents[${i}].qty=parseFloat(this.value)||0; refreshCurrentPreview();">
+      <input type="number" min="0" step="1" value="${comp.qty}" placeholder="qtd" oninput="editingComponents[${i}].qty=nn(this.value); refreshCurrentPreview();">
       <select onchange="editingComponents[${i}].scope=this.value; refreshCurrentPreview();">
         <option value="peca" ${comp.scope==='peca'?'selected':''}>Por peça (× un. por venda)</option>
         <option value="venda" ${comp.scope==='venda'?'selected':''}>Uma vez por venda</option>
@@ -4736,21 +4767,21 @@ function readProductForm(){
     filaments: editingFilaments,
     boxType: document.getElementById('pBox').value,
     machineId: document.getElementById('pMachine').value,
-    timeH: (parseFloat(document.getElementById('pTimeH').value)||0) + (parseFloat(document.getElementById('pTimeMin').value)||0)/60,
-    bubbleWrapM: parseFloat(document.getElementById('pBubble').value)||0,
-    tapeM: parseFloat(document.getElementById('pTape').value)||0,
-    failureMarginPct: (parseFloat(document.getElementById('pFail').value)||0)/100,
+    timeH: (numField('pTimeH')) + (numField('pTimeMin'))/60,
+    bubbleWrapM: numField('pBubble'),
+    tapeM: numField('pTape'),
+    failureMarginPct: (numField('pFail'))/100,
     laborActions: editingLaborActions,
     toolsUsed: editingToolsUsed,
     components: editingComponents,
-    unitsPerPrint: Math.max(1, parseFloat(document.getElementById('pUnitsPerPrint').value)||1),
-    unitsPerSale: Math.max(1, parseFloat(document.getElementById('pUnitsPerSale').value)||1),
-    marketPriceOverride: parseFloat(document.getElementById('pMarketOverride').value) || null,
-    lengthCm: parseFloat(document.getElementById('pLengthCm').value)||0,
-    widthCm: parseFloat(document.getElementById('pWidthCm').value)||0,
-    heightCm: parseFloat(document.getElementById('pHeightCm').value)||0,
-    estimatedFreightMl: parseFloat(document.getElementById('pFreightMl').value)||0,
-    estimatedFreightShopee: parseFloat(document.getElementById('pFreightShopee').value)||0,
+    unitsPerPrint: Math.max(1, numField('pUnitsPerPrint', 1)),
+    unitsPerSale: Math.max(1, numField('pUnitsPerSale', 1)),
+    marketPriceOverride: (document.getElementById('pMarketOverride').value.trim() ? numField('pMarketOverride') : null),
+    lengthCm: numField('pLengthCm'),
+    widthCm: numField('pWidthCm'),
+    heightCm: numField('pHeightCm'),
+    estimatedFreightMl: numField('pFreightMl'),
+    estimatedFreightShopee: numField('pFreightShopee'),
     modelOrigin: document.getElementById('pModelOrigin').value,
     modelLicense: document.getElementById('pModelLicense').value.trim(),
     modelSourceUrl: document.getElementById('pModelSourceUrl').value.trim(),
@@ -4782,9 +4813,9 @@ function readProductForm(){
   return form;
 }
 function suggestBoxForDimensions(){
-  const lengthCm = parseFloat(document.getElementById('pLengthCm').value)||0;
-  const widthCm = parseFloat(document.getElementById('pWidthCm').value)||0;
-  const heightCm = parseFloat(document.getElementById('pHeightCm').value)||0;
+  const lengthCm = numField('pLengthCm');
+  const widthCm = numField('pWidthCm');
+  const heightCm = numField('pHeightCm');
   if(lengthCm>0 && widthCm>0 && heightCm>0){
     const best = bestFittingBox(lengthCm, widthCm, heightCm);
     if(best) document.getElementById('pBox').value = best.name;
@@ -4794,9 +4825,9 @@ function suggestBoxForDimensions(){
 function updateBoxFitStatus(){
   const statusEl = document.getElementById('pBoxFitStatus');
   if(!statusEl) return;
-  const lengthCm = parseFloat(document.getElementById('pLengthCm').value)||0;
-  const widthCm = parseFloat(document.getElementById('pWidthCm').value)||0;
-  const heightCm = parseFloat(document.getElementById('pHeightCm').value)||0;
+  const lengthCm = numField('pLengthCm');
+  const widthCm = numField('pWidthCm');
+  const heightCm = numField('pHeightCm');
   if(!(lengthCm>0 && widthCm>0 && heightCm>0)){ statusEl.textContent = ''; return; }
   const boxName = document.getElementById('pBox').value;
   const box = materialByName(boxName);
@@ -4908,7 +4939,7 @@ function confirmProduct(id){
   }
   const priceMlRaw = document.getElementById('pPriceMl').value;
   const priceShopeeRaw = document.getElementById('pPriceShopee').value;
-  const stock = parseFloat(document.getElementById('pStock').value)||0;
+  const stock = numField('pStock');
   const c = calcProduct(form);
   // Produtos não tem mais campo de "venda própria" — practicedPrice fica no
   // fallback por custo, só pra outros lugares do app (Cálculo, catálogo) que
@@ -5215,7 +5246,7 @@ function confirmQuickCustomOrder(){
   const contact = document.getElementById('qcoContact').value.trim();
   const type = document.getElementById('qcoType').value;
   const deliveryDate = document.getElementById('qcoDeliveryDate').value;
-  const qty = parseFloat(document.getElementById('qcoQty').value)||1;
+  const qty = numField('qcoQty', 1);
   if(!clientName || !contact || !type || !deliveryDate){ toast('Preencha nome, contato, tipo e data de entrega','err'); return; }
   let cu = state.customers.find(c=>c.name.trim().toLowerCase()===clientName.toLowerCase());
   if(!cu){ cu = { id:uid(), name:clientName, contact, notes:'' }; state.customers.push(cu); saveCustomers(); }
@@ -5310,11 +5341,11 @@ function openCustomOrderModal(id){
 
       <div class="section-title">Comercial</div>
       <div class="row2">
-        <div class="field"><label>Margem de lucro desejada (%)</label><input type="number" id="pMargin" value="${(o.desiredMarginPct!=null ? o.desiredMarginPct : calcProduct(o).desiredMarginPct).toFixed(0)}" step="1" oninput="document.getElementById('pPrice').dataset.touched=''; refreshCurrentPreview()"></div>
-        <div class="field"><label>Valor total combinado (R$)</label><input type="number" id="pPrice" value="${o.practicedPrice||''}" step="0.01" placeholder="deixe em branco = preço sugerido" oninput="this.dataset.touched='1'; refreshCurrentPreview()" style="${reqBorder('totalValue')}"></div>
+        <div class="field"><label>Margem de lucro desejada (%)</label><input type="number" min="0" id="pMargin" value="${(o.desiredMarginPct!=null ? o.desiredMarginPct : calcProduct(o).desiredMarginPct).toFixed(0)}" step="1" oninput="document.getElementById('pPrice').dataset.touched=''; refreshCurrentPreview()"></div>
+        <div class="field"><label>Valor total combinado (R$)</label><input type="number" min="0" id="pPrice" value="${o.practicedPrice||''}" step="0.01" placeholder="deixe em branco = preço sugerido" oninput="this.dataset.touched='1'; refreshCurrentPreview()" style="${reqBorder('totalValue')}"></div>
       </div>
       <div class="row2">
-        <div class="field"><label>Sinal pago (R$)</label><input type="number" id="coDepositPaid" value="${o.depositPaid||''}" step="0.01" placeholder="0,00"></div>
+        <div class="field"><label>Sinal pago (R$)</label><input type="number" min="0" id="coDepositPaid" value="${o.depositPaid||''}" step="0.01" placeholder="0,00"></div>
         <div class="field"><label>Forma de pagamento</label><input id="coPaymentMethod" value="${o.paymentMethod||''}" placeholder="Ex: PIX, dinheiro"></div>
       </div>
 
@@ -5360,7 +5391,7 @@ function openCustomOrderModal(id){
         </select></div>
       </div>
       <div class="row2">
-        <div class="field"><label>Plástico bolha (m)</label><input type="number" id="pBubble" value="${o.bubbleWrapM||0}" step="0.1" oninput="refreshCurrentPreview()"></div>
+        <div class="field"><label>Plástico bolha (m)</label><input type="number" min="0" id="pBubble" value="${o.bubbleWrapM||0}" step="0.1" oninput="refreshCurrentPreview()"></div>
         <div class="field"><label>Tempo impressão</label>
           <div style="display:flex;gap:6px;align-items:center;">
             <input type="number" id="pTimeH" value="${Math.floor(o.timeH||0)}" min="0" step="1" placeholder="h" style="width:0;flex:1;" oninput="refreshCurrentPreview()">
@@ -5371,8 +5402,8 @@ function openCustomOrderModal(id){
         </div>
       </div>
       <div class="row2">
-        <div class="field"><label>Fita adesiva usada (m)</label><input type="number" id="pTape" value="${o.tapeM||0}" step="0.1" oninput="refreshCurrentPreview()"></div>
-        <div class="field"><label>Margem de falha (%)</label><input type="number" id="pFail" value="${(o.failureMarginPct*100)||10}" step="1" oninput="refreshCurrentPreview()"></div>
+        <div class="field"><label>Fita adesiva usada (m)</label><input type="number" min="0" id="pTape" value="${o.tapeM||0}" step="0.1" oninput="refreshCurrentPreview()"></div>
+        <div class="field"><label>Margem de falha (%)</label><input type="number" min="0" id="pFail" value="${(o.failureMarginPct*100)||10}" step="1" oninput="refreshCurrentPreview()"></div>
       </div>
       <div class="field" style="margin-bottom:6px;"><label>Mão de obra (ações e minutos de cada uma)</label></div>
       <div id="laborActionRows"></div>
@@ -5384,18 +5415,18 @@ function openCustomOrderModal(id){
 
       <div class="section-title">Perfil de fatiamento</div>
       <div class="row2">
-        <div class="field"><label>Bico (°C)</label><input type="number" id="coNozzleTempC" value="${o.nozzleTempC||''}" step="1"></div>
-        <div class="field"><label>Temp. mesa (°C)</label><input type="number" id="coBedTempC" value="${o.bedTempC||''}" step="1"></div>
+        <div class="field"><label>Bico (°C)</label><input type="number" min="0" id="coNozzleTempC" value="${o.nozzleTempC||''}" step="1"></div>
+        <div class="field"><label>Temp. mesa (°C)</label><input type="number" min="0" id="coBedTempC" value="${o.bedTempC||''}" step="1"></div>
       </div>
       <div class="row3">
-        <div class="field"><label>Altura de camada (mm)</label><input type="number" id="coLayerHeightMm" value="${o.layerHeightMm||''}" step="0.01"></div>
-        <div class="field"><label>Diâmetro do bico (mm)</label><input type="number" id="coNozzleDiameterMm" value="${o.nozzleDiameterMm||0.4}" step="0.1"></div>
-        <div class="field"><label>Paredes</label><input type="number" id="coWalls" value="${o.walls||''}" step="1"></div>
+        <div class="field"><label>Altura de camada (mm)</label><input type="number" min="0" id="coLayerHeightMm" value="${o.layerHeightMm||''}" step="0.01"></div>
+        <div class="field"><label>Diâmetro do bico (mm)</label><input type="number" min="0" id="coNozzleDiameterMm" value="${o.nozzleDiameterMm||0.4}" step="0.1"></div>
+        <div class="field"><label>Paredes</label><input type="number" min="0" id="coWalls" value="${o.walls||''}" step="1"></div>
       </div>
       <div class="row3">
-        <div class="field"><label>Preenchimento (%)</label><input type="number" id="coInfillPct" value="${o.infillPct||''}" step="1"></div>
+        <div class="field"><label>Preenchimento (%)</label><input type="number" min="0" id="coInfillPct" value="${o.infillPct||''}" step="1"></div>
         <div class="field"><label>Padrão</label><input id="coInfillPattern" value="${o.infillPattern||''}" placeholder="Ex: grid, gyroid"></div>
-        <div class="field"><label>Velocidade (mm/s)</label><input type="number" id="coPrintSpeedMmS" value="${o.printSpeedMmS||''}" step="1"></div>
+        <div class="field"><label>Velocidade (mm/s)</label><input type="number" min="0" id="coPrintSpeedMmS" value="${o.printSpeedMmS||''}" step="1"></div>
       </div>
       <div class="row2">
         <div class="field"><label>Orientação na mesa</label><input id="coOrientation" value="${o.orientation||''}"></div>
@@ -5415,9 +5446,9 @@ function openCustomOrderModal(id){
 
       <div class="section-title">Estimado × real</div>
       <div class="row3">
-        <div class="field"><label>Peso real (g)</label><input type="number" id="coRealWeightG" value="${o.realWeightG||''}" step="0.1"></div>
-        <div class="field"><label>Tempo real (h)</label><input type="number" id="coRealTimeH" value="${o.realTimeH||''}" step="0.1"></div>
-        <div class="field"><label>Custo real (R$)</label><input type="number" id="coRealCost" value="${o.realCost||''}" step="0.01"></div>
+        <div class="field"><label>Peso real (g)</label><input type="number" min="0" id="coRealWeightG" value="${o.realWeightG||''}" step="0.1"></div>
+        <div class="field"><label>Tempo real (h)</label><input type="number" min="0" id="coRealTimeH" value="${o.realTimeH||''}" step="0.1"></div>
+        <div class="field"><label>Custo real (R$)</label><input type="number" min="0" id="coRealCost" value="${o.realCost||''}" step="0.01"></div>
       </div>
       <div class="field"><label>Observação</label><input id="coRealObservation" value="${o.realObservation||''}"></div>
 
@@ -5468,13 +5499,13 @@ function readCustomOrderForm(){
     filaments: editingFilaments,
     boxType: document.getElementById('pBox').value,
     machineId: document.getElementById('pMachine').value,
-    timeH: (parseFloat(document.getElementById('pTimeH').value)||0) + (parseFloat(document.getElementById('pTimeMin').value)||0)/60,
-    bubbleWrapM: parseFloat(document.getElementById('pBubble').value)||0,
-    tapeM: parseFloat(document.getElementById('pTape').value)||0,
-    failureMarginPct: (parseFloat(document.getElementById('pFail').value)||0)/100,
+    timeH: (numField('pTimeH')) + (numField('pTimeMin'))/60,
+    bubbleWrapM: numField('pBubble'),
+    tapeM: numField('pTape'),
+    failureMarginPct: (numField('pFail'))/100,
     laborActions: editingLaborActions,
     toolsUsed: editingToolsUsed,
-    desiredMarginPct: parseFloat(document.getElementById('pMargin').value)||0,
+    desiredMarginPct: numField('pMargin'),
     modelOrigin: document.getElementById('pModelOrigin').value,
     modelLicense: document.getElementById('pModelLicense').value.trim(),
     modelSourceUrl: document.getElementById('pModelSourceUrl').value.trim(),
@@ -5484,7 +5515,7 @@ function readCustomOrderForm(){
     contact: document.getElementById('coContact').value.trim(),
     orderType: document.getElementById('coOrderType').value,
     linkedProductId: document.getElementById('coLinkedProductId').value,
-    qty: parseFloat(document.getElementById('coQty').value)||1,
+    qty: numField('coQty', 1),
     sizeLabel: document.getElementById('coSizeLabel').value.trim(),
     pieceText: document.getElementById('coPieceText').value,
     baseColor: document.getElementById('coBaseColor').value.trim(),
@@ -5493,28 +5524,28 @@ function readCustomOrderForm(){
     deliveryDate: document.getElementById('coDeliveryDate').value,
     deliveryMethod: document.getElementById('coDeliveryMethod').value.trim(),
     deliveryAddress: document.getElementById('coDeliveryAddress').value.trim(),
-    depositPaid: parseFloat(document.getElementById('coDepositPaid').value)||0,
+    depositPaid: numField('coDepositPaid'),
     paymentMethod: document.getElementById('coPaymentMethod').value.trim(),
     approved: document.getElementById('coApproved').checked,
     approvalDate: document.getElementById('coApprovalDate').value,
     approvedBy: document.getElementById('coApprovedBy').value.trim(),
     printDate: document.getElementById('coPrintDate').value,
-    nozzleTempC: parseFloat(document.getElementById('coNozzleTempC').value)||0,
-    bedTempC: parseFloat(document.getElementById('coBedTempC').value)||0,
-    layerHeightMm: parseFloat(document.getElementById('coLayerHeightMm').value)||0,
-    nozzleDiameterMm: parseFloat(document.getElementById('coNozzleDiameterMm').value)||0,
-    walls: parseFloat(document.getElementById('coWalls').value)||0,
-    infillPct: parseFloat(document.getElementById('coInfillPct').value)||0,
+    nozzleTempC: numField('coNozzleTempC'),
+    bedTempC: numField('coBedTempC'),
+    layerHeightMm: numField('coLayerHeightMm'),
+    nozzleDiameterMm: numField('coNozzleDiameterMm'),
+    walls: numField('coWalls'),
+    infillPct: numField('coInfillPct'),
     infillPattern: document.getElementById('coInfillPattern').value.trim(),
-    printSpeedMmS: parseFloat(document.getElementById('coPrintSpeedMmS').value)||0,
+    printSpeedMmS: numField('coPrintSpeedMmS'),
     orientation: document.getElementById('coOrientation').value.trim(),
     supports: document.getElementById('coSupports').value,
     brimRaft: document.getElementById('coBrimRaft').value.trim(),
     colorChangeLayer: document.getElementById('coColorChangeLayer').value.trim(),
     colorChangeHeightMm: document.getElementById('coColorChangeHeightMm').value.trim(),
-    realWeightG: parseFloat(document.getElementById('coRealWeightG').value)||0,
-    realTimeH: parseFloat(document.getElementById('coRealTimeH').value)||0,
-    realCost: parseFloat(document.getElementById('coRealCost').value)||0,
+    realWeightG: numField('coRealWeightG'),
+    realTimeH: numField('coRealTimeH'),
+    realCost: numField('coRealCost'),
     realObservation: document.getElementById('coRealObservation').value.trim(),
     result: document.getElementById('coResult').value,
     failurePctReason: document.getElementById('coFailurePctReason').value.trim(),
@@ -5910,20 +5941,20 @@ function openMaterialModal(id){
           ${['Pequena','Média','Grande'].map(s=>`<option value="${esc(s)}" ${esc(m.name===('Caixa '+s)?'selected':'')}>${esc(s)}</option>`).join('')}
         </select></div>
         <div class="row3">
-          <div class="field"><label>Comprimento interno (cm)</label><input type="number" id="mLengthCm" value="${m.lengthCm||''}" step="0.1" placeholder="opcional"></div>
-          <div class="field"><label>Largura interna (cm)</label><input type="number" id="mWidthCm" value="${m.widthCm||''}" step="0.1" placeholder="opcional"></div>
-          <div class="field"><label>Altura interna (cm)</label><input type="number" id="mHeightCm" value="${m.heightCm||''}" step="0.1" placeholder="opcional"></div>
+          <div class="field"><label>Comprimento interno (cm)</label><input type="number" min="0" id="mLengthCm" value="${m.lengthCm||''}" step="0.1" placeholder="opcional"></div>
+          <div class="field"><label>Largura interna (cm)</label><input type="number" min="0" id="mWidthCm" value="${m.widthCm||''}" step="0.1" placeholder="opcional"></div>
+          <div class="field"><label>Altura interna (cm)</label><input type="number" min="0" id="mHeightCm" value="${m.heightCm||''}" step="0.1" placeholder="opcional"></div>
         </div>
       </div>
       <div id="mFlatDimsBlock" style="display:${(packagingType==='envelope'||packagingType==='saquinho')?'block':'none'};margin:0 0 10px;">
         <div class="row2">
-          <div class="field"><label>Comprimento interno (cm)</label><input type="number" id="mFlatLengthCm" value="${m.lengthCm||''}" step="0.1" placeholder="opcional"></div>
-          <div class="field"><label>Largura interna (cm)</label><input type="number" id="mFlatWidthCm" value="${m.widthCm||''}" step="0.1" placeholder="opcional"></div>
+          <div class="field"><label>Comprimento interno (cm)</label><input type="number" min="0" id="mFlatLengthCm" value="${m.lengthCm||''}" step="0.1" placeholder="opcional"></div>
+          <div class="field"><label>Largura interna (cm)</label><input type="number" min="0" id="mFlatWidthCm" value="${m.widthCm||''}" step="0.1" placeholder="opcional"></div>
         </div>
         <div class="field hint" style="margin-top:-8px;">Sem altura própria — embalagem achatada e flexível. A seleção automática só oferece essa opção pra peças de até ${FLAT_PACKAGING_MAX_HEIGHT_CM}cm de altura.</div>
       </div>
       <div id="mRollWidthBlock" style="display:${(packagingType==='bolha'||packagingType==='fita')?'block':'none'};margin:0 0 10px;">
-        <div class="field"><label>Largura do rolo (cm)</label><input type="number" id="mRollWidthCm" value="${m.widthCm||''}" step="0.1" placeholder="opcional"></div>
+        <div class="field"><label>Largura do rolo (cm)</label><input type="number" min="0" id="mRollWidthCm" value="${m.widthCm||''}" step="0.1" placeholder="opcional"></div>
       </div>
     </div>
 
@@ -5937,13 +5968,13 @@ function openMaterialModal(id){
           </select>
           <input id="mToolTypeNew" placeholder="Nome do novo tipo" style="margin-top:6px;display:${esc(m.toolType && !toolTypeSuggestions().includes(m.toolType)?'block':'none')};" value="${esc(m.toolType && !toolTypeSuggestions().includes(m.toolType)?m.toolType:'')}">
         </div>
-        <div class="field"><label>Vida útil estimada (usos)</label><input type="number" id="mUsefulLifeUses" value="${m.usefulLifeUses||''}" step="1" placeholder="Ex: 50"></div>
+        <div class="field"><label>Vida útil estimada (usos)</label><input type="number" min="0" id="mUsefulLifeUses" value="${m.usefulLifeUses||''}" step="1" placeholder="Ex: 50"></div>
       </div>
     </div>
 
     <div class="row2">
-      <div class="field"><label>Preço de compra (R$)</label><input type="number" id="mPPrice" value="${m.purchasePrice}" step="0.01" oninput="updateMaterialUnitCost()"></div>
-      <div class="field"><label>Quantidade da compra</label><input type="number" id="mPQty" value="${m.purchaseQty}" step="0.01" oninput="updateMaterialUnitCost()"></div>
+      <div class="field"><label>Preço de compra (R$)</label><input type="number" min="0" id="mPPrice" value="${m.purchasePrice}" step="0.01" oninput="updateMaterialUnitCost()"></div>
+      <div class="field"><label>Quantidade da compra</label><input type="number" min="0" id="mPQty" value="${m.purchaseQty}" step="0.01" oninput="updateMaterialUnitCost()"></div>
     </div>
     <div class="field"><label>Custo unitário calculado</label><input id="mUnitCost" value="${brl(m.costPerUnit)}" disabled></div>
     <div class="row2">
@@ -6020,8 +6051,8 @@ function updateFilamentNamePreview(){
   if(preview) preview.value = computeFilamentName(materialType, colorName, isDualColor, colorName2);
 }
 function updateMaterialUnitCost(){
-  const price = parseFloat(document.getElementById('mPPrice').value)||0;
-  const qty = parseFloat(document.getElementById('mPQty').value)||1;
+  const price = numField('mPPrice');
+  const qty = numField('mPQty', 1);
   document.getElementById('mUnitCost').value = brl(price/qty);
 }
 function confirmMaterial(id){
@@ -6050,18 +6081,18 @@ function confirmMaterial(id){
       const size = document.getElementById('mBoxSize').value;
       if(!size){ toast('Escolha o tamanho da caixa','err'); return; }
       name = `Caixa ${size}`;
-      lengthCm = parseFloat(document.getElementById('mLengthCm').value)||0;
-      widthCm = parseFloat(document.getElementById('mWidthCm').value)||0;
-      heightCm = parseFloat(document.getElementById('mHeightCm').value)||0;
+      lengthCm = numField('mLengthCm');
+      widthCm = numField('mWidthCm');
+      heightCm = numField('mHeightCm');
     } else {
       name = document.getElementById('mName').value.trim();
       if(!name){ toast('Informe o nome','err'); return; }
       if(isEnvelope || isSaquinho){
-        lengthCm = parseFloat(document.getElementById('mFlatLengthCm').value)||0;
-        widthCm = parseFloat(document.getElementById('mFlatWidthCm').value)||0;
+        lengthCm = numField('mFlatLengthCm');
+        widthCm = numField('mFlatWidthCm');
       }
       if(isBubbleWrap || isTape){
-        widthCm = parseFloat(document.getElementById('mRollWidthCm').value)||0;
+        widthCm = numField('mRollWidthCm');
       }
     }
   } else {
@@ -6070,17 +6101,17 @@ function confirmMaterial(id){
     if(category==='Ferramentas'){
       const ttSel = document.getElementById('mToolType').value;
       toolType = ttSel==='__new__' ? document.getElementById('mToolTypeNew').value.trim() : ttSel;
-      usefulLifeUses = parseFloat(document.getElementById('mUsefulLifeUses').value)||0;
+      usefulLifeUses = numField('mUsefulLifeUses');
     }
   }
   const dup = state.materials.find(x=>x.id!==id && x.name.trim().toLowerCase()===name.toLowerCase());
   if(dup){ toast(`Já existe uma matéria-prima chamada "${esc(dup.name)}" — use outro nome`,'err'); return; }
-  const purchasePrice = parseFloat(document.getElementById('mPPrice').value)||0;
-  const purchaseQty = parseFloat(document.getElementById('mPQty').value)||1;
+  const purchasePrice = numField('mPPrice');
+  const purchaseQty = numField('mPQty', 1);
   // Arredonda conforme a unidade: 'un' é contável, não guarda 24,01 caixas.
   const unidade = document.getElementById('mUnit').value;
-  const stock = roundQty(parseFloat(document.getElementById('mStock').value)||0, unidade);
-  const lowStock = roundQty(parseFloat(document.getElementById('mLow').value)||0, unidade);
+  const stock = roundQty(numField('mStock'), unidade);
+  const lowStock = roundQty(numField('mLow'), unidade);
   if(purchasePrice<0 || purchaseQty<0 || stock<0 || lowStock<0){ toast('Valores de preço/quantidade/estoque não podem ser negativos','err'); return; }
   const data = {
     name, category, unit: unidade,
@@ -6142,7 +6173,7 @@ function openRestockModal(id){
   showModal(`Reabastecer: ${esc(m.name)}`, `
     <div class="field"><label>Estoque atual</label><input value="${num(m.stock,1)} ${esc(m.unit)}" disabled></div>
     <div class="field"><label>Quantidade a adicionar (${esc(m.unit)})</label><input type="number" id="rQty" step="${esc(stepForUnit(m.unit))}" min="0" placeholder="Ex: ${m.purchaseQty}"></div>
-    <div class="field"><label>Custo total da compra (opcional — recalcula custo unitário)</label><input type="number" id="rCost" step="0.01" placeholder="Ex: ${m.purchasePrice}"></div>
+    <div class="field"><label>Custo total da compra (opcional — recalcula custo unitário)</label><input type="number" min="0" id="rCost" step="0.01" placeholder="Ex: ${m.purchasePrice}"></div>
     <label class="field-checkbox" style="margin:-6px 0 12px;"><input type="checkbox" id="rAddInvestment" style="width:auto;" checked> Também registrar como investimento em Anual (se informar o custo acima)</label>
     <div class="modal-actions">
       <button class="btn ghost" onclick="closeModal()">Cancelar</button>
@@ -6152,7 +6183,7 @@ function openRestockModal(id){
 }
 function confirmRestock(id){
   const m = state.materials.find(x=>x.id===id);
-  const qty = parseFloat(document.getElementById('rQty').value)||0;
+  const qty = numField('rQty');
   const cost = parseFloat(document.getElementById('rCost').value);
   if(qty<=0){ toast('Informe uma quantidade válida','err'); return; }
   let investMsg = '';
@@ -6314,9 +6345,9 @@ function renderTaxas(){
 
     <div class="section-title">Precificação</div>
     <div class="card">
-      <div class="field"><label>Margem de lucro padrão sugerida (%)</label><input type="number" id="cfgMargin" value="${((1-1/(s.markupMultiplier||2.5))*100).toFixed(0)}" step="1"></div>
+      <div class="field"><label>Margem de lucro padrão sugerida (%)</label><input type="number" min="0" id="cfgMargin" value="${((1-1/(s.markupMultiplier||2.5))*100).toFixed(0)}" step="1"></div>
       <div class="field hint" style="margin-top:-8px;">Usada como ponto de partida ao criar um produto novo — depois, cada produto pode ter a margem ajustada individualmente no próprio cadastro.</div>
-      <div class="field"><label>Piso de alerta de margem (%)</label><input type="number" id="cfgMinMargin" value="${s.minMarginPct!=null?s.minMarginPct:25}" step="1"></div>
+      <div class="field"><label>Piso de alerta de margem (%)</label><input type="number" min="0" id="cfgMinMargin" value="${s.minMarginPct!=null?s.minMarginPct:25}" step="1"></div>
       <div class="field hint" style="margin-top:-8px;">Abaixo desse valor, a margem por Mercado Livre/Shopee aparece em vermelho na lista de Produtos — é a taxa da plataforma que costuma corroer a margem, não o preço de venda direta.</div>
     </div>
   `;
@@ -6373,27 +6404,27 @@ function renderConfiguracoes(){
 
     <div class="section-title">Mão de obra</div>
     <div class="card">
-      <div class="field"><label>Valor da sua hora de trabalho (R$/h)</label><input type="number" id="cfgLabor" value="${s.laborHourlyRate||0}" step="0.01"></div>
+      <div class="field"><label>Valor da sua hora de trabalho (R$/h)</label><input type="number" min="0" id="cfgLabor" value="${s.laborHourlyRate||0}" step="0.01"></div>
       <div class="field hint" style="margin-top:-8px;">Usado para calcular o custo de mão de obra de cada produto (pintura, montagem, acabamento), com base nos minutos informados no cadastro do produto.</div>
     </div>
 
     <div class="section-title">MEI, capacidade e metas</div>
     <div class="card">
       <div class="row2">
-        <div class="field"><label>Limite anual de faturamento do MEI (R$)</label><input type="number" id="cfgMeiLimit" value="${s.meiRevenueLimit||81000}" step="100"></div>
-        <div class="field"><label>Horas de impressão disponíveis por dia (por impressora)</label><input type="number" id="cfgPrintHours" value="${s.printHoursPerDay||8}" step="0.5"></div>
+        <div class="field"><label>Limite anual de faturamento do MEI (R$)</label><input type="number" min="0" id="cfgMeiLimit" value="${s.meiRevenueLimit||81000}" step="100"></div>
+        <div class="field"><label>Horas de impressão disponíveis por dia (por impressora)</label><input type="number" min="0" id="cfgPrintHours" value="${s.printHoursPerDay||8}" step="0.5"></div>
       </div>
-      <div class="field"><label>Meta de faturamento mensal (R$)</label><input type="number" id="cfgMonthlyGoal" value="${s.monthlyGoal||0}" step="50" placeholder="0 = sem meta definida"></div>
+      <div class="field"><label>Meta de faturamento mensal (R$)</label><input type="number" min="0" id="cfgMonthlyGoal" value="${s.monthlyGoal||0}" step="50" placeholder="0 = sem meta definida"></div>
     </div>
 
     <div class="section-title">Meta de rentabilidade</div>
     <div class="card">
       <div class="row2">
-        <div class="field"><label>R$/hora-máquina mínimo aceitável</label><input type="number" id="cfgTargetHourlyProfit" value="${s.targetHourlyProfit!=null?s.targetHourlyProfit:15}" step="0.5"></div>
-        <div class="field"><label>R$/hora-máquina de produto bom</label><input type="number" id="cfgGoodHourlyProfit" value="${s.goodHourlyProfit!=null?s.goodHourlyProfit:20}" step="0.5"></div>
+        <div class="field"><label>R$/hora-máquina mínimo aceitável</label><input type="number" min="0" id="cfgTargetHourlyProfit" value="${s.targetHourlyProfit!=null?s.targetHourlyProfit:15}" step="0.5"></div>
+        <div class="field"><label>R$/hora-máquina de produto bom</label><input type="number" min="0" id="cfgGoodHourlyProfit" value="${s.goodHourlyProfit!=null?s.goodHourlyProfit:20}" step="0.5"></div>
       </div>
       <div class="field hint" style="margin-top:-8px;">Com uma impressora, o recurso escasso é hora de bico. Abaixo da meta, o produto não paga o tempo que ocupa.</div>
-      <div class="field"><label>Lucro mínimo aceitável por venda (R$)</label><input type="number" id="cfgMinProfitPerSale" value="${s.minProfitPerSale!=null?s.minProfitPerSale:8}" step="0.5"></div>
+      <div class="field"><label>Lucro mínimo aceitável por venda (R$)</label><input type="number" min="0" id="cfgMinProfitPerSale" value="${s.minProfitPerSale!=null?s.minProfitPerSale:8}" step="0.5"></div>
       <div class="field hint" style="margin-top:-8px;">Um R$/hora ótimo não significa nada se cada venda mal cobre o cafezinho — produto abaixo desse piso é sinalizado mesmo com R$/hora alto, porque só compensa em volume gigantesco de vendas.</div>
     </div>
 
@@ -6436,10 +6467,10 @@ function renderReserveRows(){
   el.innerHTML = editingReserveGoals.map((g,i)=>`
     <div class="row3" style="align-items:end;">
       <div class="field"><label>${i===0?'Nome':''}</label><input value="${esc(g.name)}" oninput="editingReserveGoals[${i}].name=this.value"></div>
-      <div class="field"><label>${i===0?'Meta mensal (R$)':''}</label><input type="number" value="${g.goal}" step="0.01" placeholder="meta mensal R$" oninput="editingReserveGoals[${i}].goal=parseFloat(this.value)||0"></div>
+      <div class="field"><label>${i===0?'Meta mensal (R$)':''}</label><input type="number" min="0" value="${g.goal}" step="0.01" placeholder="meta mensal R$" oninput="editingReserveGoals[${i}].goal=nn(this.value)"></div>
       ${g.autoMode==='cost_depreciation'
         ? `<div class="field"><label>${i===0?'Alocação automática':''}</label><input value="Automático — via custo de depreciação" disabled></div>`
-        : `<div class="field"><label>${i===0?'% do lucro por venda':''}</label><input type="number" value="${g.autoPct||0}" step="1" placeholder="0" oninput="editingReserveGoals[${i}].autoPct=Math.min(100,Math.max(0,parseFloat(this.value)||0))"></div>`}
+        : `<div class="field"><label>${i===0?'% do lucro por venda':''}</label><input type="number" min="0" value="${g.autoPct||0}" step="1" placeholder="0" oninput="editingReserveGoals[${i}].autoPct=Math.min(100,Math.max(0,nn(this.value)))"></div>`}
     </div>
     <div style="display:flex;justify-content:flex-end;margin:-6px 0 10px;">
       ${g.autoMode==='cost_depreciation' ? `<span class="field hint" style="margin:0;">Reserva fixa do sistema — não pode ser removida</span>` : `<button class="btn ghost sm" title="Remover" onclick="removeReserveRow(${i})">Remover reserva</button>`}
@@ -6468,9 +6499,9 @@ function renderMarketGroupRows(){
         <button class="btn ghost sm" title="Remover" onclick="removeMarketGroupRow(${i})">Remover</button>
       </div>
       <div class="row3">
-        <div class="field"><label>Mínimo (R$)</label><input type="number" step="0.01" value="${g.min||''}" placeholder="0" oninput="editingMarketGroups[${i}].min=parseFloat(this.value)||0"></div>
-        <div class="field"><label>Médio (R$)</label><input type="number" step="0.01" value="${g.avg||''}" placeholder="0" oninput="editingMarketGroups[${i}].avg=parseFloat(this.value)||0"></div>
-        <div class="field"><label>Máximo (R$)</label><input type="number" step="0.01" value="${g.max||''}" placeholder="0" oninput="editingMarketGroups[${i}].max=parseFloat(this.value)||0"></div>
+        <div class="field"><label>Mínimo (R$)</label><input type="number" min="0" step="0.01" value="${g.min||''}" placeholder="0" oninput="editingMarketGroups[${i}].min=nn(this.value)"></div>
+        <div class="field"><label>Médio (R$)</label><input type="number" min="0" step="0.01" value="${g.avg||''}" placeholder="0" oninput="editingMarketGroups[${i}].avg=nn(this.value)"></div>
+        <div class="field"><label>Máximo (R$)</label><input type="number" min="0" step="0.01" value="${g.max||''}" placeholder="0" oninput="editingMarketGroups[${i}].max=nn(this.value)"></div>
       </div>
       <div class="row2">
         <div class="field"><label>Essa faixa é por</label>
@@ -6506,9 +6537,9 @@ function renderCustomOrderPriceTierRows(type){
   el.innerHTML = formRowsHtml('minmax(0,1fr) minmax(0,1fr) minmax(0,1fr)', ['De (un)','Até (un)','R$ por unidade'],
     tiers.map((t,i)=>`
     <div class="form-row">
-      <input type="number" min="1" step="1" value="${t.minQty||1}" placeholder="de (un)" oninput="editingCustomOrderPriceTable['${type}'][${i}].minQty=parseFloat(this.value)||1">
-      <input type="number" min="1" step="1" value="${t.maxQty||''}" placeholder="até (opcional)" oninput="editingCustomOrderPriceTable['${type}'][${i}].maxQty=parseFloat(this.value)||0">
-      <input type="number" step="0.01" value="${t.unitPrice||''}" placeholder="R$/un" oninput="editingCustomOrderPriceTable['${type}'][${i}].unitPrice=parseFloat(this.value)||0">
+      <input type="number" min="1" step="1" value="${t.minQty||1}" placeholder="de (un)" oninput="editingCustomOrderPriceTable['${type}'][${i}].minQty=nn(this.value, 1)">
+      <input type="number" min="1" step="1" value="${t.maxQty||''}" placeholder="até (opcional)" oninput="editingCustomOrderPriceTable['${type}'][${i}].maxQty=nn(this.value)">
+      <input type="number" min="0" step="0.01" value="${t.unitPrice||''}" placeholder="R$/un" oninput="editingCustomOrderPriceTable['${type}'][${i}].unitPrice=nn(this.value)">
       ${formRowX(`removePriceTierRow('${type}',${i})`)}
     </div>
   `));
@@ -6531,21 +6562,21 @@ function renderMachineRows(){
         <button class="btn ghost sm" title="Remover" onclick="removeMachineRow(${i})">Remover</button>
       </div>
       <div class="row3">
-        <div class="field"><label>Preço de compra (R$)</label><input type="number" step="0.01" value="${m.price||0}" oninput="editingMachines[${i}].price=parseFloat(this.value)||0"></div>
-        <div class="field"><label>Valor residual (R$)</label><input type="number" step="0.01" value="${m.residual||0}" oninput="editingMachines[${i}].residual=parseFloat(this.value)||0"></div>
-        <div class="field"><label>Vida útil (horas)</label><input type="number" step="1" value="${m.lifeHours||5000}" oninput="editingMachines[${i}].lifeHours=parseFloat(this.value)||1"></div>
+        <div class="field"><label>Preço de compra (R$)</label><input type="number" min="0" step="0.01" value="${m.price||0}" oninput="editingMachines[${i}].price=nn(this.value)"></div>
+        <div class="field"><label>Valor residual (R$)</label><input type="number" min="0" step="0.01" value="${m.residual||0}" oninput="editingMachines[${i}].residual=nn(this.value)"></div>
+        <div class="field"><label>Vida útil (horas)</label><input type="number" min="0" step="1" value="${m.lifeHours||5000}" oninput="editingMachines[${i}].lifeHours=nn(this.value, 1)"></div>
       </div>
       <div class="row2">
-        <div class="field"><label>Potência média (kW)</label><input type="number" step="0.01" value="${m.powerConsumptionKw||0}" placeholder="Ex: 0.1" oninput="editingMachines[${i}].powerConsumptionKw=parseFloat(this.value)||0; renderMachineRows();"></div>
-        <div class="field"><label>Custo de energia (R$/h)</label><input type="number" step="0.0001" value="${m.energyCostPerHour||0}" ${m.powerConsumptionKw>0?'disabled':''} oninput="editingMachines[${i}].energyCostPerHour=parseFloat(this.value)||0"></div>
+        <div class="field"><label>Potência média (kW)</label><input type="number" min="0" step="0.01" value="${m.powerConsumptionKw||0}" placeholder="Ex: 0.1" oninput="editingMachines[${i}].powerConsumptionKw=nn(this.value); renderMachineRows();"></div>
+        <div class="field"><label>Custo de energia (R$/h)</label><input type="number" min="0" step="0.0001" value="${m.energyCostPerHour||0}" ${m.powerConsumptionKw>0?'disabled':''} oninput="editingMachines[${i}].energyCostPerHour=nn(this.value)"></div>
       </div>
       <div class="field hint" style="margin-top:-8px;margin-bottom:10px;">${m.powerConsumptionKw>0 ? `Calculado automaticamente pela tarifa (aba Cálculo): ${num(m.powerConsumptionKw,2)}kW × ${brl(state.settings.energyTariffPerKwh||0)}/kWh = ${brl(machineEnergyCostPerHour(m))}/h` : 'Preencha a potência pra calcular sozinho pela tarifa, ou deixe em 0 e informe o R$/h manualmente.'}</div>
       <div class="field hint" style="margin-top:-8px;margin-bottom:10px;">Depreciação calculada: ${brl(machineDeprCostPerHour(m))}/h</div>
-      <div class="field"><label>Manutenção (R$/h)</label><input type="number" step="0.01" value="${m.maintenanceCostPerHour!=null?m.maintenanceCostPerHour:0.25}" oninput="editingMachines[${i}].maintenanceCostPerHour=parseFloat(this.value)||0"></div>
+      <div class="field"><label>Manutenção (R$/h)</label><input type="number" min="0" step="0.01" value="${m.maintenanceCostPerHour!=null?m.maintenanceCostPerHour:0.25}" oninput="editingMachines[${i}].maintenanceCostPerHour=nn(this.value)"></div>
       <div class="field hint" style="margin-top:-8px;margin-bottom:10px;">Estimativa fixa de troca de bico, correias, limpeza etc. — não é derivada do histórico de manutenção abaixo (poucas horas rodadas fariam o valor oscilar demais). Revise a cada 6 meses.</div>
       <div class="row3">
-        <div class="field"><label>Parcela mensal (R$)</label><input type="number" step="0.01" value="${m.installmentValue||0}" oninput="editingMachines[${i}].installmentValue=parseFloat(this.value)||0"></div>
-        <div class="field"><label>Total de parcelas</label><input type="number" step="1" value="${m.installmentsTotal||0}" oninput="editingMachines[${i}].installmentsTotal=parseFloat(this.value)||0"></div>
+        <div class="field"><label>Parcela mensal (R$)</label><input type="number" min="0" step="0.01" value="${m.installmentValue||0}" oninput="editingMachines[${i}].installmentValue=nn(this.value)"></div>
+        <div class="field"><label>Total de parcelas</label><input type="number" min="0" step="1" value="${m.installmentsTotal||0}" oninput="editingMachines[${i}].installmentsTotal=nn(this.value)"></div>
         <div class="field"><label>Mês da 1ª parcela</label><input type="month" value="${m.startMonth||currentMonth}" oninput="editingMachines[${i}].startMonth=this.value"></div>
       </div>
     </div>
@@ -6558,7 +6589,7 @@ function openMaintenanceModal(machineId){
   showModal(`Manutenção — ${esc(m.name)}`, `
     <div class="row2">
       <div class="field"><label>Data</label><input type="date" id="mtDate" value="${todayStr()}"></div>
-      <div class="field"><label>Custo (R$, opcional)</label><input type="number" id="mtCost" step="0.01" value="0"></div>
+      <div class="field"><label>Custo (R$, opcional)</label><input type="number" min="0" id="mtCost" step="0.01" value="0"></div>
     </div>
     <div class="field"><label>O que foi feito</label><input id="mtNote" placeholder="Ex: troca de bico, nivelamento da mesa"></div>
     <div class="modal-actions">
@@ -6580,7 +6611,7 @@ function confirmMaintenance(machineId){
   const m = (state.settings.machines||[]).find(x=>x.id===machineId);
   if(!m) return;
   const date = document.getElementById('mtDate').value || todayStr();
-  const cost = parseFloat(document.getElementById('mtCost').value)||0;
+  const cost = numField('mtCost');
   const note = document.getElementById('mtNote').value.trim();
   if(!Array.isArray(m.maintenanceLog)) m.maintenanceLog = [];
   m.maintenanceLog.push({ id:uid(), date, cost, note });
@@ -6631,13 +6662,13 @@ function renderNameValueRows(containerId, list, updateFn, removeFn){
 // despesa criada agora aparecia em todos os meses anteriores do Anual.
 function addExpenseRow(){ editingExpenses.push({id:uid(),name:'',value:0,startMonth:todayStr().slice(0,7)}); renderNameValueRows('expenseRows', editingExpenses, 'updateExpenseRow', 'removeExpenseRow'); }
 function updateExpenseRow(i,field,val){
-  editingExpenses[i][field] = field==='value' ? (parseFloat(val)||0) : val;
+  editingExpenses[i][field] = field==='value' ? (nn(val)) : val;
   const t = document.getElementById('expenseTotal');
   if(t) t.textContent = brl(editingExpenses.reduce((a,e)=>a+(e.value||0),0));
 }
 function removeExpenseRow(i){ editingExpenses.splice(i,1); renderNameValueRows('expenseRows', editingExpenses, 'updateExpenseRow', 'removeExpenseRow'); }
 function addTaxRow(){ editingTaxes.push({id:uid(),name:'',value:0,startMonth:todayStr().slice(0,7)}); renderNameValueRows('taxRows', editingTaxes, 'updateTaxRow', 'removeTaxRow'); }
-function updateTaxRow(i,field,val){ editingTaxes[i][field] = field==='value' ? (parseFloat(val)||0) : val; }
+function updateTaxRow(i,field,val){ editingTaxes[i][field] = field==='value' ? (nn(val)) : val; }
 function removeTaxRow(i){ editingTaxes.splice(i,1); renderNameValueRows('taxRows', editingTaxes, 'updateTaxRow', 'removeTaxRow'); }
 /* ---------- Categorias do Mercado Livre (clássico x premium) ----------
    O ML cobra percentual DIFERENTE por categoria (são ~477) e por tipo de
@@ -6716,8 +6747,8 @@ function renderPlatformRows(){
     ${isML ? mlCategoryTable(i) : ''}
     ${isShopee ? shopeeTierPanel(p) : ''}
     ${(!isML && !isShopee) ? `<div class="row2" style="margin-bottom:4px;">
-      <div class="field"><label>Taxa %</label><input type="number" step="0.01" value="${p.pct}" oninput="editingPlatforms[${i}].pct=parseFloat(this.value)||0"></div>
-      <div class="field"><label>Taxa fixa por unidade vendida (R$)</label><input type="number" step="0.01" value="${p.fixed}" oninput="editingPlatforms[${i}].fixed=parseFloat(this.value)||0"></div>
+      <div class="field"><label>Taxa %</label><input type="number" min="0" step="0.01" value="${p.pct}" oninput="editingPlatforms[${i}].pct=nn(this.value)"></div>
+      <div class="field"><label>Taxa fixa por unidade vendida (R$)</label><input type="number" min="0" step="0.01" value="${p.fixed}" oninput="editingPlatforms[${i}].fixed=nn(this.value)"></div>
     </div>` : ''}
     ${canHaveListing ? `<div class="field" style="margin-bottom:12px;"><label>Aba de Anúncios pra "${esc(p.name)}"</label>
       <select onchange="editingPlatforms[${i}].listingTemplate=this.value||null; renderPlatformRows();">
@@ -6902,8 +6933,8 @@ function confirmMlCategory(){
     id: uid(),
     nome,
     mlCategoryId: document.getElementById('mlCatId').value.trim(),
-    classicaPct: parseFloat(document.getElementById('mlCatClassica').value)||0,
-    premiumPct: parseFloat(document.getElementById('mlCatPremium').value)||0,
+    classicaPct: numField('mlCatClassica'),
+    premiumPct: numField('mlCatPremium'),
     origem,
     atualizadoEm: todayStr(),
   });
@@ -6926,9 +6957,9 @@ function confirmTaxas(){
   const cleanPlatforms = editingPlatforms.filter(p=>p.name && p.name.trim());
   if(cleanPlatforms.length===0){ toast('Cadastre ao menos uma plataforma','err'); return; }
   s.platforms = cleanPlatforms;
-  const cfgMarginPct = Math.min(95, Math.max(0, parseFloat(document.getElementById('cfgMargin').value)||0));
+  const cfgMarginPct = Math.min(95, Math.max(0, numField('cfgMargin')));
   s.markupMultiplier = cfgMarginPct<100 ? 1/(1-cfgMarginPct/100) : 20;
-  s.minMarginPct = Math.min(95, Math.max(0, parseFloat(document.getElementById('cfgMinMargin').value)||0));
+  s.minMarginPct = Math.min(95, Math.max(0, numField('cfgMinMargin')));
   saveSettings(); toast('Taxas salvas'); renderContent();
 }
 function confirmConfiguracoes(){
@@ -6943,13 +6974,13 @@ function confirmConfiguracoes(){
   s.pixMerchantCity = document.getElementById('cfgPixCity').value.trim();
   s.whatsapp = document.getElementById('cfgWhatsapp').value.trim();
   s.instagram = document.getElementById('cfgInstagram').value.trim().replace(/^@/,'');
-  s.laborHourlyRate = parseFloat(document.getElementById('cfgLabor').value)||0;
-  s.meiRevenueLimit = parseFloat(document.getElementById('cfgMeiLimit').value)||81000;
-  s.monthlyGoal = parseFloat(document.getElementById('cfgMonthlyGoal').value)||0;
-  s.printHoursPerDay = parseFloat(document.getElementById('cfgPrintHours').value)||8;
-  s.targetHourlyProfit = parseFloat(document.getElementById('cfgTargetHourlyProfit').value)||15;
-  s.goodHourlyProfit = parseFloat(document.getElementById('cfgGoodHourlyProfit').value)||20;
-  s.minProfitPerSale = parseFloat(document.getElementById('cfgMinProfitPerSale').value)||8;
+  s.laborHourlyRate = numField('cfgLabor');
+  s.meiRevenueLimit = numField('cfgMeiLimit', 81000);
+  s.monthlyGoal = numField('cfgMonthlyGoal');
+  s.printHoursPerDay = numField('cfgPrintHours', 8);
+  s.targetHourlyProfit = numField('cfgTargetHourlyProfit', 15);
+  s.goodHourlyProfit = numField('cfgGoodHourlyProfit', 20);
+  s.minProfitPerSale = numField('cfgMinProfitPerSale', 8);
   s.marketByGroup = {};
   editingMarketGroups.forEach(g=>{ s.marketByGroup[g.category] = { min:g.min||0, avg:g.avg||0, max:g.max||0, checkedAt:g.checkedAt||'', note:g.note||'', unitBasis:g.unitBasis==='kit'?'kit':'unidade', kitSize:g.kitSize||1 }; });
   s.customOrderPriceTable = {
@@ -6994,7 +7025,7 @@ function openReserveModal(id){
   const g = state.settings.reserveGoals.find(x=>x.id===id);
   showModal(`Movimentar: ${esc(g.name)}`, `
     <div class="field"><label>Saldo acumulado atual</label><input value="${brl(g.balance)}" disabled></div>
-    <div class="field"><label>Valor a adicionar (use negativo para retirar)</label><input type="number" id="resDelta" step="0.01" placeholder="Ex: ${g.goal || 100}"></div>
+    <div class="field"><label>Valor a adicionar (use negativo para retirar)</label><input type="number" min="0" id="resDelta" step="0.01" placeholder="Ex: ${g.goal || 100}"></div>
     <div class="modal-actions">
       <button class="btn ghost" onclick="closeModal()">Cancelar</button>
       <button class="btn primary" onclick="confirmReserve('${id}')">Confirmar</button>
@@ -7003,7 +7034,7 @@ function openReserveModal(id){
 }
 function confirmReserve(id){
   const g = state.settings.reserveGoals.find(x=>x.id===id);
-  const delta = parseFloat(document.getElementById('resDelta').value)||0;
+  const delta = numField('resDelta');
   g.balance += delta;
   saveSettings(); toast('Reserva atualizada'); closeModal(); renderContent();
 }
