@@ -292,3 +292,49 @@ test('extraListingPlatforms traz só quem tem aba de Anúncios', () => {
   setState({ settings:{ platforms:[ML] } });
   assert.strictEqual(calc.extraListingPlatforms().length, 0);
 });
+
+// ===========================================================================
+//  ANÚNCIO PAGO (ML Ads / Shopee Ads)
+// ===========================================================================
+test('adSpendInMonth soma só o mês pedido, e filtra por plataforma', () => {
+  const lista = [
+    { ym:'2026-08', platform:'Mercado Livre', value:60 },
+    { ym:'2026-08', platform:'Shopee',        value:40 },
+    { ym:'2026-09', platform:'Mercado Livre', value:300 },
+  ];
+  assert.strictEqual(calc.adSpendInMonth(lista, '2026-08'), 100, 'sem plataforma, soma o mês todo');
+  assert.strictEqual(calc.adSpendInMonth(lista, '2026-08', 'Mercado Livre'), 60);
+  assert.strictEqual(calc.adSpendInMonth(lista, '2026-08', 'Shopee'), 40);
+  // O ponto de existir esta estrutura: gasto de anúncio VARIA por mês. Se
+  // caísse em settings.expenses (lista plana), agosto e setembro seriam iguais.
+  assert.strictEqual(calc.adSpendInMonth(lista, '2026-09'), 300);
+  assert.strictEqual(calc.adSpendInMonth(lista, '2026-07'), 0);
+  assert.strictEqual(calc.adSpendInMonth(null, '2026-08'), 0);
+});
+
+test('adBreakEvenSales: quantas vendas o orçamento precisa gerar', () => {
+  // R$60 num produto que lucra R$30,23 por venda: 2 vendas pagam.
+  assert.strictEqual(calc.adBreakEvenSales(60, 30.23), 2);
+  // R$60 num que lucra R$1,01: precisaria de 60 vendas — o número já diz
+  // sozinho que não vale anunciar esse.
+  assert.strictEqual(calc.adBreakEvenSales(60, 1.01), 60);
+  // Arredonda pra cima: 3,2 vendas não existe, são 4.
+  assert.strictEqual(calc.adBreakEvenSales(100, 30), 4);
+  assert.strictEqual(calc.adBreakEvenSales(0, 30), 0, 'sem orçamento, nada a pagar');
+});
+
+test('adBreakEvenSales: lucro zero ou negativo devolve null, não um número', () => {
+  /* null é a resposta CERTA, e a diferença importa: com lucro negativo,
+     nenhum número de vendas paga o anúncio — cada clique pago vira prejuízo
+     em cima de prejuízo. Devolver um número grande daria a impressão de que
+     bastaria vender mais. */
+  assert.strictEqual(calc.adBreakEvenSales(60, 0), null);
+  assert.strictEqual(calc.adBreakEvenSales(60, -3.39), null);
+});
+
+test('adBreakEvenAcos: teto de gasto por venda, em % do preço', () => {
+  // Lucro de R$16,98 num preço de R$39,90 = pode gastar até 42,6% em anúncio.
+  assert.ok(Math.abs(calc.adBreakEvenAcos(16.98, 39.90) - 42.56) < 0.01);
+  assert.strictEqual(calc.adBreakEvenAcos(-3, 39.90), 0, 'sem lucro, nenhum gasto se justifica');
+  assert.strictEqual(calc.adBreakEvenAcos(10, 0), 0, 'preço zero não tem percentual');
+});

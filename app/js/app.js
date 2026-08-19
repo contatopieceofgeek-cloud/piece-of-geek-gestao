@@ -499,6 +499,10 @@ function migrateSettings(settings){
   settings.machines.forEach(m=>{ if(m.energyCostPerHour==null) m.energyCostPerHour = 0.0704; if(m.powerConsumptionKw==null) m.powerConsumptionKw = 0; if(!m.id) m.id = uid(); if(!Array.isArray(m.maintenanceLog)) m.maintenanceLog = []; if(m.maintenanceCostPerHour==null) m.maintenanceCostPerHour = 0.25; });
   if(settings.energyTariffPerKwh==null) settings.energyTariffPerKwh = 0.75;
   if(settings.meiRevenueLimit==null) settings.meiRevenueLimit = 81000;
+  // Gasto de anúncio por mês+plataforma. Ver adSpendInMonth em calc.js.
+  if(!Array.isArray(settings.adSpend)) settings.adSpend = [];
+  // Orçamento usado no Diagnóstico enquanto não há gasto lançado no mês.
+  if(settings.adBudgetRef==null) settings.adBudgetRef = 100;
   /* Regime tributário. Muda o SENTIDO do teto de R$81.000, não só o texto:
      pra quem é MEI é um limite que não pode estourar (desenquadramento);
      pra quem não é, é a resposta de "se eu formalizar, MEI ainda me serve?".
@@ -955,7 +959,7 @@ function salesInMonth(ym){ return state.sales.filter(s=>s.date && s.date.slice(0
 
 function blocoA(ym){
   if(state.settings.operationsStartMonth && ym < state.settings.operationsStartMonth){
-    return { faturamento:0, taxas:0, receitaLiquida:0, custoProducao:0, frete:0, despesas:0, lucroBruto:0, mei:0, lucroOperacional:0, qtdVendas:0 };
+    return { faturamento:0, taxas:0, receitaLiquida:0, custoProducao:0, frete:0, despesas:0, anuncios:0, lucroBruto:0, mei:0, lucroOperacional:0, qtdVendas:0 };
   }
   const sales = salesInMonth(ym);
   const faturamento = sales.reduce((a,s)=>a+s.grossPrice,0);
@@ -968,10 +972,15 @@ function blocoA(ym){
   const taxesSrc = snap ? snap.taxes : state.settings.taxes;
   // Só conta a partir do mês da 1ª cobrança (ver sumActiveInMonth em calc.js).
   const despesas = sumActiveInMonth(expensesSrc, ym);
-  const lucroBruto = receitaLiquida - custoProducao - frete - despesas;
+  /* Anúncio pago entra AQUI, no Bloco A, e não no D: é custo operacional do
+     mês, não investimento. Lançado no D, o lucro operacional apareceria
+     melhor do que é. Não passa por snapshot porque cada lançamento já
+     carrega o próprio mês — não tem como derivar. */
+  const anuncios = adSpendInMonth(state.settings.adSpend, ym);
+  const lucroBruto = receitaLiquida - custoProducao - frete - despesas - anuncios;
   const mei = sumActiveInMonth(taxesSrc, ym);
   const lucroOperacional = lucroBruto - mei;
-  return { faturamento, taxas, receitaLiquida, custoProducao, frete, despesas, lucroBruto, mei, lucroOperacional, qtdVendas: sales.length };
+  return { faturamento, taxas, receitaLiquida, custoProducao, frete, despesas, anuncios, lucroBruto, mei, lucroOperacional, qtdVendas: sales.length };
 }
 function machineInstallmentStatus(m, ym){
   const start = m.startMonth || ym;
@@ -1975,7 +1984,7 @@ function investmentProgress(inv){
 }
 function blocoAYear(year){
   const months = monthsOfYearElapsed(year);
-  const acc = { faturamento:0, taxas:0, receitaLiquida:0, custoProducao:0, frete:0, despesas:0, mei:0, lucroBruto:0, lucroOperacional:0, qtdVendas:0, parcelas:0 };
+  const acc = { faturamento:0, taxas:0, receitaLiquida:0, custoProducao:0, frete:0, despesas:0, anuncios:0, mei:0, lucroBruto:0, lucroOperacional:0, qtdVendas:0, parcelas:0 };
   months.forEach(ym=>{
     const a = blocoA(ym);
     const b = blocoB(ym);
@@ -1985,6 +1994,7 @@ function blocoAYear(year){
     acc.custoProducao += a.custoProducao;
     acc.frete += a.frete;
     acc.despesas += a.despesas;
+    acc.anuncios += a.anuncios;
     acc.mei += a.mei;
     acc.lucroBruto += a.lucroBruto;
     acc.lucroOperacional += a.lucroOperacional;
@@ -2045,6 +2055,7 @@ function renderAnual(){
         ${caixaRow('(−) Custo de Produção', -y.custoProducao)}
         ${caixaRow('(−) Frete pago', -y.frete)}
         ${caixaRow('(−) Despesas Operacionais', -y.despesas)}
+        ${caixaRow('(−) Anúncios / tráfego pago', -y.anuncios)}
         ${caixaRow('(−) Impostos', -y.mei)}
         ${caixaRow('(=) LUCRO OPERACIONAL', y.lucroOperacional, true)}
         ${caixaRow('(−) Parcelas pagas no ano', -y.parcelas)}
@@ -3643,6 +3654,25 @@ function betterChannelInfo(hourlyMl, hourlyShopee){
   }
   return { best, label: best==='Mercado Livre'?'ML':'Shopee', flag };
 }
+/* Coluna "Anúncio" do Diagnóstico: transforma a margem em decisão de tráfego
+   pago. Duas leituras, porque uma sozinha engana:
+     - quantas VENDAS o orçamento do mês precisa gerar (número absoluto, é o
+       que dá pra comparar com o volume que você já vende);
+     - o ACOS de equilíbrio, que é o teto de gasto por venda em % do preço.
+   Lucro <= 0 no canal recebe alerta em vermelho em vez de número: anunciar ali
+   é pagar pra vender no prejuízo, e nenhum volume conserta isso. */
+function adCellHtml(profit, price){
+  const orcamento = adSpendInMonth(state.settings.adSpend, currentMonth, diagnosticoChannel);
+  const ref = orcamento > 0 ? orcamento : (state.settings.adBudgetRef || 100);
+  const vendas = adBreakEvenSales(ref, profit);
+  if(vendas === null){
+    return `<span class="badge bad">não anuncie</span>
+      <div style="font-size:10.5px;color:var(--text-faint);">lucro ${profit!=null?brl(profit):'—'} — cada venda paga daria prejuízo</div>`;
+  }
+  const acos = adBreakEvenAcos(profit, price);
+  return `<span class="num">${vendas} venda${vendas>1?'s':''}</span>
+    <div style="font-size:10.5px;color:var(--text-faint);">pra pagar ${brl(ref)}${orcamento>0?'':' (referência)'} · teto ${num(acos,0)}% do preço</div>`;
+}
 function renderProdutosDiagnostico(){
   if(state.products.length===0) return `<div class="card">${emptyState('Nenhum produto cadastrado ainda.')}</div>`;
   const target = state.settings.targetHourlyProfit!=null ? state.settings.targetHourlyProfit : 15;
@@ -3699,10 +3729,11 @@ function renderProdutosDiagnostico(){
     <td class="right num" data-label="R$/hora ML">${hourlyMl!=null?brl(hourlyMl)+'/h':'—'}</td>
     <td class="right num" data-label="R$/hora Shopee">${hourlyShopee!=null?brl(hourlyShopee)+'/h':'—'}</td>
     <td data-label="Melhor canal">${better.best?better.label:'—'}${better.flag?`<div style="font-size:10px;color:var(--text-faint);">${better.flag}</div>`:''}</td>
+    <td class="right" data-label="Anúncio">${adCellHtml(profit, channelPriceFor(c, channel))}</td>
     <td data-label="Veredito"><span class="badge ${verdict.cls}">${verdict.label}</span></td>
   </tr>`).join('');
   return channelTabs + summary + `<div class="card"><div class="tbl-wrap tbl-responsive"><table>
-    <thead><tr><th>Produto</th><th class="right">Peso/un</th><th class="right">Tempo/un</th><th class="right">Lucro/venda</th><th class="right">R$/hora ML</th><th class="right">R$/hora Shopee</th><th>Melhor canal</th><th>Veredito</th></tr></thead>
+    <thead><tr><th>Produto</th><th class="right">Peso/un</th><th class="right">Tempo/un</th><th class="right">Lucro/venda</th><th class="right">R$/hora ML</th><th class="right">R$/hora Shopee</th><th>Melhor canal</th><th class="right">Anúncio</th><th>Veredito</th></tr></thead>
     <tbody>${rows}</tbody>
   </table></div></div>`;
 }
@@ -6252,6 +6283,7 @@ function renderCaixa(){
           ${caixaRow('(−) Custo de Produção', -a.custoProducao)}
           ${caixaRow('(−) Frete pago', -a.frete)}
           ${caixaRow('(−) Despesas Operacionais', -a.despesas)}
+          ${caixaRow('(−) Anúncios / tráfego pago', -a.anuncios)}
           ${caixaRow('(=) Lucro Bruto', a.lucroBruto, true)}
           ${caixaRow('(−) Imposto MEI (DAS)', -a.mei)}
           ${caixaRow('(=) LUCRO OPERACIONAL', a.lucroOperacional, true)}
@@ -6268,6 +6300,13 @@ function renderCaixa(){
         <div class="card-title">Detalhamento — Impostos<span class="sub">${brl(a.mei)}/mês</span></div>
         ${breakdownTable(state.settings.taxes, currentMonth)}
       </div>
+    </div>
+
+    <div class="section-title">Anúncios / tráfego pago</div>
+    <div class="card">
+      <div class="field hint" style="margin:0 0 10px;">Quanto você gastou com ML Ads / Shopee Ads em <strong>${monthLabel(currentMonth)}</strong>. Diferente das despesas fixas, cada mês tem o seu valor — entra no Bloco A e reduz o lucro operacional do mês.</div>
+      ${adSpendRows(currentMonth)}
+      <button class="btn ghost sm" style="margin-top:8px;" onclick="addAdSpendRow()">+ Lançar gasto de anúncio</button>
     </div>
 
     <div class="section-title">Bloco B — Amortização do investimento</div>
@@ -6352,6 +6391,50 @@ let editingMarketGroups = [];
 let editingCustomOrderPriceTable = { chaveiro:[], lembrancinha:[], topo_bolo:[] };
 let editingBusinessName = '';
 let editingBusinessLogo = null;
+/* ---------- Anúncios / tráfego pago (aba Caixa) ----------
+   Salva direto no state a cada edição, sem rascunho: a aba Caixa não tem
+   botão "Salvar" (Taxas e Configurações têm), então esperar por um seria
+   perder o lançamento ao trocar de aba. */
+function adSpendRows(ym){
+  const lista = (state.settings.adSpend||[]).filter(a=>a.ym===ym);
+  const plataformas = (state.settings.platforms||[]).map(p=>p.name);
+  if(!lista.length) return emptyState(`Nada lançado em ${monthLabel(ym)}`);
+  const total = lista.reduce((s,a)=>s+(a.value||0),0);
+  return formRowsHtml('minmax(0,1.4fr) minmax(0,1fr)', ['Plataforma','Gasto no mês'],
+    lista.map(a=>`
+    <div class="form-row">
+      <select onchange="updateAdSpend('${escJs(a.id)}','platform',this.value)">
+        ${plataformas.map(n=>`<option value="${esc(n)}" ${a.platform===n?'selected':''}>${esc(n)}</option>`).join('')}
+      </select>
+      <input type="number" min="0" step="0.01" value="${a.value}" oninput="updateAdSpend('${escJs(a.id)}','value',this.value)">
+      ${formRowX(`removeAdSpend('${escJs(a.id)}')`)}
+    </div>`))
+    + `<div class="field hint" style="margin-top:6px;text-align:right;">Total do mês: <strong style="color:var(--text)">${brl(total)}</strong></div>`;
+}
+function addAdSpendRow(){
+  if(!(state.settings.platforms||[]).length){
+    blockedBy('Nenhuma plataforma cadastrada',
+      'O gasto de anúncio é lançado por plataforma, pra você comparar depois o que cada uma devolveu. Cadastre as suas primeiro.',
+      'Ir para Taxas', `switchTab('taxas');`);
+    return;
+  }
+  if(!Array.isArray(state.settings.adSpend)) state.settings.adSpend = [];
+  state.settings.adSpend.push({ id:uid(), ym:currentMonth, platform:state.settings.platforms[0].name, value:0 });
+  saveSettings(); renderContent();
+}
+function updateAdSpend(id, campo, valor){
+  const a = (state.settings.adSpend||[]).find(x=>x.id===id);
+  if(!a) return;
+  a[campo] = campo==='value' ? nn(valor) : valor;
+  saveSettings();
+  // Só re-renderiza no valor: trocar de plataforma não mexe em total nenhum,
+  // e re-render a cada tecla digitada tiraria o foco do campo.
+  if(campo==='value') renderContent();
+}
+function removeAdSpend(id){
+  state.settings.adSpend = (state.settings.adSpend||[]).filter(x=>x.id!==id);
+  saveSettings(); renderContent();
+}
 function renderTaxas(){
   const s = state.settings;
   return `

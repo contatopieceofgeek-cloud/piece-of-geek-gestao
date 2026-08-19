@@ -61,7 +61,22 @@ Estado global em `state = { materials, products, sales, orders, customers, print
 - **orders**: fila de produção (Kanban: Aguardando impressão → Imprimindo → Pronto pra envio → Enviado).
 - **customers**: clientes, linkados a `sales` via `customerId`.
 - **printFailures**: registro de falhas de impressão (desperdício real de material/energia), desconta do estoque proporcionalmente.
-- **settings**: tudo configurável — máquinas, taxas de plataforma (Shopee tem `tiers` pra cálculo automático por faixa de preço, ML não), despesas, impostos, metas de reserva, chave PIX, meta de faturamento, DAS, `operationsStartMonth` (mês de início das operações — ver pegadinha #9), `investments` (compras avulsas/parceladas que aparecem em Caixa/Anual — ligado a Estoque nos dois sentidos: criar um investimento de categoria Filamento/Embalagem/Ferramentas/Componentes pode já somar ao estoque do material, e criar material novo ou reabastecer com custo em Estoque pode já criar o investimento correspondente, checkbox em cada modal).
+- **settings**: tudo configurável — máquinas, taxas de plataforma (Shopee tem `tiers` pra cálculo automático por faixa de preço, ML não), despesas, impostos, metas de reserva, chave PIX, meta de faturamento, DAS, `operationsStartMonth` (mês de início das operações — ver pegadinha #9), `investments` (compras avulsas/parceladas que aparecem em Caixa/Anual — ligado a Estoque nos dois sentidos: criar um investimento de categoria Filamento/Embalagem/Ferramentas/Componentes pode já somar ao estoque do material, e criar material novo ou reabastecer com custo em Estoque pode já criar o investimento correspondente, checkbox em cada modal), `adSpend` (⚠️ ver "Anúncios pagos" abaixo).
+
+## Anúncios pagos (ML Ads / Shopee Ads)
+
+`settings.adSpend = [{id, ym, platform, value}]` — **uma linha por mês e plataforma**, lançada na aba Caixa (que já tem seletor de mês). Grava direto no estado a cada edição, porque o Caixa não tem botão Salvar.
+
+⚠️ **Anúncio entra no Bloco A, não no D — e isso não é detalhe de arrumação.** Nenhum dos dois lugares que já existiam servia:
+- `settings.expenses` é lista FLAT sem data (ver pegadinha #11): o mesmo valor cairia em TODO mês. Anúncio muda todo mês por definição — é exatamente o número que a pessoa mexe pra testar.
+- `investments` cai no **Bloco D**, depois do lucro operacional. Anúncio pago é custo de vender, igual taxa de plataforma: deixar ele fora do Bloco A faz o app dizer que a operação dá mais lucro do que dá. Gastar R$100 pra vender é despesa do mês, não compra de máquina.
+
+`adSpendInMonth(lista, ym, plataforma?)` em `calc.js` (testada) soma; sem o 3º argumento soma todas as plataformas. `blocoA(ym)` subtrai o total junto com despesas.
+
+**No Diagnóstico**, a coluna "Anúncio" responde a pergunta que o usuário fez ("compensa?") sem ele refazer conta: quantas vendas daquele produto pagam o orçamento do canal. Usa o gasto REAL do mês pro canal selecionado; sem lançamento, cai em `settings.adBudgetRef` (padrão 100) e escreve "(referência)" pra ninguém achar que é dado real.
+
+- `adBreakEvenSales(orcamento, lucroPorVenda)` — devolve **`null`** quando o lucro não é positivo, e `null` vira o selo `não anuncie`, não um número. É de propósito: com margem negativa não existe volume que resolva — mais vendas só aumentam o prejuízo. Mostrar "600 vendas" ali seria pior que não mostrar nada, porque parece meta alcançável.
+- `adBreakEvenAcos(lucroPorVenda, preco)` — o teto de ACOS (% do preço que pode virar anúncio antes de zerar o lucro). É o número que se digita no painel do ML/Shopee, não uma métrica decorativa.
 
 ## ⚠️ Pegadinhas já resolvidas (não reintroduzir)
 

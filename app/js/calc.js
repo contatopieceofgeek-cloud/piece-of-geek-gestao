@@ -398,6 +398,36 @@ function machineHoursOfJob(job, prod){
   return (job.qty || 1) * ((prod && prod.timeH) || 0) * (pct / 100);
 }
 
+/* ===== Anúncio pago (ML Ads / Shopee Ads) =====
+   Gasto com anúncio é VARIÁVEL por mês (R$60 em julho, R$300 em agosto) e
+   por isso não cabia em nenhuma estrutura que já existia: `expenses` é lista
+   plana, aplicada igual a todo mês; `investments` tem data mas cai no Bloco D
+   (saldo final), o que deixaria o LUCRO OPERACIONAL melhor que a realidade —
+   exatamente o erro que este app existe pra evitar. Então cada lançamento
+   carrega o próprio mês e entra no Bloco A. */
+function adSpendInMonth(list, ym, platformName){
+  return (list || [])
+    .filter(a => a.ym === ym && (platformName == null || a.platform === platformName))
+    .reduce((s, a) => s + (a.value || 0), 0);
+}
+
+/* Quantas vendas daquele produto/canal um orçamento precisa gerar pra se
+   pagar. É a conta que decide se vale anunciar: `null` quando o lucro por
+   venda é zero ou negativo, porque aí NENHUM número de vendas paga — cada
+   clique pago vira prejuízo em cima de prejuízo. */
+function adBreakEvenSales(budget, profitPerSale){
+  if(!(budget > 0)) return 0;
+  if(!(profitPerSale > 0)) return null;
+  return Math.ceil(budget / profitPerSale);
+}
+
+/* ACOS de equilíbrio: o quanto do preço pode ir pra anúncio antes de zerar o
+   lucro. É a margem do produto naquele canal, lida como teto de gasto. */
+function adBreakEvenAcos(profitPerSale, price){
+  if(!(price > 0) || !(profitPerSale > 0)) return 0;
+  return (profitPerSale / price) * 100;
+}
+
 /* Despesas/impostos que valem no mês `ym`.
    A lista é FLAT, sem histórico: sem esse recorte, uma despesa cadastrada hoje
    era cobrada de TODOS os meses, inclusive os anteriores a ela existir — o
@@ -414,6 +444,7 @@ function sumActiveInMonth(list, ym){
 if(typeof module !== 'undefined' && module.exports){
   module.exports = {
     activeInMonth, sumActiveInMonth, machineHoursOfJob,
+    adSpendInMonth, adBreakEvenSales, adBreakEvenAcos,
     materialByName, boxCost, filamentCost, bubbleWrapMaterial, bubbleWrapUnitCost,
     tapeMaterial, tapeUnitCost, toolCostPerUse, FLAT_PACKAGING_MAX_HEIGHT_CM,
     boxFitsDimensions, bestFittingBox, totalWeight, findMachine,
