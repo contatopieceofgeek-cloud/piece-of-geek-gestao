@@ -1140,7 +1140,7 @@ function renderSubscriptionBanner(){
   if(!el) return;
   const cfg = appConfig();
   const cta = cfg.checkoutUrl
-    ? `<a class="btn sm primary" href="${cfg.checkoutUrl}" target="_blank" rel="noopener" style="text-decoration:none;white-space:nowrap;">Assinar ${cfg.precoMensal||''}</a>`
+    ? `<a class="btn sm primary" href="${safeUrl(cfg.checkoutUrl)}" target="_blank" rel="noopener" style="text-decoration:none;white-space:nowrap;">Assinar ${cfg.precoMensal||''}</a>`
     : '';
   const faixa = (cor, texto, acao) => `
     <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;
@@ -1737,7 +1737,7 @@ function stockBadge(m){
 }
 function renderRecentSalesTable(sales){
   return `<div class="tbl-wrap tbl-responsive"><table><thead><tr><th>Data</th><th>Produto</th><th>Plataforma</th><th class="right">Líquido</th></tr></thead><tbody>
-    ${sales.map(s=>`<tr><td class="num" data-label="Data">${fmtDate(s.date)}</td><td data-label="Produto">${esc(s.productName)}</td><td data-label="Plataforma">${esc(platformBadge(s.platform))}</td><td class="right num" data-label="Líquido">${brl(s.netReceipt)}</td></tr>`).join('')}
+    ${sales.map(s=>`<tr><td class="num" data-label="Data">${fmtDate(s.date)}</td><td data-label="Produto">${esc(s.productName)}</td><td data-label="Plataforma">${platformBadge(s.platform)}</td><td class="right num" data-label="Líquido">${brl(s.netReceipt)}</td></tr>`).join('')}
   </tbody></table></div>`;
 }
 function fmtDate(d){ if(!d) return '-'; const [y,m,day]=d.split('-'); return `${day}/${m}/${y}`; }
@@ -1745,7 +1745,10 @@ function platformBadge(p){
   const palette = ['warn','bad','info','ok','mut'];
   const idx = state.settings.platforms.findIndex(x=>x.name===p);
   const cls = palette[idx>=0 ? idx%palette.length : palette.length-1];
-  return `<span class="badge ${cls}">${p}</span>`;
+  // Escapa AQUI: esta função devolve HTML, então quem a chama não pode
+  // envolvê-la em esc() (a marcação viraria texto). O nome da plataforma é
+  // digitado pelo usuário, então a proteção tem que morar dentro.
+  return `<span class="badge ${cls}">${esc(p)}</span>`;
 }
 function drawDashboardCharts(){
   if(typeof Chart==='undefined'){ return; }
@@ -2855,7 +2858,7 @@ function renderVendas(){
             <td class="num" data-label="Data">${fmtDate(s.date)}${s.groupId?' <span class="chip" title="Faz parte de uma venda com vários itens">🧾</span>':''}</td>
             <td data-label="Produto">${esc(s.productName)}</td>
             <td data-label="Cliente">${s.customerId ? ((state.customers.find(cu=>cu.id===s.customerId)||{}).name || '—') : '<span class="chip">avulso</span>'}</td>
-            <td data-label="Plataforma">${esc(platformBadge(s.platform))}</td>
+            <td data-label="Plataforma">${platformBadge(s.platform)}</td>
             <td class="right num" data-label="Qtd">${s.qty}</td>
             <td class="right num" data-label="Preço bruto">${brl(s.grossPrice)}</td>
             <td class="right num" data-label="Taxa" style="color:var(--text-faint)">${brl(s.feeTotal)}</td>
@@ -4926,7 +4929,7 @@ function updateProductPreview(){
     ${marketRangeLine}
     ${pricingChannelBlockHtml('Mercado Livre', 'Mercado Livre', c.practicedPriceMl, c, marketInfo, form)}
     ${pricingChannelBlockHtml('Shopee', 'Shopee', c.practicedPriceShopee, c, marketInfo, form)}
-    ${esc(extraListingPlatforms().map(plat=>pricingChannelBlockHtml(plat.name, plat.name, c.practicedPriceExtra[plat.id], c, marketInfo, form)).join(''))}
+    ${extraListingPlatforms().map(plat=>pricingChannelBlockHtml(plat.name, plat.name, c.practicedPriceExtra[plat.id], c, marketInfo, form)).join('')}
   `;
   const priceMlInput = document.getElementById('pPriceMl');
   if(priceMlInput && !priceMlInput.dataset.touched && document.activeElement!==priceMlInput){
@@ -5097,7 +5100,7 @@ function renderPersonalizados(){
             ${esc(o.name||orderTypeLabel(o.orderType))}
             <span class="badge info">${orderTypeLabel(o.orderType)}</span>
           </div>
-          <div style="font-size:11.5px;color:var(--text-faint);margin-top:3px;">Pedido ${o.orderNumber||'—'} · ${customerNameFor(o)}${wa?` · <a href="${wa}" target="_blank" rel="noopener noreferrer">${o.contact}</a>`:(o.contact?' · '+o.contact:'')}</div>
+          <div style="font-size:11.5px;color:var(--text-faint);margin-top:3px;">Pedido ${o.orderNumber||'—'} · ${customerNameFor(o)}${wa?` · <a href="${safeUrl(wa)}" target="_blank" rel="noopener noreferrer">${o.contact}</a>`:(o.contact?' · '+o.contact:'')}</div>
         </div>
         ${resultBadge(o.result)}
       </div>
@@ -5655,7 +5658,9 @@ function exportCustomOrderPDF(id){
     </div>
     <div style="height:4px;background:#BD4119;"></div>
   `;
-  const field = (label, value) => `<div style="flex:1;min-width:0;"><div style="font-size:9.5px;font-weight:700;color:#8A8F9C;letter-spacing:.03em;margin-bottom:3px;">${label}</div><div style="font-size:12.5px;color:#1A1D23;min-height:16px;">${value||'—'}</div></div>`;
+  // Mesma regra do platformBadge: devolve HTML, logo escapa por dentro —
+  // `value` vem do pedido do cliente (nome da peça, texto personalizado).
+  const field = (label, value) => `<div style="flex:1;min-width:0;"><div style="font-size:9.5px;font-weight:700;color:#8A8F9C;letter-spacing:.03em;margin-bottom:3px;">${esc(label)}</div><div style="font-size:12.5px;color:#1A1D23;min-height:16px;">${esc(value||'—')}</div></div>`;
   const row = (...fields) => `<div style="display:flex;gap:18px;margin-bottom:12px;">${fields.join('')}</div>`;
   const sectionTitle = (n, t) => `<div style="border-left:3px solid #BD4119;padding-left:8px;font-weight:700;font-size:12px;color:#1A1D23;margin:16px 0 10px;">${n} · ${t.toUpperCase()}</div>`;
   const checkbox = (checked, label) => `<span style="display:inline-flex;align-items:center;gap:5px;margin-right:16px;font-size:11.5px;color:#1A1D23;"><span style="display:inline-block;width:12px;height:12px;border:1.5px solid #8A8F9C;border-radius:3px;background:${checked?'#157A45':'#fff'};"></span>${label}</span>`;
@@ -5667,7 +5672,7 @@ function exportCustomOrderPDF(id){
         ${row(field('Pedido nº',o.orderNumber), field('Data',fmtDate(o.orderDate)), field('Cliente',cuName))}
         <div style="background:#FDF1EC;border-radius:10px;padding:16px 18px;margin:14px 0;">
           <div style="font-weight:700;font-size:12px;color:#BD4119;margin-bottom:2px;">O QUE SERÁ IMPRESSO <span style="font-weight:400;color:#8A8F9C;font-size:10.5px;">— confira letra por letra, depois de impresso não há como corrigir</span></div>
-          ${esc(row(field('Produto',o.name), field('Quantidade',o.qty), field('Tamanho (mm)',o.sizeLabel)))}
+          ${row(field('Produto',o.name), field('Quantidade',o.qty), field('Tamanho (mm)',o.sizeLabel))}
           ${row(field('Texto que vai na peça', (o.pieceText||'—').replace(/\n/g,'<br>')))}
           ${row(field('Cor da base',o.baseColor), field('Cor do texto/detalhe',o.detailColor), field('Acabamento',o.finish))}
         </div>
@@ -5688,7 +5693,7 @@ function exportCustomOrderPDF(id){
     <div class="catalog-summary" style="padding:0;">
       ${pageHeader('Ficha Técnica de Impressão','interno')}
       <div style="padding:22px 26px;">
-        ${esc(row(field('Pedido nº',o.orderNumber), field('Produto / SKU',o.name), field('Data de impressão',fmtDate(o.printDate))))}
+        ${row(field('Pedido nº',o.orderNumber), field('Produto / SKU',o.name), field('Data de impressão',fmtDate(o.printDate)))}
         ${sectionTitle(1,'Arquivo e licença')}
         ${row(field('Nome do arquivo',o.modelFileName), field('Origem',o.modelOrigin==='terceiro'?'Terceiro':'Próprio'), field('Licença',o.modelOrigin==='terceiro'?o.modelLicense:'—'))}
         ${o.modelOrigin==='terceiro' ? row(field('URL do modelo',o.modelSourceUrl)) : ''}
