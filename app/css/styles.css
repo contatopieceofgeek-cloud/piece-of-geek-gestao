@@ -440,7 +440,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--nozzle);box-shadow:0 
   body.printing-catalog #catalogPrintArea{display:block!important;}
   @page{ margin:0; }
 }
+/* Área de impressão fora da tela. O nome vem do catálogo, que foi removido,
+   mas printHTML() continua servindo o recibo de venda e o PDF de encomenda —
+   por isso isto fica. `.catalog-page` saiu junto com o catálogo. */
 #catalogPrintArea{display:none;}
 .catalog-summary{padding:50px 44px;box-sizing:border-box;width:210mm;font-family:var(--font-body);color:#111;background:#fff;page-break-after:always;}
-.catalog-page{page-break-after:always;padding:50px 44px;box-sizing:border-box;width:210mm;height:297mm;font-family:var(--font-body);color:#111;background:#fff;}
-.catalog-page:last-child{page-break-after:auto;}
