@@ -1471,7 +1471,7 @@ function renderDashboard(){
       </div>
       <div class="card">
         <div class="card-title">Vendas por plataforma<span class="sub">${monthLabel(currentMonth)}</span></div>
-        <div style="height:220px;">${a.qtdVendas? '<canvas id="chartPlatform"></canvas>' : emptyState('Sem vendas registradas neste mês')}</div>
+        <div style="height:220px;">${a.qtdVendas? '<canvas id="chartPlatform"></canvas>' : emptyState('Sem vendas registradas neste mês.', '+ Nova venda', `openSaleModal()`)}</div>
       </div>
     </div>
 
@@ -1485,7 +1485,7 @@ function renderDashboard(){
       </div>
       <div class="card">
         <div class="card-title">Vendas recentes<span class="sub" style="cursor:pointer;color:var(--teal)" onclick="switchTab('vendas')">ver todas →</span></div>
-        ${recentSales.length ? renderRecentSalesTable(recentSales) : emptyState('Nenhuma venda registrada ainda')}
+        ${recentSales.length ? renderRecentSalesTable(recentSales) : emptyState('Nenhuma venda registrada ainda.', '+ Nova venda', `openSaleModal()`)}
       </div>
       <div class="card">
         <div class="card-title">Pedidos em aberto<span class="sub" style="cursor:pointer;color:var(--teal)" onclick="switchTab('pedidos')">ver fila →</span></div>
@@ -1495,7 +1495,7 @@ function renderDashboard(){
 
     <div class="card" style="margin-top:14px;">
       <div class="card-title">Top produtos por receita<span class="sub">${monthLabel(currentMonth)}</span></div>
-      <div style="height:260px;">${a.qtdVendas? '<canvas id="chartTop"></canvas>' : emptyState('Sem dados de vendas neste mês')}</div>
+      <div style="height:260px;">${a.qtdVendas? '<canvas id="chartTop"></canvas>' : emptyState('Sem dados de vendas neste mês.', '+ Nova venda', `openSaleModal()`)}</div>
     </div>
 
     <div class="card" style="margin-top:14px;">
@@ -1529,7 +1529,9 @@ function productProfitability(days){
 }
 function renderProfitabilityTable(){
   const rows = productProfitability(90).slice(0,10);
-  if(!rows.length) return emptyState('Sem vendas nos últimos 90 dias');
+  if(!rows.length) return emptyState(
+    'Sem vendas nos últimos 90 dias.<br><span style="font-size:12.5px;">Esta tabela ordena os produtos por lucro por hora de impressora — precisa de venda registrada pra ter o que comparar.</span>',
+    '+ Nova venda', `openSaleModal()`);
   return `<div class="tbl-wrap tbl-responsive"><table>
     <thead><tr><th>Produto</th><th class="right">Qtd</th><th class="right">Receita</th><th class="right">Lucro</th><th class="right">Margem</th><th class="right">Lucro/hora impressora</th></tr></thead>
     <tbody>${rows.map(p=>`<tr>
@@ -1727,13 +1729,13 @@ function blockedBy(titulo, explicacao, botaoLabel, botaoOnclick){
 }
 function renderOpenOrdersList(){
   const open = state.orders.filter(o=>o.status!=='Enviado').sort((a,b)=>(a.dueDate||'9999').localeCompare(b.dueDate||'9999')).slice(0,6);
-  if(open.length===0) return emptyState('Nenhuma encomenda em aberto');
+  if(open.length===0) return emptyState('Nenhuma encomenda em aberto.', '+ Novo pedido', `openOrderModal()`);
   return `<div class="tbl-wrap tbl-responsive"><table><thead><tr><th>Cliente</th><th>Produto</th><th>Status</th></tr></thead><tbody>
     ${open.map(o=>`<tr><td data-label="Cliente">${orderCustomerName(o)||'—'}</td><td data-label="Produto">${o.qty}x ${esc(o.productName)}</td><td data-label="Status"><span class="badge info">${esc(o.status)}</span></td></tr>`).join('')}
   </tbody></table></div>`;
 }
 function renderLowStockList(low){
-  if(!state.materials.length) return emptyState('Nenhuma matéria-prima cadastrada');
+  if(!state.materials.length) return emptyState('Nenhuma matéria-prima cadastrada.', '+ Nova matéria-prima', `openMaterialModal()`);
   const rows = state.materials.slice().sort((a,b)=> (a.stock-a.lowStock) - (b.stock-b.lowStock)).slice(0,8);
   return `<div class="tbl-wrap tbl-responsive"><table><thead><tr><th>Material</th><th class="right">Estoque</th><th class="right">Mínimo</th><th>Status</th></tr></thead><tbody>
     ${rows.map(m=>`<tr><td data-label="Material">${esc(m.name)}</td><td class="right num" data-label="Estoque">${num(m.stock,0)} ${esc(m.unit)}</td><td class="right num" data-label="Mínimo">${num(m.lowStock,0)} ${esc(m.unit)}</td><td data-label="Status">${stockBadge(m)}</td></tr>`).join('')}
@@ -2082,7 +2084,9 @@ function renderAnual(){
           <td data-label="Item">${esc(inv.name)}</td><td data-label="Categoria"><span class="chip">${esc(inv.category||'Outros')}</span></td><td class="num" data-label="Data">${fmtDate(inv.date)}</td><td data-label="Pagamento">${payLabel}</td><td class="right num" data-label="Valor">${brl(inv.value)}</td>
           <td class="right"><button class="btn ghost sm" onclick="deleteInvestment('${inv.id}')">Excluir</button></td>
         </tr>`;}).join('')}</tbody>
-      </table></div>` : emptyState('Nenhum investimento cadastrado ainda')}
+      </table></div>` : emptyState(
+        'Nenhum investimento cadastrado ainda.<br><span style="font-size:12.5px;">Compras avulsas ou parceladas — impressora, ferramenta, lote de filamento. Aparecem no Bloco D do Caixa, depois do lucro operacional.</span>',
+        '+ Adicionar investimento', `openInvestmentModal()`)}
     </div>
   `;
 }
@@ -2481,7 +2485,9 @@ function renderImpressao(){
           <td class="right"><button class="btn ghost sm" onclick="openPrintJobModal('${f.productId}', ${f.qty||1}, '${f.outcome}', '${f.id}')">Editar</button> <button class="btn ghost sm" onclick="deletePrintJob('${f.id}')">Excluir</button></td>
         </tr>`;
         }).join('')}</tbody>
-      </table></div>` : emptyState('Nenhuma impressão registrada ainda. Clique em "Nova impressão" pra começar.')}
+      </table></div>` : emptyState(
+        'Nenhuma impressão registrada ainda.<br><span style="font-size:12.5px;">Registrar a leva soma as peças ao estoque; registrar a falha desconta o material e a energia que foram perdidos.</span>',
+        '+ Nova impressão', `openPrintJobModal()`)}
     </div>
   `;
 }
@@ -2701,7 +2707,9 @@ function renderCalculo(){
       </tr>`).join('')}</tbody>
     </table></div>
     <div class="field hint" style="margin-top:10px;">Energia/h = potência (kW) × tarifa. Se a potência estiver em branco, usa o valor manual definido na impressora. Depreciação/h = (preço − valor residual) ÷ vida útil em horas — quanto a máquina "perde de valor" a cada hora de uso.</div>
-    </div>` : `<div class="card">${emptyState('Nenhuma impressora cadastrada — adicione em "Gerenciar impressoras"')}</div>`}
+    </div>` : `<div class="card">${emptyState(
+      'Nenhuma impressora cadastrada.<br><span style="font-size:12.5px;">Sem ela não há custo de energia nem depreciação por hora — o custo do produto sai incompleto.</span>',
+      'Gerenciar impressoras', `switchTab('configuracoes')`)}</div>`}
 
     <div class="section-title">Uso e manutenção</div>
     ${machines.length ? `<div class="grid g-3">
@@ -2801,7 +2809,7 @@ function updateCalculoExample(){
   const sel = document.getElementById('calcProdSelect');
   const box = document.getElementById('calculoExample');
   if(!sel || !box) return;
-  if(state.products.length===0){ box.innerHTML = emptyState('Cadastre um produto pra ver o exemplo'); return; }
+  if(state.products.length===0){ box.innerHTML = emptyState('Cadastre um produto pra ver o exemplo.', '+ Novo produto', `openProductModal()`); return; }
   const prod = state.products.find(p=>p.id===sel.value) || state.products[0];
   const c = calcProduct(prod);
   box.innerHTML = `
@@ -2862,7 +2870,7 @@ function renderVendas(){
     </div>
 
     <div class="card">
-      ${list.length===0 ? emptyState('Nenhuma venda encontrada. Clique em "Nova venda" para começar.') : `
+      ${list.length===0 ? emptyState('Nenhuma venda encontrada.', '+ Nova venda', `openSaleModal()`) : `
       <div class="tbl-wrap tbl-responsive"><table>
         <thead><tr><th>Data</th><th>Produto</th><th>Cliente</th><th>Plataforma</th><th class="right">Qtd</th><th class="right">Preço bruto</th><th class="right">Taxa</th><th class="right">Líquido</th><th class="right">Custo prod.</th><th class="right">Frete</th><th class="right">Lucro</th><th>Rastreio</th><th></th></tr></thead>
         <tbody>
@@ -3675,7 +3683,9 @@ function adCellHtml(profit, price){
     <div style="font-size:10.5px;color:var(--text-faint);">pra pagar ${brl(ref)}${orcamento>0?'':' (referência)'} · teto ${num(acos,0)}% do preço</div>`;
 }
 function renderProdutosDiagnostico(){
-  if(state.products.length===0) return `<div class="card">${emptyState('Nenhum produto cadastrado ainda.')}</div>`;
+  if(state.products.length===0) return `<div class="card">${emptyState(
+    'Nenhum produto cadastrado ainda.<br><span style="font-size:12.5px;">O Diagnóstico compara lucro por hora de impressora entre os produtos e diz quais compensam imprimir.</span>',
+    '+ Novo produto', `openProductModal()`)}</div>`;
   const target = state.settings.targetHourlyProfit!=null ? state.settings.targetHourlyProfit : 15;
   const channel = diagnosticoChannel;
   const list = state.products.map(p=>{
@@ -3903,7 +3913,9 @@ function listingFieldSuggestions(idKey, key, presets){
 let anunciosFilter = { search:'' };
 let anunciosView = 'lista';
 function renderAnuncios(){
-  if(state.products.length===0) return `<div class="card">${emptyState('Cadastre um produto primeiro em Produtos')}</div>`;
+  if(state.products.length===0) return `<div class="card">${emptyState(
+    'Nenhum produto cadastrado ainda.<br><span style="font-size:12.5px;">O anúncio é montado a partir do produto — título, foto, medidas e preço saem do cadastro dele.</span>',
+    '+ Novo produto', `openProductModal()`)}</div>`;
   const tabs = `<div class="tabbar">
     <button class="tabbtn ${anunciosView==='lista'?'active':''}" onclick="anunciosView='lista'; renderContent();">Lista</button>
     <button class="tabbtn ${anunciosView==='prontos'?'active':''}" onclick="anunciosView='prontos'; renderContent();">Anúncios prontos</button>
@@ -3956,7 +3968,7 @@ function renderAnunciosLista(){
   const searchBar = `<div class="filter-bar">
     <div class="field"><label>Buscar</label><input value="${anunciosFilter.search}" placeholder="Nome do produto..." oninput="anunciosFilter.search=this.value; renderContent();"></div>
   </div>`;
-  if(q && list.length===0) return searchBar + `<div class="card">${emptyState('Nenhum produto encontrado')}</div>`;
+  if(q && list.length===0) return searchBar + `<div class="card">${emptyState(`Nenhum produto encontrado para “${esc(anunciosFilter.search)}”.`, 'Limpar busca', `anunciosFilter.search=''; renderContent();`)}</div>`;
   const sections = groupProductsByCategory(list).map(({category, products})=>{
     const rows = products.map(p=>{
       const l = listingFor(p.id);
@@ -3988,7 +4000,9 @@ function renderAnunciosLista(){
 }
 function renderAnunciosProntos(){
   const ready = state.products.map(p=>({p, l:listingFor(p.id)})).filter(({l})=>listingIsComplete(l));
-  if(ready.length===0) return `<div class="card">${emptyState('Nenhum anúncio pronto ainda — complete todos os campos de um produto na aba Lista')}</div>`;
+  if(ready.length===0) return `<div class="card">${emptyState(
+    'Nenhum anúncio pronto ainda.<br><span style="font-size:12.5px;">Um anúncio fica pronto quando todos os campos dele estão preenchidos — é o que permite copiar e colar direto no marketplace.</span>',
+    'Preencher um anúncio', `anunciosView='lista'; renderContent();`)}</div>`;
   const toolbar = `<div style="margin-bottom:14px;"><button class="btn ghost sm" onclick="exportAllReadyListingsXlsx()">Exportar todos os prontos (Excel)</button></div>`;
   const grouped = groupProductsByCategory(ready.map(r=>r.p)).map(({category, products})=>{
     const cards = products.map(p=>{
@@ -5112,7 +5126,9 @@ function changeCustomOrderStatus(id, status){
   renderContent();
 }
 function renderPersonalizados(){
-  if(state.customOrders.length===0) return `<div class="card">${emptyState('Nenhuma encomenda personalizada cadastrada ainda. Clique em "+ Nova encomenda personalizada".')}</div>`;
+  if(state.customOrders.length===0) return `<div class="card">${emptyState(
+    'Nenhuma encomenda personalizada cadastrada ainda.<br><span style="font-size:12.5px;">Peça sob medida, feita uma vez só — não vira produto de catálogo, mas o custo e o prazo são calculados igual.</span>',
+    '+ Nova encomenda personalizada', `openQuickCustomOrderModal()`)}</div>`;
   let list = state.customOrders.slice();
   if(personalizadosFilter.search){
     const q = personalizadosFilter.search.toLowerCase();
@@ -5188,7 +5204,9 @@ function renderPersonalizados(){
 // disso ainda é plano, não fato, e não serve pra calibrar nada.
 function renderPersonalizadosDiagnostico(){
   const delivered = state.customOrders.filter(o=>o.status==='Entregue');
-  if(delivered.length===0) return `<div class="card">${emptyState('Nenhuma encomenda entregue ainda — o Diagnóstico usa o histórico real pra calibrar as estimativas.')}</div>`;
+  if(delivered.length===0) return `<div class="card">${emptyState(
+    'Nenhuma encomenda entregue ainda.<br><span style="font-size:12.5px;">O Diagnóstico compara o que você estimou com o que a peça realmente custou — só encomenda entregue tem peso e tempo reais pra comparar.</span>',
+    'Voltar ao quadro', `personalizadosView='kanban'; renderContent(); renderTopbarActions();`)}</div>`;
   const list = delivered.map(o=>{
     const c = calcProduct(o);
     const estWeight = totalWeight(o);
@@ -5817,7 +5835,7 @@ function renderMaterialsStock(){
   </div>`;
   const q = materialsFilter.search.toLowerCase();
   const filtered = q ? state.materials.filter(m=>m.name.toLowerCase().includes(q)) : state.materials;
-  if(q && filtered.length===0) return searchBar + `<div class="card">${emptyState('Nenhum material encontrado')}</div>`;
+  if(q && filtered.length===0) return searchBar + `<div class="card">${emptyState(`Nenhum material encontrado para “${esc(materialsFilter.search)}”.`, 'Limpar busca', `materialsFilter.search=''; renderContent();`)}</div>`;
   const cats = [...new Set(filtered.map(m=>m.category))];
   return searchBar + suggestionPanel + cats.map(cat=>`
     <div class="section-title">${esc(cat)}</div>
@@ -5871,7 +5889,9 @@ function avgMonthlySalesKits(productId){
   return totalKits / Math.max(1, months.size);
 }
 function renderFinishedStock(){
-  if(state.products.length===0) return `<div class="card">${emptyState('Nenhum produto cadastrado')}</div>`;
+  if(state.products.length===0) return `<div class="card">${emptyState(
+    'Nenhum produto cadastrado.<br><span style="font-size:12.5px;">Esta aba conta peças prontas na prateleira — as levas registradas na Fila de Impressão entram aqui.</span>',
+    '+ Novo produto', `openProductModal()`)}</div>`;
   const rows = state.products.map(p=>{
     const c = calcProduct(p);
     // totalCost é da VENDA (unitsPerSale peças) — estoque conta PEÇAS, então
@@ -6371,7 +6391,7 @@ function caixaRow(label, value, bold){
    não chegou aparece apagado e sem valor — se sumisse da lista, o usuário não
    entenderia por que o total não bate com o que ele cadastrou. */
 function breakdownTable(items, ym){
-  if(!items || items.length===0) return `${emptyState('Nenhum item cadastrado')}<div class="card-actions"><button class="btn ghost sm" style="width:100%;" onclick="switchTab('configuracoes')">+ Adicionar item</button></div>`;
+  if(!items || items.length===0) return emptyState('Nenhum item cadastrado.', '+ Adicionar item', `switchTab('configuracoes')`);
   return `<div class="tbl-wrap"><table><tbody>
     ${items.map(i=>{
       const futuro = ym && i.startMonth && i.startMonth > ym;
@@ -6604,7 +6624,9 @@ function removeReserveRow(i){
 function renderMarketGroupRows(){
   const el = document.getElementById('marketGroupRows');
   if(!el) return;
-  if(!editingMarketGroups.length){ el.innerHTML = `<div class="empty" style="padding:10px;">Nenhuma categoria de produto cadastrada ainda — crie categorias em Produtos primeiro.</div>`; return; }
+  if(!editingMarketGroups.length){ el.innerHTML = emptyState(
+    'Nenhuma categoria de produto cadastrada ainda.<br><span style="font-size:12.5px;">A faixa de preço de mercado é definida por categoria — a categoria nasce no cadastro do produto.</span>',
+    '+ Novo produto', `openProductModal()`); return; }
   el.innerHTML = editingMarketGroups.map((g,i)=>`
     <div class="card" style="margin-bottom:10px;padding:12px 14px;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
