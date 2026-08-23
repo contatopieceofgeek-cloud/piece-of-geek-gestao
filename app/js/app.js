@@ -1680,10 +1680,13 @@ function updateQuickQuotePreview(){
     <div class="calc-line"><span>Peso total</span><span>${num(totalWeight(draft),0)}g</span></div>
     <div class="calc-line"><span>Custo material</span><span>${brl(c.materialCost)}</span></div>
     <div class="calc-line"><span>Custo energia</span><span>${brl(c.energyCost)}</span></div>
-    <div class="calc-line"><span>Embalagem</span><span>${brl(c.embalagemCost)}</span></div>
     <div class="calc-line"><span>Depreciação</span><span>${brl(c.depreciation)}</span></div>
+    <div class="calc-line"><span>Manutenção</span><span>${brl(c.maintenance)}</span></div>
     <div class="calc-line"><span>Mão de obra</span><span>${brl(c.laborCost)}</span></div>
+    ${c.toolsCost>0 ? `<div class="calc-line"><span>Ferramentas</span><span>${brl(c.toolsCost)}</span></div>` : ''}
     <div class="calc-line"><span>Margem de falha</span><span>${brl(c.failureCost)}</span></div>
+    <div class="calc-line"><span>Embalagem</span><span>${brl(c.embalagemCost)}</span></div>
+    ${c.componentsCost>0 ? `<div class="calc-line"><span>Componentes</span><span>${brl(c.componentsCost)}</span></div>` : ''}
     <div class="calc-line total"><span>Custo total</span><span>${brl(c.totalCost)}</span></div>
     <div class="calc-line total"><span>Preço sugerido — venda própria (margem ${num(draft.desiredMarginPct,0)}%)</span><span style="color:var(--green)">${brl(c.suggestedPrice)}</span></div>
     <div class="calc-line" style="color:var(--text-faint);"><span>↳ Mercado Livre (já com a taxa)</span><span>${brl(c.suggestedPriceMl)}</span></div>
@@ -2754,8 +2757,8 @@ function renderCalculo(){
         </div>
         <div>
           <div style="font-weight:600;font-size:13.5px;">3. Custo de embalagem</div>
-          <div class="chip" style="font-family:var(--font-mono);margin:5px 0;">custo da caixa + (metros de plástico bolha × custo por metro)</div>
-          <div style="font-size:12px;color:var(--text-dim);">Só a caixa e o plástico bolha marcados como tal em Estoque entram aqui.</div>
+          <div class="chip" style="font-family:var(--font-mono);margin:5px 0;">custo da embalagem + (metros de plástico bolha × custo/m) + (metros de fita × custo/m)</div>
+          <div style="font-size:12px;color:var(--text-dim);">Entram a embalagem escolhida (caixa, envelope ou saquinho), o plástico bolha e a fita — os três marcados como tal em Estoque. Entra <strong>uma vez por venda</strong>, não por peça: um kit de 3 vai numa caixa só.</div>
         </div>
         <div>
           <div style="font-weight:600;font-size:13.5px;">4. Depreciação</div>
@@ -2773,13 +2776,29 @@ function renderCalculo(){
           <div style="font-size:12px;color:var(--text-dim);">Pintura, montagem, acabamento — qualquer trabalho manual depois que a peça sai da impressora.</div>
         </div>
         <div>
-          <div style="font-weight:600;font-size:13.5px;">7. Custo de falha</div>
+          <div style="font-weight:600;font-size:13.5px;">7. Custo de ferramentas</div>
+          <div class="chip" style="font-family:var(--font-mono);margin:5px 0;">usos na peça × (preço da ferramenta ÷ vida útil em usos)</div>
+          <div style="font-size:12px;color:var(--text-dim);">Lixa, alicate, pincel — o que se gasta com o uso. Cada uso da peça consome uma fração do preço da ferramenta.</div>
+        </div>
+        <div>
+          <div style="font-weight:600;font-size:13.5px;">8. Custo de componentes</div>
+          <div class="chip" style="font-family:var(--font-mono);margin:5px 0;">quantidade × custo unitário  (× peças da venda, se o escopo for "por peça")</div>
+          <div style="font-size:12px;color:var(--text-dim);">Parafuso, ímã, tag, cordão — o que vai no pacote mas não é impresso. O escopo decide a escala: <strong>por peça</strong> multiplica pelas peças da venda (2 parafusos por peça, kit de 3 leva 6); <strong>por venda</strong> é uma vez só, igual embalagem.</div>
+        </div>
+        <div>
+          <div style="font-weight:600;font-size:13.5px;">9. Custo de falha</div>
           <div class="chip" style="font-family:var(--font-mono);margin:5px 0;">(material + energia + depreciação + 50% da mão de obra) × margem de falha%</div>
-          <div style="font-size:12px;color:var(--text-dim);">Cobre o risco de uma impressão falhar antes de terminar. Embalagem fica de fora — caixa e plástico bolha só são gastos depois que a peça sai boa. Metade da mão de obra entra porque setup e a descoberta da falha consomem tempo mesmo quando a impressão não termina.</div>
+          <div style="font-size:12px;color:var(--text-dim);">Cobre o risco de uma impressão falhar antes de terminar. Embalagem e componentes ficam de fora — caixa, fita e parafuso só são gastos depois que a peça sai boa. Metade da mão de obra entra porque setup e a descoberta da falha consomem tempo mesmo quando a impressão não termina.</div>
         </div>
         <div style="border-top:1px solid var(--line);padding-top:14px;">
+          <div style="font-weight:600;font-size:13.5px;">Leva ≠ venda</div>
+          <div class="chip" style="font-family:var(--font-mono);margin:5px 0;">custo por peça = custo da leva ÷ peças que a leva rende</div>
+          <div style="font-size:12px;color:var(--text-dim);">Peso e tempo cadastrados são da <strong>leva inteira</strong>. Se uma impressão rende 12 peças, tudo que escala com peso e tempo é dividido por 12 pra virar custo de uma peça. Depois, o custo por peça é multiplicado pelas <strong>peças da venda</strong> — um anúncio de kit de 3 custa 3 peças, mas uma embalagem só.</div>
+        </div>
+        <div>
           <div style="font-weight:600;font-size:13.5px;">Custo total</div>
-          <div class="chip" style="font-family:var(--font-mono);margin:5px 0;">material + energia + embalagem + depreciação + manutenção + mão de obra + falha</div>
+          <div class="chip" style="font-family:var(--font-mono);margin:5px 0;">(material + energia + depreciação + manutenção + mão de obra + ferramentas + falha) × peças da venda + embalagem + componentes</div>
+          <div style="font-size:12px;color:var(--text-dim);">Os sete primeiros são por peça e escalam com o tamanho da venda; embalagem e componentes entram por venda.</div>
         </div>
         <div>
           <div style="font-weight:600;font-size:13.5px;">Preço sugerido</div>
@@ -5643,6 +5662,7 @@ function updateCustomOrderPreview(){
     <div class="calc-line"><span>Manutenção</span><span>${brl(c.maintenance)}</span></div>
     <div class="calc-line"><span>Mão de obra</span><span>${brl(c.laborCost)}</span></div>
     ${c.toolsCost>0 ? `<div class="calc-line"><span>Ferramentas</span><span>${brl(c.toolsCost)}</span></div>` : ''}
+    ${c.componentsCost>0 ? `<div class="calc-line"><span>Componentes (${componentsLabelFor(form)})</span><span>${brl(c.componentsCost)}</span></div>` : ''}
     <div class="calc-line"><span>Custo de falha</span><span>${brl(c.failureCost)}</span></div>
     <div class="calc-line total"><span>Custo total</span><span>${brl(c.totalCost)}</span></div>
     <div class="calc-line total"><span>Preço sugerido (margem de ${num(form.desiredMarginPct,0)}%)</span><span>${brl(c.suggestedPrice)}</span></div>

@@ -78,6 +78,23 @@ Estado global em `state = { materials, products, sales, orders, customers, print
 - `adBreakEvenSales(orcamento, lucroPorVenda)` — devolve **`null`** quando o lucro não é positivo, e `null` vira o selo `não anuncie`, não um número. É de propósito: com margem negativa não existe volume que resolva — mais vendas só aumentam o prejuízo. Mostrar "600 vendas" ali seria pior que não mostrar nada, porque parece meta alcançável.
 - `adBreakEvenAcos(lucroPorVenda, preco)` — o teto de ACOS (% do preço que pode virar anúncio antes de zerar o lucro). É o número que se digita no painel do ML/Shopee, não uma métrica decorativa.
 
+## Custo: o motor e as QUATRO telas que o explicam
+
+`calcProduct()` monta o custo assim — sete parcelas **por peça**, multiplicadas pelas peças da venda, mais duas que entram **uma vez por venda**:
+
+```
+(material + energia + depreciação + manutenção + mão de obra + ferramentas + falha) × unitsPerSale
+  + embalagem + componentes
+```
+
+⚠️ **Quatro telas listam esse custo item a item, e elas derivam.** Bug real relatado pelo usuário: o motor ganhou manutenção, ferramentas, componentes e fita, e as telas ficaram para trás. Nada quebra — as linhas simplesmente não somam o total impresso logo abaixo delas (R$6,91 de linhas sob um total de R$7,16; os R$0,25 eram a manutenção, dentro do total e fora da lista). A aba Cálculo ainda documentava `custo da caixa + bolha` e um Custo total sem ferramentas nem componentes.
+
+As quatro: `updateQuickQuotePreview` (Orçamento rápido), `updateCalculoExample` (Cálculo → exemplo real), `updateProductPreview` (modal de Produto), `updateCustomOrderPreview` (encomenda personalizada). Parcela nova no motor tem que aparecer nas quatro **e** ganhar bloco de fórmula na aba Cálculo.
+
+`test/custo-exibido.test.js` trava isso sem lista mantida à mão: lê a linha `const totalCost` de `calc.js`, descobre as parcelas, descobre as telas de detalhamento (função que imprime `c.totalCost` e cita 3+ parcelas) e exige que cada tela cite todas. A primeira versão do teste enumerava as funções à mão e deixou passar duas — o mesmo erro que ele existe pra pegar. Só a tabela `TERMO_DA_PARCELA` (parcela → título em português na aba Cálculo) é escrita à mão, e ela falha alto quando uma parcela nova não tem termo.
+
+Somar as linhas EXIBIDAS não fecha exatamente em produto com `unitsPerSale>1`: cada linha é arredondada a 2 casas antes de multiplicar. Diferença de centavos ali é arredondamento de exibição, não parcela faltando — conferir sempre contra os valores crus de `calcProduct()`, nunca contra o texto da tela.
+
 ## ⚠️ Pegadinhas já resolvidas (não reintroduzir)
 
 1. **`desiredMarginPct` é um número percentual RAW (60), não decimal (0.60).** `calcProduct()` divide por 100 internamente (`prod.desiredMarginPct/100`). Um bug real aconteceu aqui: um fluxo novo (orçamento rápido) dividiu por 100 antes de guardar, causando dupla divisão e margem de ~0.6% em vez de 60%. Qualquer código novo que popule esse campo deve passar o número cru (60), nunca a fração.
